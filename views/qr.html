@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Escaneie o QR Code do WhatsApp</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 50px;
+    }
+    #qrcode {
+      margin: auto;
+      width: 256px;
+      height: 256px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Escaneie este QR Code com o WhatsApp</h2>
+  <div id="qrcode"></div>
+
+  <script>
+    async function fetchQr() {
+      try {
+        const res = await fetch('/get-qr');
+        if (!res.ok) throw new Error('QR não disponível');
+        const data = await res.json();
+
+        document.getElementById('qrcode').innerHTML = '';
+
+        new QRCode(document.getElementById('qrcode'), {
+          text: data.qr,
+          width: 256,
+          height: 256,
+          correctLevel: QRCode.CorrectLevel.H
+        });
+      } catch (err) {
+        document.getElementById('qrcode').innerHTML = '<p>QR Code não disponível. Atualize a página.</p>';
+      }
+    }
+
+    fetchQr();
+    setInterval(fetchQr, 10000);
+  </script>
+</body>
+</html>
