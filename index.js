@@ -23,7 +23,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // Keep-alive Render (substitua pela URL real do seu app)
 setInterval(() => {
-  fetch(`https://seu-bot-no-render.onrender.com`).catch(() => {});
+  fetch(`https://botazevedoadv.onrender.com`).catch(() => {});
 }, 1000 * 60 * 10); // a cada 10 minutos
 
 app.set('view engine', 'ejs');
@@ -45,6 +45,10 @@ app.get('/get-qr', (req, res) => {
     res.status(404).send('QR Code não disponível no momento.');
   }
 });
+
+// Controle de última interação por usuário (em ms)
+const lastInteraction = new Map();
+const TIMEOUT = 30 * 60 * 1000; // 30 minutos
 
 const startSock = async () => {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
@@ -89,31 +93,47 @@ const startSock = async () => {
 
     const sender = msg.key.remoteJid;
     const texto = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-
     if (texto.trim().length < 1) return;
+
+    const now = Date.now();
+    const lastTime = lastInteraction.get(sender) || 0;
 
     const send = async (text) => {
       await delay(1200 + Math.random() * 1000);
       await sock.sendMessage(sender, { text });
     };
 
+    // Atualiza o timestamp da última interação
+    lastInteraction.set(sender, now);
+
+    // Respostas imediatas para opções 1, 2 e 3
     if (texto === '1') {
       await send("Perfeito! Para que possamos te ajudar da melhor forma com seu problema aéreo, por favor, nos envie as informações que você tem.");
       await send("✈️ Especifique o problema: Foi atraso, cancelamento, overbooking, ou extravio/dano de bagagem?");
       await send("📝 Detalhe os fatos: Conte-nos o que aconteceu, mesmo que seja por áudio!");
       await send("📎 Envie documentos: passagem aérea, comprovantes e quaisquer outras provas.");
       await send("👨‍⚖️ Um especialista entrará em contato em breve para analisar seu caso.");
+      return;
     } else if (texto === '2') {
       await send("Certo! Para que nosso time de Direito Imobiliário possa te auxiliar:");
       await send("📎 Envie o contrato com a construtora.");
       await send("📝 Explique o motivo da sua consulta e qual é o problema.");
       await send("👨‍⚖️ Um especialista analisará sua demanda e entrará em contato.");
+      return;
     } else if (texto === '3') {
       await send("Entendido. Um de nossos atendentes entrará em contato em breve.");
       await send("📝 Por favor, descreva brevemente sobre o que você precisa de ajuda.");
-    } else {
-      await send("Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nEscolha uma das opções:\n\n1️⃣ Direito Aéreo\n2️⃣ Direito Imobiliário\n3️⃣ Outros assuntos");
+      return;
     }
+
+    // Se passou menos de 30 minutos desde a última interação, não repete o menu
+    if (now - lastTime < TIMEOUT) {
+      // Não responde nada para evitar flood/repetição
+      return;
+    }
+
+    // Caso contrário, manda o menu inicial
+    await send("Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nEscolha uma das opções:\n\n1️⃣ Direito Aéreo\n2️⃣ Direito Imobiliário\n3️⃣ Outros assuntos");
   });
 };
 
