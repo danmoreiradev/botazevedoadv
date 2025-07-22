@@ -7,10 +7,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 
-const makeWASocket = baileys.makeWASocket;
-const useMultiFileAuthState = baileys.useMultiFileAuthState;
-const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
-const DisconnectReason = baileys.DisconnectReason;
+const makeWASocket = baileys.default;
+const { useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } = baileys;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -21,18 +19,18 @@ let qrCodeString = '';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Keep-alive Render (substitua pela URL real do seu app)
+// Keep-alive Render (a cada 10 minutos)
 setInterval(() => {
   fetch(`https://botazevedoadv.onrender.com`).catch(() => {});
-}, 1000 * 60 * 10); // a cada 10 minutos
+}, 1000 * 60 * 10);
 
+// Configuração do Express
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/', (req, res) => {
-  res.redirect('/qr');
-});
+// Rotas
+app.get('/', (req, res) => res.redirect('/qr'));
 
 app.get('/qr', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'qr.html'));
@@ -46,19 +44,22 @@ app.get('/get-qr', (req, res) => {
   }
 });
 
-// Controle de última interação por usuário (em ms)
-const lastInteraction = new Map();
-const TIMEOUT = 30 * 60 * 1000; // 30 minutos
+// Mapa para controlar últimas interações
+const lastInteraction = new Map(); // para o timeout do menu
+const conversaLivre = new Map(); // usuários que estão em conversa livre
+const TIMEOUT = 1000 * 60 * 30; // 30 minutos
+const CONVERSA_TIMEOUT = 1000 * 60 * 60; // 1 hora
 
+// Função principal do socket
 const startSock = async () => {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
-
   const { version } = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
     version,
     auth: state,
-    getMessage: async () => ({ conversation: "Mensagem recuperada" })
+    printQRInTerminal: true,
+    getMessage: async () => ({ conversation: "Mensagem recuperada" }),
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -66,23 +67,18 @@ const startSock = async () => {
   sock.ev.on('connection.update', (update) => {
     const { connection, qr, lastDisconnect } = update;
 
-    if (qr) {
-      qrCodeString = qr; // string do QR para frontend
-    }
+    if (qr) qrCodeString = qr;
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-      if (shouldReconnect) {
-        startSock();
-      }
+      if (shouldReconnect) startSock();
     }
 
     if (connection === 'open') {
-      qrCodeString = ''; // limpa qr após conectar
+      qrCodeString = '';
       sock.sendMessage(sock.user.id, {
-        text: "✅ Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
+        text: "✅ Conectado com sucesso ao bot do Azevedo - Advogados Associados!",
       });
     }
   });
@@ -97,16 +93,22 @@ const startSock = async () => {
 
     const now = Date.now();
     const lastTime = lastInteraction.get(sender) || 0;
+    const conversaStatus = conversaLivre.get(sender) || 0;
 
     const send = async (text) => {
       await delay(1200 + Math.random() * 1000);
       await sock.sendMessage(sender, { text });
     };
 
-    // Atualiza o timestamp da última interação
+    // Atualiza tempo da última interação
     lastInteraction.set(sender, now);
 
-    // Respostas imediatas para opções 1, 2 e 3
+    // Se usuário estiver em modo conversa livre, não responder
+    if (now - conversaStatus < CONVERSA_TIMEOUT) {
+      return;
+    }
+
+    // Fluxo das opções
     if (texto === '1') {
       await send("Perfeito! Para que possamos te ajudar da melhor forma com seu problema aéreo, por favor, nos envie as informações que você tem.");
       await send("✈️ Especifique o problema: Foi atraso, cancelamento, overbooking, ou extravio/dano de bagagem?");
@@ -126,17 +128,18 @@ const startSock = async () => {
       return;
     }
 
-    // Se passou menos de 30 minutos desde a última interação, não repete o menu
-    if (now - lastTime < TIMEOUT) {
-      // Não responde nada para evitar flood/repetição
-      return;
-    }
+    // Caso tenha mandado algo fora das opções, entra em conversa livre
+    conversaLivre.set(sender, now);
 
-    // Caso contrário, manda o menu inicial
-    await send("Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nEscolha uma das opções:\n\n1️⃣ Direito Aéreo\n2️⃣ Direito Imobiliário\n3️⃣ Outros assuntos");
+    // Se última mensagem já tem 30 min, manda o menu de novo
+    if (now - lastTime >= TIMEOUT) {
+      await send("Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nEscolha uma das opções:\n\n1️⃣ Direito Aéreo\n2️⃣ Direito Imobiliário\n3️⃣ Outros assuntos");
+    }
   });
 };
 
 startSock();
 
-app.listen(port, () => console.log("✅ Servidor iniciado na porta " + port));
+app.listen(port, () => {
+  console.log("✅ Servidor iniciado na porta " + port);
+});
