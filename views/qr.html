@@ -39,6 +39,11 @@
       margin: 0;
       font-weight: bold;
     }
+    #status-msg {
+      min-height: 24px;
+      margin: 15px 0;
+      font-size: 16px;
+    }
   </style>
 </head>
 <body>
@@ -53,6 +58,12 @@
   </div>
 
   <script>
+    // Variáveis de controle de estado
+    let isConnected = false;
+    let intervalId = null;
+    let qrCodeInstance = null;
+
+    // Verifica se o usuário está logado
     async function checkLogin() {
       try {
         const res = await fetch('/session-info');
@@ -67,64 +78,108 @@
       }
     }
 
+    // Formata o número de telefone
+    function formatPhoneNumber(phone) {
+      if (!phone) return '';
+      
+      // Remove sufixos como @c.us ou :número
+      let cleanNumber = phone.split('@')[0].split(':')[0];
+      
+      // Formata como (DD) XXXXX-XXXX para números brasileiros
+      if (cleanNumber.length >= 12) {
+        const ddd = cleanNumber.substring(0, 2);
+        const firstPart = cleanNumber.substring(2, 7);
+        const secondPart = cleanNumber.substring(7, 11);
+        return `(${ddd}) ${firstPart}-${secondPart}`;
+      }
+      
+      // Formatação genérica para outros padrões
+      return cleanNumber;
+    }
+
+    // Atualiza as informações da sessão
     async function fetchSessionInfo() {
       try {
         const res = await fetch('/session-info');
         const data = await res.json();
 
         if (data.connected) {
-          document.getElementById('qrcode').style.display = 'none';
-
-          const statusEl = document.getElementById('status-msg');
-          if (statusEl.textContent !== '✅ Conectado com sucesso!') {
-            statusEl.textContent = '✅ Conectado com sucesso!';
+          if (!isConnected) {
+            // Primeira conexão
+            isConnected = true;
+            document.getElementById('qrcode').style.display = 'none';
+            document.getElementById('status-msg').textContent = '✅ Conectado com sucesso!';
+            
+            // Formata o número de telefone
+            const formattedNumber = formatPhoneNumber(data.user?.id || '');
+            
+            // Atualiza o perfil
+            if (data.user?.profilePictureUrl) {
+              document.getElementById('profile-img').src = data.user.profilePictureUrl;
+            }
+            document.getElementById('profile-id').textContent = formattedNumber;
+            document.getElementById('profile').style.display = 'block';
+            
+            // Para de verificar após conectar
+            clearInterval(intervalId);
           }
-
-          console.log('ID original:', data.user.id);
-
-          // Limpa ID removendo @... ou :...
-          let cleanId = data.user.id;
-          if (cleanId.includes('@')) {
-            cleanId = cleanId.replace(/@.*$/, '');
-          } else if (cleanId.includes(':')) {
-            cleanId = cleanId.split(':')[0];
-          }
-
-          console.log('ID limpo:', cleanId);
-
-          document.getElementById('profile-img').src = data.user.profilePictureUrl;
-          document.getElementById('profile-id').textContent = cleanId;
-          document.getElementById('profile').style.display = 'block';
         } else {
-          document.getElementById('profile').style.display = 'none';
-          document.getElementById('qrcode').style.display = 'block';
-          document.getElementById('status-msg').textContent = '';
+          if (isConnected) {
+            // Foi desconectado
+            isConnected = false;
+            document.getElementById('profile').style.display = 'none';
+            document.getElementById('qrcode').style.display = 'block';
+            document.getElementById('status-msg').textContent = '📲 Escaneie o QR com o WhatsApp';
+            
+            // Reinicia o intervalo se foi desconectado
+            startPolling();
+          }
         }
       } catch (err) {
         console.error('Erro ao buscar sessão:', err);
+        document.getElementById('status-msg').textContent = '⚠️ Erro ao conectar. Atualize a página.';
       }
     }
 
+    // Gera ou atualiza o QR Code
     async function fetchQr() {
       try {
-        const res = await fetch('/get-qr');
-        if (!res.ok) throw new Error('QR não disponível');
-        const data = await res.json();
+        // Só busca QR code se não estiver conectado
+        if (!isConnected) {
+          const res = await fetch('/get-qr');
+          if (!res.ok) throw new Error('QR não disponível');
+          const data = await res.json();
 
-        document.getElementById('qrcode').innerHTML = '';
-        new QRCode(document.getElementById('qrcode'), {
-          text: data.qr,
-          width: 256,
-          height: 256,
-          correctLevel: QRCode.CorrectLevel.H
-        });
-        document.getElementById('status-msg').textContent = '📲 Escaneie o QR com o WhatsApp';
+          // Limpa o QR Code anterior se existir
+          if (qrCodeInstance) {
+            qrCodeInstance.clear();
+            document.getElementById('qrcode').innerHTML = '';
+          }
+
+          // Cria novo QR Code
+          qrCodeInstance = new QRCode(document.getElementById('qrcode'), {
+            text: data.qr,
+            width: 256,
+            height: 256,
+            correctLevel: QRCode.CorrectLevel.H
+          });
+          
+          document.getElementById('status-msg').textContent = '📲 Escaneie o QR com o WhatsApp';
+        }
       } catch (err) {
+        console.error('Erro ao gerar QR Code:', err);
         document.getElementById('qrcode').innerHTML = '<p>QR Code não disponível. Atualize a página.</p>';
-        document.getElementById('status-msg').textContent = '';
+        document.getElementById('status-msg').textContent = '⚠️ Erro ao gerar QR Code';
       }
     }
 
+    // Inicia a verificação periódica
+    function startPolling() {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(updatePage, 10000);
+    }
+
+    // Atualiza a página
     async function updatePage() {
       const loggedIn = await checkLogin();
       if (!loggedIn) return;
@@ -133,8 +188,11 @@
       await fetchQr();
     }
 
-    updatePage();
-    setInterval(updatePage, 10000);
+    // Inicialização
+    document.addEventListener('DOMContentLoaded', () => {
+      updatePage();
+      startPolling();
+    });
   </script>
 </body>
 </html>
