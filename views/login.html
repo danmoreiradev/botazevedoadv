@@ -1,14 +1,71 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <title>Login</title>
+  <meta charset="UTF-8" />
+  <title>Login - Chatbot Azevedo Adv
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #4e54c8, #8f94fb);
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: #333;
+    }
+    .login-container {
+      background: white;
+      padding: 40px 30px;
+      border-radius: 12px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+      width: 320px;
+      text-align: center;
+    }
+    h2 {
+      margin-bottom: 25px;
+      color: #4e54c8;
+      font-weight: 700;
+    }
+    input[type="password"] {
+      width: 100%;
+      padding: 12px 15px;
+      margin-bottom: 20px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+    input[type="password"]:focus {
+      border-color: #4e54c8;
+      outline: none;
+    }
+    button {
+      width: 100%;
+      padding: 12px 15px;
+      background: #4e54c8;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background: #3b3fc1;
+    }
+  </style>
 </head>
 <body>
-  <h2>Área restrita</h2>
-  <form method="POST" action="/login">
-    <input type="password" name="senha" placeholder="Digite a senha" required />
-    <button type="submit">Entrar</button>
-  </form>
+  <div class="login-container">
+    <h2>Área Restrita</h2>
+    <form method="POST" action="/login">
+      <input type="password" name="senha" placeholder="Digite a senha" required autofocus />
+      <button type="submit">Entrar</button>
+    </form>
+  </div>
 </body>
 </html>
