@@ -78,25 +78,20 @@
       }
     }
 
-    // Formata o número de telefone
-    function formatPhoneNumber(phone) {
-    if (!phone) return '';
+  function formatPhoneNumber(phone) {
+  if (!phone) return '';
   
-   // Remove tudo após @ ou : e caracteres não numéricos
-    let cleanNumber = phone.split('@')[0].split(':')[0].replace(/\D/g, '');
+  let cleanNumber = phone.split('@')[0].split(':')[0].replace(/\D/g, '');
   
-    // Formatação para números brasileiros (DDD + 9 dígitos)
-    if (cleanNumber.length === 12 || cleanNumber.length === 13) {
-     const ddd = cleanNumber.substring(0, 2);
-     const prefix = cleanNumber.substring(2, 4); // 19
-     const part1 = cleanNumber.substring(4, 8);  // 9961
-     const part2 = cleanNumber.substring(8, 12); // 79651
-    
-     // Formato: DDD + XX XXXX-XXXX
-     return `${ddd} ${prefix} ${part1}-${part2}`;
-   }
+  // Formato específico para 11 dígitos (19 99617-9651)
+  if (cleanNumber.length === 11) {
+    return `${cleanNumber.substring(0, 2)} ${cleanNumber.substring(2, 7)}-${cleanNumber.substring(7)}`;
+  }
+  // Formato para 13 dígitos (55 19 99617-9651)
+  else if (cleanNumber.length === 13) {
+    return `${cleanNumber.substring(0, 2)} ${cleanNumber.substring(2, 4)} ${cleanNumber.substring(4, 9)}-${cleanNumber.substring(9)}`;
+  }
   
-  // Retorna sem formatação se não for um número brasileiro conhecido
   return cleanNumber;
 }
     // Atualiza as informações da sessão
