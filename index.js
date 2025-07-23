@@ -6,25 +6,47 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
-import dotenv from 'dotenv';
-
-dotenv.config();
-
 import session from 'express-session';
+
+const makeWASocket = baileys.makeWASocket;
+const useMultiFileAuthState = baileys.useMultiFileAuthState;
+const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
+const DisconnectReason = baileys.DisconnectReason;
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const app = express();
+const port = process.env.PORT || 3000;
+
+const SENHA_FIXA = 'pepe@2025'; // 🔐 altere para sua senha segura
+
+let sock;
+let qrCodeString = '';
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  secret: 'chave-secreta-bot', // pode guardar no .env também
+  secret: 'chave-secreta-bot',
   resave: false,
   saveUninitialized: false
 }));
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+app.use(express.static(path.join(__dirname, 'public')));
 
+// Keep-alive Render
+setInterval(() => {
+  fetch(`https://botazevedoadv.onrender.com`).catch(() => {});
+}, 1000 * 60 * 10); // a cada 10 minutos
+
+// Login e proteção de rota
 app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
 
 app.post('/login', (req, res) => {
   const senha = req.body.senha;
-  if (senha === process.env.LOGIN_PASSWORD) {
+  if (senha === SENHA_FIXA) {
     req.session.logado = true;
     res.redirect('/qr');
   } else {
@@ -32,7 +54,10 @@ app.post('/login', (req, res) => {
   }
 });
 
-// Protege a rota do QR:
+app.get('/', (req, res) => {
+  res.redirect('/qr');
+});
+
 app.get('/qr', (req, res) => {
   if (!req.session.logado) return res.redirect('/login');
   res.sendFile(path.join(__dirname, 'views', 'qr.html'));
@@ -47,53 +72,38 @@ app.get('/get-qr', (req, res) => {
   }
 });
 
+app.get('/session-info', async (req, res) => {
+  if (!req.session.logado) return res.status(401).send('Não autorizado.');
+  if (!sock || !sock.user) return res.json({ connected: false });
 
-const makeWASocket = baileys.makeWASocket;
-const useMultiFileAuthState = baileys.useMultiFileAuthState;
-const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
-const DisconnectReason = baileys.DisconnectReason;
+  try {
+    let profilePictureUrl;
+    try {
+      profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image');
+    } catch {
+      profilePictureUrl = 'https://via.placeholder.com/80';
+    }
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const app = express();
-const port = process.env.PORT || 3000;
-
-let sock;
-let qrCodeString = '';
-
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-// Keep-alive Render (substitua pela URL real do seu app)
-setInterval(() => {
-  fetch(`https://botazevedoadv.onrender.com`).catch(() => {});
-}, 1000 * 60 * 10); // a cada 10 minutos
-
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.get('/', (req, res) => {
-  res.redirect('/qr');
-});
-
-app.get('/qr', (req, res) => {
-  res.sendFile(path.join(__dirname, 'views', 'qr.html'));
-});
-
-app.get('/get-qr', (req, res) => {
-  if (qrCodeString) {
-    res.json({ qr: qrCodeString });
-  } else {
-    res.status(404).send('QR Code não disponível no momento.');
+    res.json({
+      connected: true,
+      user: {
+        id: sock.user.id,
+        name: sock.user.name || '',
+        profilePictureUrl
+      }
+    });
+  } catch (err) {
+    console.error('Erro ao obter info da sessão:', err);
+    res.status(500).json({ connected: false });
   }
 });
 
-// Controle de última interação por usuário (em ms)
+// Controle de última interação por usuário (anti-flood)
 const lastInteraction = new Map();
-const TIMEOUT = 30 * 60 * 1000; // 30 minutos
+const TIMEOUT = 30 * 60 * 1000;
 
 const startSock = async () => {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
-
   const { version } = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
@@ -104,24 +114,14 @@ const startSock = async () => {
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', (update) => {
-    const { connection, qr, lastDisconnect } = update;
-
-    if (qr) {
-      qrCodeString = qr; // string do QR para frontend
-    }
-
+  sock.ev.on('connection.update', ({ connection, qr, lastDisconnect }) => {
+    if (qr) qrCodeString = qr;
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-      if (shouldReconnect) {
-        startSock();
-      }
+      if (statusCode !== DisconnectReason.loggedOut) startSock();
     }
-
     if (connection === 'open') {
-      qrCodeString = ''; // limpa qr após conectar
+      qrCodeString = '';
       sock.sendMessage(sock.user.id, {
         text: "✅ Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
       });
@@ -144,10 +144,8 @@ const startSock = async () => {
       await sock.sendMessage(sender, { text });
     };
 
-    // Atualiza o timestamp da última interação
     lastInteraction.set(sender, now);
 
-    // Respostas imediatas para opções 1, 2 e 3
     if (texto === '1') {
       await send("Perfeito! Para que possamos te ajudar da melhor forma com seu problema aéreo, por favor, nos envie as informações que você tem.");
       await send("✈️ Especifique o problema: Foi atraso, cancelamento, overbooking, ou extravio/dano de bagagem?");
@@ -167,44 +165,11 @@ const startSock = async () => {
       return;
     }
 
-    // Se passou menos de 30 minutos desde a última interação, não repete o menu
-    if (now - lastTime < TIMEOUT) {
-      // Não responde nada para evitar flood/repetição
-      return;
-    }
+    if (now - lastTime < TIMEOUT) return;
 
-    // Caso contrário, manda o menu inicial
     await send("Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nEscolha uma das opções:\n\n1️⃣ Direito Aéreo\n2️⃣ Direito Imobiliário\n3️⃣ Outros assuntos");
   });
 };
-
-app.get('/session-info', async (req, res) => {
-  if (!sock || !sock.user) {
-    return res.json({ connected: false });
-  }
-
-  try {
-    let profilePictureUrl;
-    try {
-      profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image');
-    } catch (err) {
-      profilePictureUrl = 'https://via.placeholder.com/80';
-    }
-
-    res.json({
-      connected: true,
-      user: {
-        id: sock.user.id,
-        name: sock.user.name || '',
-        profilePictureUrl
-      }
-    });
-  } catch (err) {
-    console.error('Erro ao obter info da sessão:', err);
-    res.status(500).json({ connected: false });
-  }
-});
-
 
 startSock();
 

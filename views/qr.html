@@ -26,6 +26,7 @@
     }
     #profile {
       margin-top: 20px;
+      display: none;
     }
     #profile img {
       width: 80px;
@@ -44,7 +45,7 @@
   <div id="container">
     <h2>Conecte seu WhatsApp</h2>
     <div id="qrcode"></div>
-    <div id="profile" style="display:none;">
+    <div id="profile">
       <img id="profile-img" src="" alt="Foto de Perfil">
       <p id="profile-id"></p>
     </div>
@@ -52,10 +53,24 @@
   </div>
 
   <script>
+    // Redireciona para login se não autenticado
+    async function checkLogin() {
+      try {
+        const res = await fetch('/session-info');
+        if (res.status === 401) {
+          window.location.href = '/login';
+          return false;
+        }
+        return true;
+      } catch {
+        window.location.href = '/login';
+        return false;
+      }
+    }
+
     async function fetchSessionInfo() {
       try {
         const res = await fetch('/session-info');
-        if (!res.ok) throw new Error();
         const data = await res.json();
 
         if (data.connected) {
@@ -67,6 +82,7 @@
         } else {
           document.getElementById('profile').style.display = 'none';
           document.getElementById('qrcode').style.display = 'block';
+          document.getElementById('status-msg').textContent = '';
         }
       } catch (err) {
         console.error('Erro ao buscar sessão:', err);
@@ -89,10 +105,14 @@
         document.getElementById('status-msg').textContent = '📲 Escaneie o QR com o WhatsApp';
       } catch (err) {
         document.getElementById('qrcode').innerHTML = '<p>QR Code não disponível. Atualize a página.</p>';
+        document.getElementById('status-msg').textContent = '';
       }
     }
 
     async function updatePage() {
+      const loggedIn = await checkLogin();
+      if (!loggedIn) return;
+
       await fetchSessionInfo();
       await fetchQr();
     }
