@@ -75,9 +75,11 @@
 
         if (data.connected) {
           document.getElementById('qrcode').style.display = 'none';
-          document.getElementById('status-msg').textContent = '✅ Conectado com sucesso!';
+          const statusEl = document.getElementById('status-msg');
+          if (statusEl.textContent !== '✅ Conectado com sucesso!') {
+          statusEl.textContent = '✅ Conectado com sucesso!';}
           document.getElementById('profile-img').src = data.user.profilePictureUrl;
-          document.getElementById('profile-id').textContent = data.user.id.replace('@s.whatsapp.net', '');
+          document.getElementById('profile-id').textContent = data.user.id.replace(/@.*$/, '');
           document.getElementById('profile').style.display = 'block';
         } else {
           document.getElementById('profile').style.display = 'none';
