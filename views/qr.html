@@ -53,7 +53,6 @@
   </div>
 
   <script>
-    // Redireciona para login se não autenticado
     async function checkLogin() {
       try {
         const res = await fetch('/session-info');
@@ -75,11 +74,26 @@
 
         if (data.connected) {
           document.getElementById('qrcode').style.display = 'none';
+
           const statusEl = document.getElementById('status-msg');
           if (statusEl.textContent !== '✅ Conectado com sucesso!') {
-          statusEl.textContent = '✅ Conectado com sucesso!';}
+            statusEl.textContent = '✅ Conectado com sucesso!';
+          }
+
+          console.log('ID original:', data.user.id);
+
+          // Limpa ID removendo @... ou :...
+          let cleanId = data.user.id;
+          if (cleanId.includes('@')) {
+            cleanId = cleanId.replace(/@.*$/, '');
+          } else if (cleanId.includes(':')) {
+            cleanId = cleanId.split(':')[0];
+          }
+
+          console.log('ID limpo:', cleanId);
+
           document.getElementById('profile-img').src = data.user.profilePictureUrl;
-          document.getElementById('profile-id').textContent = data.user.id.replace(/@.*$/, '');
+          document.getElementById('profile-id').textContent = cleanId;
           document.getElementById('profile').style.display = 'block';
         } else {
           document.getElementById('profile').style.display = 'none';
