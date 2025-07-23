@@ -83,11 +83,11 @@
   
   let cleanNumber = phone.split('@')[0].split(':')[0].replace(/\D/g, '');
   
-  // Formato específico para 11 dígitos (19 99617-9651)
+  // Formato específico para 11 dígitos 
   if (cleanNumber.length === 11) {
     return `${cleanNumber.substring(0, 2)} ${cleanNumber.substring(2, 7)}-${cleanNumber.substring(7)}`;
   }
-  // Formato para 13 dígitos (55 19 99617-9651)
+  // Formato para 13 dígitos
   else if (cleanNumber.length === 13) {
     return `${cleanNumber.substring(0, 2)} ${cleanNumber.substring(2, 4)} ${cleanNumber.substring(4, 9)}-${cleanNumber.substring(9)}`;
   }
