@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <title>Login - Chatbot Azevedo Adv</title>
+  <title>Login</title>
   <style>
     * {
       box-sizing: border-box;
@@ -58,15 +58,50 @@
     button:hover {
       background: #3b3fc1;
     }
+    #erro {
+      color: red;
+      margin-top: 10px;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
   <div class="login-container">
-    <h2>Área Restrita</h2>
-    <form method="POST" action="/login">
+    <h2>Área Restrita - Chatbot Azevedo Adv</h2>
+    <form id="login-form">
       <input type="password" name="senha" placeholder="Digite a senha" required autofocus />
       <button type="submit">Entrar</button>
     </form>
+    <p id="erro"></p>
   </div>
+
+  <script>
+    const form = document.getElementById('login-form');
+    const erroElem = document.getElementById('erro');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const senha = form.senha.value;
+
+      try {
+        const res = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ senha })
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          window.location.href = '/qr';
+        } else {
+          erroElem.textContent = data.message;
+        }
+      } catch (err) {
+        erroElem.textContent = 'Erro na conexão com o servidor.';
+      }
+    });
+  </script>
 </body>
 </html>

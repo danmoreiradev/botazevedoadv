@@ -44,13 +44,16 @@ app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
 
+app.use(express.json()); // importante para aceitar JSON no body
+
 app.post('/login', (req, res) => {
   const senha = req.body.senha;
+
   if (senha === SENHA_FIXA) {
     req.session.logado = true;
-    res.redirect('/qr');
+    res.json({ success: true });
   } else {
-    res.send('Senha incorreta. <a href="/login">Tentar novamente</a>');
+    res.json({ success: false, message: 'Senha incorreta. Tente novamente.' });
   }
 });
 
