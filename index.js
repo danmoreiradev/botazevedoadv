@@ -137,6 +137,34 @@ const startSock = async () => {
   });
 };
 
+app.get('/session-info', async (req, res) => {
+  if (!sock || !sock.user) {
+    return res.json({ connected: false });
+  }
+
+  try {
+    let profilePictureUrl;
+    try {
+      profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image');
+    } catch (err) {
+      profilePictureUrl = 'https://via.placeholder.com/80';
+    }
+
+    res.json({
+      connected: true,
+      user: {
+        id: sock.user.id,
+        name: sock.user.name || '',
+        profilePictureUrl
+      }
+    });
+  } catch (err) {
+    console.error('Erro ao obter info da sessão:', err);
+    res.status(500).json({ connected: false });
+  }
+});
+
+
 startSock();
 
 app.listen(port, () => console.log("✅ Servidor iniciado na porta " + port));

@@ -2,26 +2,77 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <title>Escaneie o QR Code do WhatsApp</title>
+  <title>WhatsApp - Conexão</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     body {
       font-family: Arial, sans-serif;
       text-align: center;
-      margin-top: 50px;
+      margin-top: 40px;
+      background-color: #f4f4f4;
+    }
+    #container {
+      max-width: 400px;
+      margin: auto;
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
     }
     #qrcode {
-      margin: auto;
+      margin: 20px auto;
       width: 256px;
       height: 256px;
+    }
+    #profile {
+      margin-top: 20px;
+    }
+    #profile img {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      object-fit: cover;
+      margin-bottom: 10px;
+    }
+    #profile p {
+      margin: 0;
+      font-weight: bold;
     }
   </style>
 </head>
 <body>
-  <h2>Escaneie este QR Code com o WhatsApp</h2>
-  <div id="qrcode"></div>
+  <div id="container">
+    <h2>Conecte seu WhatsApp</h2>
+    <div id="qrcode"></div>
+    <div id="profile" style="display:none;">
+      <img id="profile-img" src="" alt="Foto de Perfil">
+      <p id="profile-id"></p>
+    </div>
+    <p id="status-msg"></p>
+  </div>
 
   <script>
+    async function fetchSessionInfo() {
+      try {
+        const res = await fetch('/session-info');
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+
+        if (data.connected) {
+          document.getElementById('qrcode').style.display = 'none';
+          document.getElementById('status-msg').textContent = '✅ Conectado com sucesso!';
+          document.getElementById('profile-img').src = data.user.profilePictureUrl;
+          document.getElementById('profile-id').textContent = data.user.id.replace('@s.whatsapp.net', '');
+          document.getElementById('profile').style.display = 'block';
+        } else {
+          document.getElementById('profile').style.display = 'none';
+          document.getElementById('qrcode').style.display = 'block';
+        }
+      } catch (err) {
+        console.error('Erro ao buscar sessão:', err);
+      }
+    }
+
     async function fetchQr() {
       try {
         const res = await fetch('/get-qr');
@@ -29,20 +80,25 @@
         const data = await res.json();
 
         document.getElementById('qrcode').innerHTML = '';
-
         new QRCode(document.getElementById('qrcode'), {
           text: data.qr,
           width: 256,
           height: 256,
           correctLevel: QRCode.CorrectLevel.H
         });
+        document.getElementById('status-msg').textContent = '📲 Escaneie o QR com o WhatsApp';
       } catch (err) {
         document.getElementById('qrcode').innerHTML = '<p>QR Code não disponível. Atualize a página.</p>';
       }
     }
 
-    fetchQr();
-    setInterval(fetchQr, 10000);
+    async function updatePage() {
+      await fetchSessionInfo();
+      await fetchQr();
+    }
+
+    updatePage();
+    setInterval(updatePage, 10000);
   </script>
 </body>
 </html>
