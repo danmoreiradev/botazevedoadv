@@ -6,6 +6,47 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+import session from 'express-session';
+app.use(express.urlencoded({ extended: true }));
+app.use(session({
+  secret: 'chave-secreta-bot', // pode guardar no .env também
+  resave: false,
+  saveUninitialized: false
+}));
+
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'views', 'login.html'));
+});
+
+app.post('/login', (req, res) => {
+  const senha = req.body.senha;
+  if (senha === process.env.LOGIN_PASSWORD) {
+    req.session.logado = true;
+    res.redirect('/qr');
+  } else {
+    res.send('Senha incorreta. <a href="/login">Tentar novamente</a>');
+  }
+});
+
+// Protege a rota do QR:
+app.get('/qr', (req, res) => {
+  if (!req.session.logado) return res.redirect('/login');
+  res.sendFile(path.join(__dirname, 'views', 'qr.html'));
+});
+
+app.get('/get-qr', (req, res) => {
+  if (!req.session.logado) return res.status(401).send('Não autorizado.');
+  if (qrCodeString) {
+    res.json({ qr: qrCodeString });
+  } else {
+    res.status(404).send('QR Code não disponível no momento.');
+  }
+});
+
 
 const makeWASocket = baileys.makeWASocket;
 const useMultiFileAuthState = baileys.useMultiFileAuthState;
