@@ -18,7 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3000;
 
-const SENHA_HASH = '$2b$10$XxIBIaFZkX0a4Py5uTR57eULZ7bI9e1TvBbtCEYOxo6slXCbPvw5C';
+const SENHA_HASH = '$2b$10$yZxId/b5NiW6gq/Nb8EFbusyvFZpBFBCOrd36rpyDfcPuhbNAynNK';
 
 let sock;
 let qrCodeString = '';
