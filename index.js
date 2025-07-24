@@ -1,12 +1,13 @@
 import './keepAlive.js';
+import 'dotenv/config';
 import express from 'express';
 import * as baileys from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
-import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import session from 'express-session';
+import bcrypt from 'bcrypt';
 
 const makeWASocket = baileys.makeWASocket;
 const useMultiFileAuthState = baileys.useMultiFileAuthState;
@@ -17,7 +18,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3000;
 
-const SENHA_FIXA = 'pepe@2025'; // 🔐 altere para sua senha segura
+// Configurações de segurança
+const SENHA_HASH = process.env.SENHA_HASH;
+if (!SENHA_HASH) {
+  console.error('ERRO: Variável SENHA_HASH não configurada no .env');
+  process.exit(1);
+}
 
 let sock;
 let qrCodeString = '';
@@ -26,48 +32,75 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  secret: 'chave-secreta-bot',
+  secret: process.env.SESSION_SECRET || require('crypto').randomBytes(32).toString('hex'),
   resave: false,
-  saveUninitialized: false
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 1 dia
+  }
 }));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
 
 // Keep-alive Render
 setInterval(() => {
   fetch(`https://botazevedoadv.onrender.com`).catch(() => {});
 }, 1000 * 60 * 10); // a cada 10 minutos
 
-// Login e proteção de rota
+// Rotas de autenticação
 app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
 
-app.use(express.json()); // importante para aceitar JSON no body
+app.post('/login', async (req, res) => {
+  try {
+    const { senha } = req.body;
+    
+    if (!senha) {
+      return res.status(400).json({ success: false, message: 'Senha não fornecida' });
+    }
 
-app.post('/login', (req, res) => {
-  const senha = req.body.senha;
-
-  if (senha === SENHA_FIXA) {
-    req.session.logado = true;
-    res.json({ success: true });
-  } else {
-    res.json({ success: false, message: 'Senha incorreta. Tente novamente.' });
+    const match = await bcrypt.compare(senha, SENHA_HASH);
+    if (match) {
+      req.session.logado = true;
+      req.session.regenerate(() => {
+        res.json({ success: true });
+      });
+    } else {
+      res.status(401).json({ success: false, message: 'Senha incorreta. Tente novamente.' });
+    }
+  } catch (error) {
+    console.error('Erro no login:', error);
+    res.status(500).json({ success: false, message: 'Erro interno no servidor' });
   }
 });
+
+app.get('/logout', (req, res) => {
+  req.session.destroy();
+  res.redirect('/login');
+});
+
+// Rotas protegidas
+const requireAuth = (req, res, next) => {
+  if (!req.session.logado) {
+    return res.redirect('/login');
+  }
+  next();
+};
 
 app.get('/', (req, res) => {
   res.redirect('/qr');
 });
 
-app.get('/qr', (req, res) => {
-  if (!req.session.logado) return res.redirect('/login');
+app.get('/qr', requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'qr.html'));
 });
 
-app.get('/get-qr', (req, res) => {
-  if (!req.session.logado) return res.status(401).send('Não autorizado.');
+app.get('/get-qr', requireAuth, (req, res) => {
   if (qrCodeString) {
     res.json({ qr: qrCodeString });
   } else {
@@ -75,11 +108,10 @@ app.get('/get-qr', (req, res) => {
   }
 });
 
-app.get('/session-info', async (req, res) => {
-  if (!req.session.logado) return res.status(401).send('Não autorizado.');
-  if (!sock || !sock.user) return res.json({ connected: false });
-
+app.get('/session-info', requireAuth, async (req, res) => {
   try {
+    if (!sock || !sock.user) return res.json({ connected: false });
+
     let profilePictureUrl;
     try {
       profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image');
@@ -176,4 +208,4 @@ const startSock = async () => {
 
 startSock();
 
-app.listen(port, () => console.log("✅ Servidor iniciado na porta " + port));
+app.listen(port, () => console.log(`✅ Servidor iniciado na porta ${port}`));

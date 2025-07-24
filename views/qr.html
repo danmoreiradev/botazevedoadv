@@ -58,12 +58,12 @@
   </div>
 
   <script>
-    // Variáveis de controle de estado
+ 
     let isConnected = false;
     let intervalId = null;
     let qrCodeInstance = null;
 
-    // Verifica se o usuário está logado
+
     async function checkLogin() {
       try {
         const res = await fetch('/session-info');
@@ -83,18 +83,15 @@
   
   let cleanNumber = phone.split('@')[0].split(':')[0].replace(/\D/g, '');
   
-  // Formato específico para 11 dígitos 
   if (cleanNumber.length === 11) {
     return `${cleanNumber.substring(0, 2)} ${cleanNumber.substring(2, 7)}-${cleanNumber.substring(7)}`;
   }
-  // Formato para 13 dígitos
   else if (cleanNumber.length === 13) {
     return `${cleanNumber.substring(0, 2)} ${cleanNumber.substring(2, 4)} ${cleanNumber.substring(4, 9)}-${cleanNumber.substring(9)}`;
   }
   
   return cleanNumber;
 }
-    // Atualiza as informações da sessão
     async function fetchSessionInfo() {
       try {
         const res = await fetch('/session-info');
@@ -102,33 +99,27 @@
 
         if (data.connected) {
           if (!isConnected) {
-            // Primeira conexão
             isConnected = true;
             document.getElementById('qrcode').style.display = 'none';
             document.getElementById('status-msg').textContent = '✅ Conectado com sucesso!';
             
-            // Formata o número de telefone
             const formattedNumber = formatPhoneNumber(data.user?.id || '');
             
-            // Atualiza o perfil
             if (data.user?.profilePictureUrl) {
               document.getElementById('profile-img').src = data.user.profilePictureUrl;
             }
             document.getElementById('profile-id').textContent = formattedNumber;
             document.getElementById('profile').style.display = 'block';
             
-            // Para de verificar após conectar
             clearInterval(intervalId);
           }
         } else {
           if (isConnected) {
-            // Foi desconectado
             isConnected = false;
             document.getElementById('profile').style.display = 'none';
             document.getElementById('qrcode').style.display = 'block';
             document.getElementById('status-msg').textContent = '📲 Escaneie o QR com o WhatsApp';
             
-            // Reinicia o intervalo se foi desconectado
             startPolling();
           }
         }
@@ -138,22 +129,18 @@
       }
     }
 
-    // Gera ou atualiza o QR Code
     async function fetchQr() {
       try {
-        // Só busca QR code se não estiver conectado
         if (!isConnected) {
           const res = await fetch('/get-qr');
           if (!res.ok) throw new Error('QR não disponível');
           const data = await res.json();
 
-          // Limpa o QR Code anterior se existir
           if (qrCodeInstance) {
             qrCodeInstance.clear();
             document.getElementById('qrcode').innerHTML = '';
           }
 
-          // Cria novo QR Code
           qrCodeInstance = new QRCode(document.getElementById('qrcode'), {
             text: data.qr,
             width: 256,
@@ -170,13 +157,11 @@
       }
     }
 
-    // Inicia a verificação periódica
     function startPolling() {
       if (intervalId) clearInterval(intervalId);
       intervalId = setInterval(updatePage, 10000);
     }
 
-    // Atualiza a página
     async function updatePage() {
       const loggedIn = await checkLogin();
       if (!loggedIn) return;
@@ -185,7 +170,6 @@
       await fetchQr();
     }
 
-    // Inicialização
     document.addEventListener('DOMContentLoaded', () => {
       updatePage();
       startPolling();
