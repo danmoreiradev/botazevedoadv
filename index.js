@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import session from 'express-session';
+import bcrypt from 'bcrypt';
 
 const makeWASocket = baileys.makeWASocket;
 const useMultiFileAuthState = baileys.useMultiFileAuthState;
@@ -17,7 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3000;
 
-const SENHA_FIXA = 'pepe@2025'; // 🔐 altere para sua senha segura
+const SENHA_HASH = '$2b$10$XxIBIaFZkX0a4Py5uTR57eULZ7bI9e1TvBbtCEYOxo6slXCbPvw5C';
 
 let sock;
 let qrCodeString = '';
@@ -44,12 +45,13 @@ app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
 
-app.use(express.json()); // importante para aceitar JSON no body
+app.use(express.json());
 
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
   const senha = req.body.senha;
 
-  if (senha === SENHA_FIXA) {
+  const match = await bcrypt.compare(senha, SENHA_HASH);
+  if (match) {
     req.session.logado = true;
     res.json({ success: true });
   } else {
