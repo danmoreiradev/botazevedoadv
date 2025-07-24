@@ -51,22 +51,20 @@
     <h2>Conecte seu WhatsApp</h2>
     <div id="qrcode"></div>
     <div id="profile">
-      <img id="profile-img" src="" alt="Foto de Perfil">
+      <img id="profile-img" src="" alt="Foto de Perfil" />
       <p id="profile-id"></p>
     </div>
     <p id="status-msg"></p>
   </div>
 
   <script>
- 
     let isConnected = false;
     let intervalId = null;
     let qrCodeInstance = null;
 
-
     async function checkLogin() {
       try {
-        const res = await fetch('/session-info');
+        const res = await fetch('/session-info', { credentials: 'include' }); // << sessão enviada
         if (res.status === 401) {
           window.location.href = '/login';
           return false;
@@ -78,23 +76,20 @@
       }
     }
 
-  function formatPhoneNumber(phone) {
-  if (!phone) return '';
-  
-  let cleanNumber = phone.split('@')[0].split(':')[0].replace(/\D/g, '');
-  
-  if (cleanNumber.length === 11) {
-    return `${cleanNumber.substring(0, 2)} ${cleanNumber.substring(2, 7)}-${cleanNumber.substring(7)}`;
-  }
-  else if (cleanNumber.length === 13) {
-    return `${cleanNumber.substring(0, 2)} ${cleanNumber.substring(2, 4)} ${cleanNumber.substring(4, 9)}-${cleanNumber.substring(9)}`;
-  }
-  
-  return cleanNumber;
-}
+    function formatPhoneNumber(phone) {
+      if (!phone) return '';
+      let cleanNumber = phone.split('@')[0].split(':')[0].replace(/\D/g, '');
+      if (cleanNumber.length === 11) {
+        return `${cleanNumber.substring(0, 2)} ${cleanNumber.substring(2, 7)}-${cleanNumber.substring(7)}`;
+      } else if (cleanNumber.length === 13) {
+        return `${cleanNumber.substring(0, 2)} ${cleanNumber.substring(2, 4)} ${cleanNumber.substring(4, 9)}-${cleanNumber.substring(9)}`;
+      }
+      return cleanNumber;
+    }
+
     async function fetchSessionInfo() {
       try {
-        const res = await fetch('/session-info');
+        const res = await fetch('/session-info', { credentials: 'include' }); // << sessão enviada
         const data = await res.json();
 
         if (data.connected) {
@@ -102,15 +97,15 @@
             isConnected = true;
             document.getElementById('qrcode').style.display = 'none';
             document.getElementById('status-msg').textContent = '✅ Conectado com sucesso!';
-            
+
             const formattedNumber = formatPhoneNumber(data.user?.id || '');
-            
+
             if (data.user?.profilePictureUrl) {
               document.getElementById('profile-img').src = data.user.profilePictureUrl;
             }
             document.getElementById('profile-id').textContent = formattedNumber;
             document.getElementById('profile').style.display = 'block';
-            
+
             clearInterval(intervalId);
           }
         } else {
@@ -119,7 +114,7 @@
             document.getElementById('profile').style.display = 'none';
             document.getElementById('qrcode').style.display = 'block';
             document.getElementById('status-msg').textContent = '📲 Escaneie o QR com o WhatsApp';
-            
+
             startPolling();
           }
         }
@@ -132,7 +127,7 @@
     async function fetchQr() {
       try {
         if (!isConnected) {
-          const res = await fetch('/get-qr');
+          const res = await fetch('/get-qr', { credentials: 'include' }); // << sessão enviada
           if (!res.ok) throw new Error('QR não disponível');
           const data = await res.json();
 
@@ -147,7 +142,7 @@
             height: 256,
             correctLevel: QRCode.CorrectLevel.H
           });
-          
+
           document.getElementById('status-msg').textContent = '📲 Escaneie o QR com o WhatsApp';
         }
       } catch (err) {
