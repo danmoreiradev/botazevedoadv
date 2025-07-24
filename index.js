@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import session from 'express-session';
+import crypto from 'crypto';
 
 const makeWASocket = baileys.makeWASocket;
 const useMultiFileAuthState = baileys.useMultiFileAuthState;
@@ -31,7 +32,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  secret: process.env.SESSION_SECRET || require('crypto').randomBytes(32).toString('hex'),
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
   cookie: {
