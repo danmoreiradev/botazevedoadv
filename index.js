@@ -65,18 +65,17 @@ app.post('/login', (req, res) => {
     }
 
     if (senha === SENHA_APP) {
-      req.session.logado = true;
-      req.session.regenerate(() => {
-        res.json({ success: true });
-      });
+      req.session.logado = true;  // seta flag direto na sessão
+      return res.json({ success: true });  // responde com sucesso direto
     } else {
-      res.status(401).json({ success: false, message: 'Senha incorreta. Tente novamente.' });
+      return res.status(401).json({ success: false, message: 'Senha incorreta. Tente novamente.' });
     }
   } catch (error) {
     console.error('Erro no login:', error);
-    res.status(500).json({ success: false, message: 'Erro interno no servidor' });
+    return res.status(500).json({ success: false, message: 'Erro interno no servidor' });
   }
 });
+
 
 app.get('/logout', (req, res) => {
   req.session.destroy();
