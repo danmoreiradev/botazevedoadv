@@ -7,7 +7,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import session from 'express-session';
-import bcrypt from 'bcrypt';
 
 const makeWASocket = baileys.makeWASocket;
 const useMultiFileAuthState = baileys.useMultiFileAuthState;
@@ -19,9 +18,9 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // Configurações de segurança
-const SENHA_HASH = process.env.SENHA_HASH;
-if (!SENHA_HASH) {
-  console.error('ERRO: Variável SENHA_HASH não configurada no .env');
+const SENHA_APP = process.env.SENHA_APP;
+if (!SENHA_APP) {
+  console.error('ERRO: Variável SENHA_APP não configurada no .env');
   process.exit(1);
 }
 
@@ -56,16 +55,15 @@ app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
 
-app.post('/login', async (req, res) => {
+app.post('/login', (req, res) => {
   try {
     const { senha } = req.body;
-    
+
     if (!senha) {
       return res.status(400).json({ success: false, message: 'Senha não fornecida' });
     }
 
-    const match = await bcrypt.compare(senha, SENHA_HASH);
-    if (match) {
+    if (senha === SENHA_APP) {
       req.session.logado = true;
       req.session.regenerate(() => {
         res.json({ success: true });
