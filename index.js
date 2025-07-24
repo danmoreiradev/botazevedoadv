@@ -65,14 +65,20 @@ app.post('/login', (req, res) => {
     }
 
     if (senha === SENHA_APP) {
-      req.session.logado = true;  // seta flag direto na sessão
-      return res.json({ success: true });  // responde com sucesso direto
+      req.session.logado = true;
+      req.session.save(err => {
+        if (err) {
+          console.error('Erro ao salvar sessão:', err);
+          return res.status(500).json({ success: false, message: 'Erro interno no servidor' });
+        }
+        res.json({ success: true });
+      });
     } else {
-      return res.status(401).json({ success: false, message: 'Senha incorreta. Tente novamente.' });
+      res.status(401).json({ success: false, message: 'Senha incorreta. Tente novamente.' });
     }
   } catch (error) {
     console.error('Erro no login:', error);
-    return res.status(500).json({ success: false, message: 'Erro interno no servidor' });
+    res.status(500).json({ success: false, message: 'Erro interno no servidor' });
   }
 });
 
