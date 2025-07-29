@@ -24,6 +24,12 @@ let sock;
 let qrCodeString = '';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+// ===== NOVAS CONSTANTES ===== //
+const TICKET_TIMEOUT = 2 * 60 * 60 * 1000; // 2 horas em milissegundos
+const activeTickets = new Map();
+const generateTicketId = () => `TKT${Date.now()}${Math.floor(Math.random() * 1000)}`;
+// ============================ //
+
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
@@ -38,9 +44,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Keep-alive Render
 setInterval(() => {
   fetch(`https://botazevedoadv.onrender.com`).catch(() => {});
-}, 1000 * 60 * 10); // a cada 10 minutos
+}, 1000 * 60 * 10);
 
-// Login e proteção de rota
+// Rotas (mantidas iguais)
 app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
@@ -49,7 +55,6 @@ app.use(express.json());
 
 app.post('/login', async (req, res) => {
   const senha = req.body.senha;
-
   const match = await bcrypt.compare(senha, SENHA_HASH);
   if (match) {
     req.session.logado = true;
@@ -59,10 +64,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => {
-  res.redirect('/qr');
-});
-
+app.get('/', (req, res) => res.redirect('/qr'));
 app.get('/qr', (req, res) => {
   if (!req.session.logado) return res.redirect('/login');
   res.sendFile(path.join(__dirname, 'views', 'qr.html'));
@@ -70,11 +72,7 @@ app.get('/qr', (req, res) => {
 
 app.get('/get-qr', (req, res) => {
   if (!req.session.logado) return res.status(401).send('Não autorizado.');
-  if (qrCodeString) {
-    res.json({ qr: qrCodeString });
-  } else {
-    res.status(404).send('QR Code não disponível no momento.');
-  }
+  res.json(qrCodeString ? { qr: qrCodeString } : { status: 'waiting' });
 });
 
 app.get('/session-info', async (req, res) => {
@@ -82,13 +80,7 @@ app.get('/session-info', async (req, res) => {
   if (!sock || !sock.user) return res.json({ connected: false });
 
   try {
-    let profilePictureUrl;
-    try {
-      profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image');
-    } catch {
-      profilePictureUrl = 'https://via.placeholder.com/80';
-    }
-
+    const profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image').catch(() => 'https://via.placeholder.com/80');
     res.json({
       connected: true,
       user: {
@@ -102,10 +94,6 @@ app.get('/session-info', async (req, res) => {
     res.status(500).json({ connected: false });
   }
 });
-
-// Controle de última interação por usuário (anti-flood)
-const lastInteraction = new Map();
-const TIMEOUT = 30 * 60 * 1000;
 
 const startSock = async () => {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
@@ -138,7 +126,10 @@ const startSock = async () => {
     if (!msg.message || msg.key.fromMe) return;
 
     const sender = msg.key.remoteJid;
-    const texto = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+    const texto = msg.message?.conversation || 
+                 msg.message?.extendedTextMessage?.text || 
+                 msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId || '';
+    
     if (texto.trim().length < 1) return;
 
     const now = Date.now();
@@ -149,8 +140,33 @@ const startSock = async () => {
       await sock.sendMessage(sender, { text });
     };
 
+    // ===== LÓGICA DE TICKETS ===== //
+    let ticket = Array.from(activeTickets.values()).find(t => t.user === sender);
+    
+    // Se não tem ticket ou ticket expirado
+    if (!ticket || (now - ticket.lastInteraction > TICKET_TIMEOUT)) {
+      if (ticket) activeTickets.delete(ticket.id);
+      
+      const ticketId = generateTicketId();
+      ticket = {
+        id: ticketId,
+        user: sender,
+        createdAt: now,
+        lastInteraction: now
+      };
+      activeTickets.set(ticketId, ticket);
+      
+      await send(`📝 Ticket criado: ${ticketId}`);
+    } else {
+      // Atualiza última interação
+      ticket.lastInteraction = now;
+      activeTickets.set(ticket.id, ticket);
+    }
+    // ============================= //
+
     lastInteraction.set(sender, now);
 
+    // Mensagens originais mantidas intactas
     if (texto === '1') {
       await send("Perfeito! Para que possamos te ajudar da melhor forma com seu problema aéreo, por favor, nos envie as informações que você tem.");
       await send("✈️ Especifique o problema: Foi atraso, cancelamento, overbooking, ou extravio/dano de bagagem?");
@@ -172,7 +188,22 @@ const startSock = async () => {
 
     if (now - lastTime < TIMEOUT) return;
 
-    await send("Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nEscolha uma das opções:\n\n1️⃣ Direito Aéreo\n2️⃣ Direito Imobiliário\n3️⃣ Outros assuntos");
+    await sock.sendMessage(sender, {
+      text: "Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.",
+      footer: "Escolha uma das opções abaixo",
+      title: "Como podemos ajudar você?",
+      buttonText: "Ver opções",
+      sections: [
+        {
+          title: "Áreas de Atuação",
+          rows: [
+            { title: "1️⃣ Direito Aéreo", rowId: "1", description: "Problemas com voos e companhias aéreas" },
+            { title: "2️⃣ Direito Imobiliário", rowId: "2", description: "Questões com construtoras e imóveis" },
+            { title: "3️⃣ Outros assuntos", rowId: "3", description: "Outras questões jurídicas" }
+          ]
+        }
+      ]
+    });
   });
 };
 
