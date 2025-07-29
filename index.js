@@ -143,11 +143,14 @@ const startSock = async () => {
       if (statusCode !== DisconnectReason.loggedOut) startSock();
     }
     if (connection === 'open') {
-      qrCodeString = '';
-      sock.sendMessage(sock.user.id, {
-        text: "✅ Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
-      });
-    }
+    qrCodeString = '';
+    setTimeout(() => {
+    sock.sendMessage(sock.user.id, {
+      text: "✅ Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
+    });
+  }, 2000); // espera 2 segundos
+}
+
   });
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
