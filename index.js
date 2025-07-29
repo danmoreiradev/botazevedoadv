@@ -1,17 +1,29 @@
 import './keepAlive.js';
 import express from 'express';
-import * as baileys from '@whiskeysockets/baileys';
-import { Boom } from '@hapi/boom';
+import { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } from '@whiskeysockets/baileys';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import session from 'express-session';
 import bcrypt from 'bcrypt';
+import { Boom } from '@hapi/boom';
 
 // Configurações básicas
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Correção para o aviso do MemoryStore (usando Redis em produção)
+let sessionStore;
+if (process.env.NODE_ENV === 'production') {
+  const RedisStore = (await import('connect-redis')).default;
+  const redis = (await import('redis')).createClient({
+    url: process.env.REDIS_URL
+  });
+  sessionStore = new RedisStore({ client: redis });
+} else {
+  sessionStore = new session.MemoryStore();
+}
 
 // Autenticação
 const SENHA_HASH = '$2b$10$yZxId/b5NiW6gq/Nb8EFbusyvFZpBFBCOrd36rpyDfcPuhbNAynNK';
@@ -21,21 +33,23 @@ let sock;
 let qrCodeString = '';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Sistema de Tickets (NOVO)
+// Sistema de Tickets
 const TICKET_EXPIRATION = 2 * 60 * 60 * 1000; // 2 horas
 const activeTickets = new Map();
 const generateTicketId = () => `TKT${Date.now()}${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
 
-// Controle de flood (existente)
+// Controle de flood
 const TIMEOUT = 30 * 60 * 1000; // 30 minutos
 const lastInteraction = new Map();
 
 // Configuração do Express
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  secret: 'chave-secreta-bot',
+  store: sessionStore,
+  secret: process.env.SESSION_SECRET || 'chave-secreta-bot',
   resave: false,
-  saveUninitialized: false
+  saveUninitialized: false,
+  cookie: { secure: process.env.NODE_ENV === 'production' }
 }));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -63,7 +77,7 @@ const startSock = async () => {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
   const { version } = await fetchLatestBaileysVersion();
 
-  sock = baileys.makeWASocket({
+  sock = makeWASocket({
     version,
     auth: state,
     printQRInTerminal: true,
@@ -75,7 +89,7 @@ const startSock = async () => {
   sock.ev.on('connection.update', (update) => {
     if (update.qr) qrCodeString = update.qr;
     if (update.connection === 'close') {
-      const shouldReconnect = update.lastDisconnect?.error?.output?.statusCode !== baileys.DisconnectReason.loggedOut;
+      const shouldReconnect = update.lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
       if (shouldReconnect) startSock();
     }
     if (update.connection === 'open') {
@@ -99,13 +113,12 @@ const startSock = async () => {
       const now = Date.now();
       const lastTime = lastInteraction.get(sender) || 0;
 
-      // Função auxiliar para enviar mensagens
       const send = async (message) => {
         await delay(1000 + Math.random() * 500);
         await sock.sendMessage(sender, { text: message });
       };
 
-      // Sistema de Tickets (Implementação completa)
+      // Sistema de Tickets
       let userTicket = Array.from(activeTickets.values()).find(t => t.user === sender);
       const isNewInteraction = !userTicket || (now - userTicket.lastInteraction > TICKET_EXPIRATION);
 
@@ -129,7 +142,7 @@ const startSock = async () => {
 
       lastInteraction.set(sender, now);
 
-      // Respostas existentes (mantidas intactas)
+      // Respostas existentes
       if (text === '1') {
         await send("Perfeito! Para que possamos te ajudar da melhor forma com seu problema aéreo, por favor, nos envie as informações que você tem.");
         await send("✈️ Especifique o problema: Foi atraso, cancelamento, overbooking, ou extravio/dano de bagagem?");
@@ -149,7 +162,6 @@ const startSock = async () => {
         return;
       }
 
-      // Mensagem inicial se for nova interação
       if (now - lastTime >= TIMEOUT) {
         await sock.sendMessage(sender, {
           text: "Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.",
@@ -173,8 +185,8 @@ const startSock = async () => {
 };
 
 // Inicialização
-startSock();
+startSock().catch(err => console.error('Erro ao iniciar o bot:', err));
 app.listen(port, () => console.log(`✅ Bot iniciado na porta ${port}`));
 
 // Keep-alive
-setInterval(() => fetch(`https://botazevedoadv.onrender.com`).catch(() => {}), 600000);
+setInterval(() => fetch(`https://${process.env.RENDER_INSTANCE_ID}.onrender.com`).catch(() => {}), 600000);
