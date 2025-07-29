@@ -24,11 +24,14 @@ let sock;
 let qrCodeString = '';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// ===== NOVAS CONSTANTES ===== //
-const TICKET_TIMEOUT = 2 * 60 * 60 * 1000; // 2 horas em milissegundos
-const activeTickets = new Map();
+// ===== CONSTANTES ADICIONADAS ===== //
+const TIMEOUT = 30 * 60 * 1000; // 30 minutos
+const TICKET_TIMEOUT = 2 * 60 * 60 * 1000; // 2 horas
+const lastInteraction = new Map(); // Controle de flood
+const activeTickets = new Map(); // Controle de tickets
+
 const generateTicketId = () => `TKT${Date.now()}${Math.floor(Math.random() * 1000)}`;
-// ============================ //
+// ================================= //
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));
@@ -143,8 +146,8 @@ const startSock = async () => {
     // ===== LÓGICA DE TICKETS ===== //
     let ticket = Array.from(activeTickets.values()).find(t => t.user === sender);
     
-    // Se não tem ticket ou ticket expirado
-    if (!ticket || (now - ticket.lastInteraction > TICKET_TIMEOUT)) {
+    // Verifica se precisa criar novo ticket
+    if (!ticket || (now - (ticket?.lastInteraction || 0) > TICKET_TIMEOUT) {
       if (ticket) activeTickets.delete(ticket.id);
       
       const ticketId = generateTicketId();
@@ -158,7 +161,7 @@ const startSock = async () => {
       
       await send(`📝 Ticket criado: ${ticketId}`);
     } else {
-      // Atualiza última interação
+      // Atualiza última interação do ticket existente
       ticket.lastInteraction = now;
       activeTickets.set(ticket.id, ticket);
     }
