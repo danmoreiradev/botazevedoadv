@@ -107,7 +107,7 @@ const lastInteraction = new Map();
 const TIMEOUT = 30 * 60 * 1000;
 
 // Controle de tickets
-const tickets = new Map(); // Map<sender, { ticketId: string, lastActivity: number }>
+const tickets = new Map();
 const TICKET_TIMEOUT = 2 * 60 * 60 * 1000;
 
 const generateTicketId = () => {
@@ -143,14 +143,13 @@ const startSock = async () => {
       if (statusCode !== DisconnectReason.loggedOut) startSock();
     }
     if (connection === 'open') {
-    qrCodeString = '';
-    setTimeout(() => {
-    sock.sendMessage(sock.user.id, {
-      text: "✅ Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
-    });
-  }, 2000); // espera 2 segundos
-}
-
+      qrCodeString = '';
+      setTimeout(() => {
+        sock.sendMessage(sock.user.id, {
+          text: "✅ Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
+        });
+      }, 2000);
+    }
   });
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
@@ -160,8 +159,9 @@ const startSock = async () => {
     const sender = msg.key.remoteJid;
     const texto = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
     const buttonId = msg.message?.buttonsResponseMessage?.selectedButtonId || null;
+    const listId = msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId || null;
 
-    if (texto.trim().length < 1 && !buttonId) return;
+    if (texto.trim().length < 1 && !buttonId && !listId) return;
 
     const now = Date.now();
     lastInteraction.set(sender, now);
@@ -171,7 +171,6 @@ const startSock = async () => {
       await sock.sendMessage(sender, { text });
     };
 
-    // Verificação e criação de ticket
     let ticket = tickets.get(sender);
     if (!ticket || (now - ticket.lastActivity > TICKET_TIMEOUT)) {
       ticket = {
@@ -180,39 +179,42 @@ const startSock = async () => {
       };
       tickets.set(sender, ticket);
 
-  await sock.sendMessage(sender, {
-  text: `Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nSeu atendimento foi iniciado com o número: *${ticket.ticketId}*`,
-  footer: "Escolha uma das opções abaixo:",
-  templateButtons: [
-    { index: 1, quickReplyButton: { displayText: '1️⃣ Direito Aéreo', id: 'op_1' } },
-    { index: 2, quickReplyButton: { displayText: '2️⃣ Direito Imobiliário', id: 'op_2' } },
-    { index: 3, quickReplyButton: { displayText: '3️⃣ Outros assuntos', id: 'op_3' } }
-  ]
-});
-
-
-
+      await sock.sendMessage(sender, {
+        text: `Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nSeu atendimento foi iniciado com o número: *${ticket.ticketId}*`,
+        footer: "Escolha uma das opções abaixo:",
+        title: "Áreas de atendimento",
+        buttonText: "Clique aqui para escolher",
+        sections: [
+          {
+            title: "Serviços disponíveis",
+            rows: [
+              { title: "1️⃣ Direito Aéreo", rowId: "op_1" },
+              { title: "2️⃣ Direito Imobiliário", rowId: "op_2" },
+              { title: "3️⃣ Outros assuntos", rowId: "op_3" }
+            ]
+          }
+        ]
+      });
       return;
     } else {
       ticket.lastActivity = now;
       tickets.set(sender, ticket);
     }
 
-    // Atendimento com botão ou texto
-    if (buttonId === 'op_1' || texto === '1') {
+    if (buttonId === 'op_1' || listId === 'op_1' || texto === '1') {
       await send("Perfeito! Para que possamos te ajudar da melhor forma com seu problema aéreo, por favor, nos envie as informações que você tem.");
       await send("✈️ Especifique o problema: Foi atraso, cancelamento, overbooking, ou extravio/dano de bagagem?");
       await send("📝 Detalhe os fatos: Conte-nos o que aconteceu, mesmo que seja por áudio!");
       await send("📎 Envie documentos: passagem aérea, comprovantes e quaisquer outras provas.");
       await send("👨‍⚖️ Um especialista entrará em contato em breve para analisar seu caso.");
       return;
-    } else if (buttonId === 'op_2' || texto === '2') {
+    } else if (buttonId === 'op_2' || listId === 'op_2' || texto === '2') {
       await send("Certo! Para que nosso time de Direito Imobiliário possa te auxiliar:");
       await send("📎 Envie o contrato com a construtora.");
       await send("📝 Explique o motivo da sua consulta e qual é o problema.");
       await send("👨‍⚖️ Um especialista analisará sua demanda e entrará em contato.");
       return;
-    } else if (buttonId === 'op_3' || texto === '3') {
+    } else if (buttonId === 'op_3' || listId === 'op_3' || texto === '3') {
       await send("Entendido. Um de nossos atendentes entrará em contato em breve.");
       await send("📝 Por favor, descreva brevemente sobre o que você precisa de ajuda.");
       return;
