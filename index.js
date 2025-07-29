@@ -38,7 +38,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Keep-alive Render
 setInterval(() => {
   fetch(`https://botazevedoadv.onrender.com`).catch(() => {});
-}, 1000 * 60 * 10); // a cada 10 minutos
+}, 1000 * 60 * 10);
 
 // Login e proteção de rota
 app.get('/login', (req, res) => {
@@ -49,7 +49,6 @@ app.use(express.json());
 
 app.post('/login', async (req, res) => {
   const senha = req.body.senha;
-
   const match = await bcrypt.compare(senha, SENHA_HASH);
   if (match) {
     req.session.logado = true;
@@ -103,9 +102,27 @@ app.get('/session-info', async (req, res) => {
   }
 });
 
-// Controle de última interação por usuário (anti-flood)
+// Controle de última interação
 const lastInteraction = new Map();
 const TIMEOUT = 30 * 60 * 1000;
+
+// Controle de tickets
+const tickets = new Map(); // Map<sender, { ticketId: string, lastActivity: number }>
+const TICKET_TIMEOUT = 2 * 60 * 60 * 1000;
+
+const generateTicketId = () => {
+  return 'Ticket#' + Math.random().toString(36).substr(2, 6).toUpperCase();
+};
+
+// Limpeza de tickets inativos
+setInterval(() => {
+  const now = Date.now();
+  for (const [sender, ticket] of tickets.entries()) {
+    if (now - ticket.lastActivity > TICKET_TIMEOUT) {
+      tickets.delete(sender);
+    }
+  }
+}, 1000 * 60 * 10);
 
 const startSock = async () => {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
@@ -139,40 +156,62 @@ const startSock = async () => {
 
     const sender = msg.key.remoteJid;
     const texto = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-    if (texto.trim().length < 1) return;
+    const buttonId = msg.message?.buttonsResponseMessage?.selectedButtonId || null;
+
+    if (texto.trim().length < 1 && !buttonId) return;
 
     const now = Date.now();
-    const lastTime = lastInteraction.get(sender) || 0;
+    lastInteraction.set(sender, now);
 
     const send = async (text) => {
       await delay(1200 + Math.random() * 1000);
       await sock.sendMessage(sender, { text });
     };
 
-    lastInteraction.set(sender, now);
+    // Verificação e criação de ticket
+    let ticket = tickets.get(sender);
+    if (!ticket || (now - ticket.lastActivity > TICKET_TIMEOUT)) {
+      ticket = {
+        ticketId: generateTicketId(),
+        lastActivity: now
+      };
+      tickets.set(sender, ticket);
 
-    if (texto === '1') {
+      // Envia boas-vindas com botões
+      await sock.sendMessage(sender, {
+        text: `Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nSeu atendimento foi iniciado com o número: *${ticket.ticketId}*`,
+        buttons: [
+          { buttonId: 'op_1', buttonText: { displayText: '1️⃣ Direito Aéreo' }, type: 1 },
+          { buttonId: 'op_2', buttonText: { displayText: '2️⃣ Direito Imobiliário' }, type: 1 },
+          { buttonId: 'op_3', buttonText: { displayText: '3️⃣ Outros assuntos' }, type: 1 }
+        ],
+        headerType: 1
+      });
+      return;
+    } else {
+      ticket.lastActivity = now;
+      tickets.set(sender, ticket);
+    }
+
+    // Atendimento com botão ou texto
+    if (buttonId === 'op_1' || texto === '1') {
       await send("Perfeito! Para que possamos te ajudar da melhor forma com seu problema aéreo, por favor, nos envie as informações que você tem.");
       await send("✈️ Especifique o problema: Foi atraso, cancelamento, overbooking, ou extravio/dano de bagagem?");
       await send("📝 Detalhe os fatos: Conte-nos o que aconteceu, mesmo que seja por áudio!");
       await send("📎 Envie documentos: passagem aérea, comprovantes e quaisquer outras provas.");
       await send("👨‍⚖️ Um especialista entrará em contato em breve para analisar seu caso.");
       return;
-    } else if (texto === '2') {
+    } else if (buttonId === 'op_2' || texto === '2') {
       await send("Certo! Para que nosso time de Direito Imobiliário possa te auxiliar:");
       await send("📎 Envie o contrato com a construtora.");
       await send("📝 Explique o motivo da sua consulta e qual é o problema.");
       await send("👨‍⚖️ Um especialista analisará sua demanda e entrará em contato.");
       return;
-    } else if (texto === '3') {
+    } else if (buttonId === 'op_3' || texto === '3') {
       await send("Entendido. Um de nossos atendentes entrará em contato em breve.");
       await send("📝 Por favor, descreva brevemente sobre o que você precisa de ajuda.");
       return;
     }
-
-    if (now - lastTime < TIMEOUT) return;
-
-    await send("Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nEscolha uma das opções:\n\n1️⃣ Direito Aéreo\n2️⃣ Direito Imobiliário\n3️⃣ Outros assuntos");
   });
 };
 
