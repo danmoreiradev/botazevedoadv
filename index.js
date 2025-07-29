@@ -16,11 +16,11 @@ const port = process.env.PORT || 3000;
 // Correção para o aviso do MemoryStore (usando Redis em produção)
 let sessionStore;
 if (process.env.NODE_ENV === 'production') {
-  const RedisStore = (await import('connect-redis')).default;
-  const redis = (await import('redis')).createClient({
-    url: process.env.REDIS_URL
-  });
-  sessionStore = new RedisStore({ client: redis });
+  const Redis = (await import('ioredis')).default;
+  const RedisStoreFactory = (await import('connect-redis')).default;
+  const RedisClient = new Redis(process.env.REDIS_URL);
+sessionStore = new RedisStoreFactory({ client: RedisClient });
+
 } else {
   sessionStore = new session.MemoryStore();
 }
