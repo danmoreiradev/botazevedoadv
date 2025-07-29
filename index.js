@@ -6,24 +6,11 @@ import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import session from 'express-session';
 import bcrypt from 'bcrypt';
-import { Boom } from '@hapi/boom';
 
 // Configurações básicas
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3000;
-
-// Correção para o aviso do MemoryStore (usando Redis em produção)
-let sessionStore;
-if (process.env.NODE_ENV === 'production') {
-  const Redis = (await import('ioredis')).default;
-  const RedisStoreFactory = (await import('connect-redis')).default;
-  const RedisClient = new Redis(process.env.REDIS_URL);
-sessionStore = new RedisStoreFactory({ client: RedisClient });
-
-} else {
-  sessionStore = new session.MemoryStore();
-}
 
 // Autenticação
 const SENHA_HASH = '$2b$10$yZxId/b5NiW6gq/Nb8EFbusyvFZpBFBCOrd36rpyDfcPuhbNAynNK';
@@ -42,10 +29,9 @@ const generateTicketId = () => `TKT${Date.now()}${Math.floor(Math.random() * 100
 const TIMEOUT = 30 * 60 * 1000; // 30 minutos
 const lastInteraction = new Map();
 
-// Configuração do Express
+// Configuração do Express (versão simplificada sem Redis)
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  store: sessionStore,
   secret: process.env.SESSION_SECRET || 'chave-secreta-bot',
   resave: false,
   saveUninitialized: false,
@@ -188,5 +174,5 @@ const startSock = async () => {
 startSock().catch(err => console.error('Erro ao iniciar o bot:', err));
 app.listen(port, () => console.log(`✅ Bot iniciado na porta ${port}`));
 
-// Keep-alive
-setInterval(() => fetch(`https://${process.env.RENDER_INSTANCE_ID}.onrender.com`).catch(() => {}), 600000);
+// Keep-alive simplificado
+setInterval(() => fetch(`https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost'}:${port}`).catch(() => {}), 600000);
