@@ -177,18 +177,16 @@ const startSock = async () => {
       };
       tickets.set(sender, ticket);
 
-      // Envia boas-vindas com botões
-      await sock.sendMessage(sender, {
-      buttonsMessage: {
-        text: `Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nSeu atendimento foi iniciado com o número: *${ticket.ticketId}*`,
-        footer: "Escolha uma das opções abaixo:",
-        buttons: [
-          { buttonId: 'op_1', buttonText: { displayText: '1️⃣ Direito Aéreo' }, type: 1 },
-          { buttonId: 'op_2', buttonText: { displayText: '2️⃣ Direito Imobiliário' }, type: 1 },
-          { buttonId: 'op_3', buttonText: { displayText: '3️⃣ Outros assuntos' }, type: 1 }
-        ]
-      }
-    });
+     await sock.sendMessage(sender, {
+  text: `Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nSeu atendimento foi iniciado com o número: *${ticket.ticketId}*\n\nEscolha uma das opções abaixo:`,
+  buttons: [
+    { buttonId: 'op_1', buttonText: { displayText: '1️⃣ Direito Aéreo' }, type: 1 },
+    { buttonId: 'op_2', buttonText: { displayText: '2️⃣ Direito Imobiliário' }, type: 1 },
+    { buttonId: 'op_3', buttonText: { displayText: '3️⃣ Outros assuntos' }, type: 1 }
+  ],
+  headerType: 1
+});
+
 
       return;
     } else {
