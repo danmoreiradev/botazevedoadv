@@ -114,6 +114,7 @@ const generateTicketId = () => {
   return 'Ticket#' + Math.random().toString(36).substr(2, 6).toUpperCase();
 };
 
+// Limpeza de tickets antigos
 setInterval(() => {
   const now = Date.now();
   for (const [sender, ticket] of tickets.entries()) {
@@ -157,7 +158,6 @@ const startSock = async () => {
 
     const sender = msg.key.remoteJid;
     const texto = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-
     if (texto.trim().length < 1) return;
 
     const now = Date.now();
@@ -169,22 +169,30 @@ const startSock = async () => {
     };
 
     let ticket = tickets.get(sender);
-    if (!ticket || (now - ticket.lastActivity > TICKET_TIMEOUT)) {
+
+    // Verifica se existe ticket ativo
+    const isActive = ticket && (now - ticket.lastActivity <= TICKET_TIMEOUT);
+
+    if (!ticket || !isActive) {
+      // Cria novo ticket
       ticket = {
         ticketId: generateTicketId(),
         lastActivity: now
       };
       tickets.set(sender, ticket);
 
+      // Envia menu inicial apenas se não houver chat ativo
       await sock.sendMessage(sender, {
         text: `Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nSeu atendimento foi iniciado com o número: *${ticket.ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Aéreo\n2️⃣ Direito Imobiliário\n3️⃣ Outros assuntos`
       });
       return;
     } else {
+      // Atualiza a última atividade do ticket
       ticket.lastActivity = now;
       tickets.set(sender, ticket);
     }
 
+    // Processa respostas às opções, mas não reinicia fluxo se a pessoa mandar outra coisa
     if (texto === '1') {
       await send("Perfeito! Para que possamos te ajudar da melhor forma com seu problema aéreo, por favor, nos envie as informações que você tem.");
       await send("✈️ Especifique o problema: Foi atraso, cancelamento, overbooking, ou extravio/dano de bagagem?");
@@ -203,6 +211,8 @@ const startSock = async () => {
       await send("📝 Por favor, descreva brevemente sobre o que você precisa de ajuda.");
       return;
     }
+
+    // Qualquer outra mensagem apenas atualiza lastActivity, sem reiniciar fluxo
   });
 };
 
