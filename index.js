@@ -146,7 +146,7 @@ const startSock = async () => {
       qrCodeString = '';
       setTimeout(() => {
         sock.sendMessage(sock.user.id, {
-          text: "✅ Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
+          text: "✅Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
         });
       }, 2000);
     }
