@@ -212,7 +212,6 @@ const startSock = async () => {
       return;
     }
 
-    // Qualquer outra mensagem apenas atualiza lastActivity, sem reiniciar fluxo
   });
 };
 
