@@ -24,7 +24,6 @@ let sock;
 let qrCodeString = '';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
   secret: 'chave-secreta-bot',
