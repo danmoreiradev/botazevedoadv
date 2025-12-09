@@ -35,7 +35,7 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Keep-alive Render
+// Keep-alive Rende
 setInterval(() => {
   fetch(`https://botazevedoadv.onrender.com`).catch(() => {});
 }, 1000 * 60 * 10);
