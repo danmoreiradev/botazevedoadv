@@ -34,12 +34,12 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Keep-alive Rende
+// Keep-alive Render
 setInterval(() => {
   fetch(`https://botazevedoadv.onrender.com`).catch(() => {});
 }, 1000 * 60 * 10);
 
-// Login e proteção de rota
+// Login
 app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
@@ -57,9 +57,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => {
-  res.redirect('/qr');
-});
+app.get('/', (req, res) => res.redirect('/qr'));
 
 app.get('/qr', (req, res) => {
   if (!req.session.logado) return res.redirect('/login');
@@ -68,11 +66,8 @@ app.get('/qr', (req, res) => {
 
 app.get('/get-qr', (req, res) => {
   if (!req.session.logado) return res.status(401).send('Não autorizado.');
-  if (qrCodeString) {
-    res.json({ qr: qrCodeString });
-  } else {
-    res.status(404).send('QR Code não disponível no momento.');
-  }
+  if (qrCodeString) res.json({ qr: qrCodeString });
+  else res.status(404).send('QR Code não disponível.');
 });
 
 app.get('/session-info', async (req, res) => {
@@ -95,25 +90,19 @@ app.get('/session-info', async (req, res) => {
         profilePictureUrl
       }
     });
-  } catch (err) {
-    console.error('Erro ao obter info da sessão:', err);
+  } catch {
     res.status(500).json({ connected: false });
   }
 });
 
-// Controle de última interação
-const lastInteraction = new Map();
-const TIMEOUT = 30 * 60 * 1000;
-
-// Controle de tickets
+// Tickets
 const tickets = new Map();
 const TICKET_TIMEOUT = 2 * 60 * 60 * 1000;
 
-const generateTicketId = () => {
-  return 'Ticket#' + Math.random().toString(36).substr(2, 6).toUpperCase();
-};
+const generateTicketId = () =>
+  'Ticket#' + Math.random().toString(36).substr(2, 6).toUpperCase();
 
-// Limpeza de tickets antigos
+// Limpa tickets antigos
 setInterval(() => {
   const now = Date.now();
   for (const [sender, ticket] of tickets.entries()) {
@@ -130,7 +119,7 @@ const startSock = async () => {
   sock = makeWASocket({
     version,
     auth: state,
-    getMessage: async () => ({ conversation: "Mensagem recuperada" })
+    getMessage: async () => ({ conversation: 'Mensagem recuperada' })
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -145,7 +134,7 @@ const startSock = async () => {
       qrCodeString = '';
       setTimeout(() => {
         sock.sendMessage(sock.user.id, {
-          text: "✅Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
+          text: '✅ Bot conectado com sucesso!'
         });
       }, 2000);
     }
@@ -156,64 +145,126 @@ const startSock = async () => {
     if (!msg.message || msg.key.fromMe) return;
 
     const sender = msg.key.remoteJid;
-    const texto = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-    if (texto.trim().length < 1) return;
-
+    const texto = msg.message.conversation || msg.message?.extendedTextMessage?.text || '';
     const now = Date.now();
-    lastInteraction.set(sender, now);
+
+    let ticket = tickets.get(sender);
+
+    if (!ticket || now - ticket.lastActivity > TICKET_TIMEOUT) {
+      ticket = { ticketId: generateTicketId(), lastActivity: now };
+      tickets.set(sender, ticket);
+
+      await sock.sendMessage(sender, {
+        text:
+`Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados.*
+
+📌 Seu atendimento foi iniciado com o número: *${ticket.ticketId}*
+
+Digite o número da opção desejada:
+
+1️⃣ Direito Digital (desbloqueio de contas)
+2️⃣ Direito Cível e Contratual
+3️⃣ Direito do Consumidor
+4️⃣ Outros Assuntos`
+      });
+      return;
+    }
+
+    ticket.lastActivity = now;
 
     const send = async (text) => {
       await delay(1200 + Math.random() * 1000);
       await sock.sendMessage(sender, { text });
     };
 
-    let ticket = tickets.get(sender);
-
-    // Verifica se existe ticket ativo
-    const isActive = ticket && (now - ticket.lastActivity <= TICKET_TIMEOUT);
-
-    if (!ticket || !isActive) {
-      // Cria novo ticket
-      ticket = {
-        ticketId: generateTicketId(),
-        lastActivity: now
-      };
-      tickets.set(sender, ticket);
-
-      // Envia menu inicial apenas se não houver chat ativo
-      await sock.sendMessage(sender, {
-        text: `Olá! 👋 Seja bem-vindo(a) ao Azevedo - Advogados Associados.\n\nSeu atendimento foi iniciado com o número: *${ticket.ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Aéreo\n2️⃣ Direito Imobiliário\n3️⃣ Outros assuntos`
-      });
-      return;
-    } else {
-      // Atualiza a última atividade do ticket
-      ticket.lastActivity = now;
-      tickets.set(sender, ticket);
-    }
-
-    // Processa respostas às opções, mas não reinicia fluxo se a pessoa mandar outra coisa
     if (texto === '1') {
-      await send("Perfeito! Para que possamos te ajudar da melhor forma com seu problema aéreo, por favor, nos envie as informações que você tem.");
-      await send("✈️ Especifique o problema: Foi atraso, cancelamento, overbooking, ou extravio/dano de bagagem?");
-      await send("📝 Detalhe os fatos: Conte-nos o que aconteceu, mesmo que seja por áudio!");
-      await send("📎 Envie documentos: passagem aérea, comprovantes e quaisquer outras provas.");
-      await send("👨‍⚖️ Um especialista entrará em contato em breve para analisar seu caso.");
-      return;
-    } else if (texto === '2') {
-      await send("Certo! Para que nosso time de Direito Imobiliário possa te auxiliar:");
-      await send("📎 Envie o contrato com a construtora.");
-      await send("📝 Explique o motivo da sua consulta e qual é o problema.");
-      await send("👨‍⚖️ Um especialista analisará sua demanda e entrará em contato.");
-      return;
-    } else if (texto === '3') {
-      await send("Entendido. Um de nossos atendentes entrará em contato em breve.");
-      await send("📝 Por favor, descreva brevemente sobre o que você precisa de ajuda.");
-      return;
+      await send(
+`✳️ *Direito Digital – Desbloqueio de Contas*
+
+Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
+
+Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
+
+📲 *Qual a plataforma?*
+Instagram, Facebook, WhatsApp, Mercado Livre, Uber, etc.
+
+❓ *O que aconteceu?*
+A conta foi hackeada, banida por violação de termos ou você perdeu o acesso de outra forma?
+Descreva os fatos de maneira fundamentada.
+
+📸 *Prints são fundamentais!*
+Envie capturas da mensagem de erro ou do aviso de suspensão.
+
+👨‍⚖️ Um especialista em Direito Digital analisará seu caso e entrará em contato em breve.`
+      );
     }
 
+    if (texto === '2') {
+      await send(
+`✳️ *Direito Cível e Contratual*
+
+Perfeito. Para direcionarmos você ao especialista em contratos e questões cíveis, precisamos entender o cenário:
+
+📄 *Tipo de demanda*
+Análise ou elaboração de contrato, cobrança, problema imobiliário ou responsabilidade civil?
+
+📝 *Resumo do caso*
+Explique brevemente a situação (texto ou áudio).
+
+📎 *Documentação*
+Se houver contrato, notificação ou documento assinado, envie o arquivo ou foto.
+
+⏳ Aguarde um momento, nossa equipe jurídica já foi notificada e falará com você em instantes.`
+      );
+    }
+
+    if (texto === '3') {
+      await send(
+`✳️ *Direito do Consumidor*
+
+Compreendido! Vamos ajudar você a garantir seus direitos.
+
+🛒 *Qual o problema?*
+Cobrança indevida, negativação, produto com defeito, serviço não entregue ou problema com bancos, telefonia ou planos de saúde?
+
+💰 *Houve prejuízo financeiro?*
+Informe o valor aproximado.
+
+📂 *Provas*
+Envie notas fiscais, protocolos, e-mails ou prints de conversas.
+
+👨‍⚖️ Um advogado especialista entrará em contato para orientar os próximos passos.`
+      );
+    }
+
+    if (texto === '4') {
+      await send(
+`✳️ *Outros Assuntos*
+
+Sem problemas! Mesmo que seu caso não se encaixe nas opções anteriores, queremos te ouvir.
+
+📝 Descreva brevemente o assunto ou dúvida.
+🎤 Se preferir, envie um áudio com mais detalhes.
+
+📨 Sua mensagem será encaminhada para triagem, e o profissional adequado entrará em contato o mais rápido possível.`
+      );
+    }
+
+    await send(
+`✅ *Obrigado pelas informações!*
+
+Elas já foram enviadas ao nosso sistema.
+
+⏱️ *Tempo estimado de resposta:*  
+15 a 30 minutos, dentro do horário comercial.
+
+Se precisar adicionar algo mais, pode enviar agora.`
+    );
   });
 };
 
 startSock();
 
-app.listen(port, () => console.log("✅ Servidor iniciado na porta " + port));
+app.listen(port, () =>
+  console.log(`✅ Servidor iniciado na porta ${port}`)
+);
