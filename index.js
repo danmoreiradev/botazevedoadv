@@ -298,17 +298,16 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
       ticket.aguardandoOpcao = false;
       return; // Não envia obrigado ainda
     }
-
-    // 🔹 Se usuário responder após instruções, envia obrigado
-    if (!ticket.aguardandoOpcao && ticket.lastResponseTime !== now) {
-      ticket.lastResponseTime = now;
-      await send(
+// 🔹 Se usuário respondeu após instruções, envia obrigado apenas 1 vez
+if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
+  ticket.obrigadoEnviado = true;
+  await send(
 `✅ Obrigado pelas informações! Elas já foram enviadas ao nosso sistema.
 
 ⏱️ Tempo estimado de resposta: de 15 a 30 minutos dentro do horário comercial.
 Se precisar adicionar algo mais, pode enviar agora.`
-      );
-    }
+  );
+ }
 
   });
 };
