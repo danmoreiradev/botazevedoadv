@@ -69,6 +69,34 @@ app.get('/get-qr', (req, res) => {
   else res.status(404).send('QR Code não disponível no momento.');
 });
 
+// Endpoint para retornar informações da sessão do WhatsApp
+app.get('/session-info', async (req, res) => {
+  if (!req.session.logado) return res.status(401).send('Não autorizado.');
+  if (!sock || !sock.user) return res.json({ connected: false });
+
+  try {
+    let profilePictureUrl;
+    try {
+      profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image');
+    } catch {
+      profilePictureUrl = 'https://via.placeholder.com/80';
+    }
+
+    res.json({
+      connected: true,
+      user: {
+        id: sock.user.id,             // Número do WhatsApp
+        name: sock.user.name || '',   // Nome do contato (se disponível)
+        profilePictureUrl             // URL da foto do perfil
+      }
+    });
+  } catch (err) {
+    console.error('Erro ao obter info da sessão:', err);
+    res.status(500).json({ connected: false });
+  }
+});
+
+
 // CONTROLE DE SESSÃO DO BOT
 const tickets = new Map();
 const lastMenuSent = new Map();
