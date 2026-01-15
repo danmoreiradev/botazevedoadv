@@ -1,8 +1,6 @@
 import './keepAlive.js';
 import express from 'express';
 import * as baileys from '@whiskeysockets/baileys';
-import { Boom } from '@hapi/boom';
-import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
@@ -37,7 +35,7 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Keep-alive Render
+// Keep Alive Render
 setInterval(() => {
   fetch('https://botazevedoadv.onrender.com').catch(() => {});
 }, 1000 * 60 * 10);
@@ -49,13 +47,8 @@ app.get('/login', (req, res) => {
 });
 
 app.post('/login', async (req, res) => {
-  const match = await bcrypt.compare(req.body.senha, SENHA_HASH);
-  if (match) {
-    req.session.logado = true;
-    res.json({ success: true });
-  } else {
-    res.json({ success: false });
-  }
+  const ok = await bcrypt.compare(req.body.senha, SENHA_HASH);
+  res.json({ success: ok });
 });
 
 app.get('/', (req, res) => res.redirect('/qr'));
@@ -67,8 +60,7 @@ app.get('/qr', (req, res) => {
 
 app.get('/get-qr', (req, res) => {
   if (!req.session.logado) return res.status(401).send('Não autorizado.');
-  if (qrCodeString) res.json({ qr: qrCodeString });
-  else res.status(404).send('QR indisponível.');
+  qrCodeString ? res.json({ qr: qrCodeString }) : res.status(404).send('QR indisponível.');
 });
 
 /* ================= BOT ================= */
@@ -76,8 +68,8 @@ app.get('/get-qr', (req, res) => {
 const tickets = new Map();
 const lastMenuSent = new Map();
 
-const INACTIVITY_TIMEOUT = 60 * 60 * 1000; // 1 HORA
-const MENU_COOLDOWN = 24 * 60 * 60 * 1000; // 24 HORAS
+const INACTIVITY_TIMEOUT = 60 * 60 * 1000; // 1 hora
+const MENU_COOLDOWN = 24 * 60 * 60 * 1000; // 24 horas
 
 const generateTicketId = () =>
   'Ticket#' + Math.random().toString(36).substr(2, 6).toUpperCase();
@@ -91,12 +83,20 @@ const startSock = async () => {
 
   sock.ev.on('connection.update', ({ connection, qr, lastDisconnect }) => {
     if (qr) qrCodeString = qr;
+
+    if (connection === 'open') {
+      qrCodeString = '';
+      setTimeout(() => {
+        sock.sendMessage(sock.user.id, {
+          text: '✅ Conectado com sucesso ao bot do Azevedo e Juvencio - Sociedade de Advogados! ⚖️'
+        });
+      }, 2000);
+    }
+
     if (
       connection === 'close' &&
       lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
-    ) {
-      startSock();
-    }
+    ) startSock();
   });
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
@@ -104,37 +104,35 @@ const startSock = async () => {
     if (!msg.message || msg.key.fromMe) return;
 
     const sender = msg.key.remoteJid;
-    const texto =
-      msg.message?.conversation ||
-      msg.message?.extendedTextMessage?.text ||
-      '';
-
+    const texto = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
     if (!texto.trim()) return;
 
     const now = Date.now();
     const nome = msg.pushName || '';
     const saudacao = nome ? `Olá, ${nome}` : 'Olá';
 
-    const send = async text => {
+    const send = async txt => {
       await delay(1200 + Math.random() * 800);
-      await sock.sendMessage(sender, { text });
+      await sock.sendMessage(sender, { text: txt });
     };
 
     let ticket = tickets.get(sender);
 
-    // 🔴 Inatividade de 1 hora
+    // Inatividade
     if (ticket && now - ticket.lastActivity > INACTIVITY_TIMEOUT) {
       tickets.delete(sender);
       ticket = null;
     }
 
-    // 🟢 Novo atendimento (menu só após 24h)
+    // Novo atendimento
     if (!ticket) {
       if (now - (lastMenuSent.get(sender) || 0) < MENU_COOLDOWN) return;
 
       ticket = {
         id: generateTicketId(),
-        lastActivity: now
+        lastActivity: now,
+        aguardandoOpcao: true,
+        aguardandoDados: false
       };
 
       tickets.set(sender, ticket);
@@ -161,7 +159,6 @@ Digite o número da opção desejada:
     ticket.lastActivity = now;
 
     const respostas = {
-
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
 Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
@@ -169,7 +166,7 @@ Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
 
 📌 Qual a plataforma? (Instagram, Facebook, WhatsApp, Mercado Livre, Uber, etc.)
 
-📌 O que aconteceu? A conta foi hackeada, banida por "violação de termos" ou você perdeu o acesso de outra forma? Detalhe os fatos de maneira fundamentada.
+📌 O que aconteceu? A conta foi hackeada, banida por 'violação de termos' ou você perdeu o acesso de outra forma? Detalhe os fatos de maneira fundamentada.
 
 📸 Prints são fundamentais: Envie documentos, como capturas de tela da mensagem de erro ou do aviso de suspensão que aparece para você.
 
@@ -261,23 +258,24 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
     };
 
     if (ticket.aguardandoOpcao && respostas[texto]) {
-  await send(respostas[texto]);
+      await send(respostas[texto]);
+      ticket.aguardandoOpcao = false;
+      ticket.aguardandoDados = true;
+      return;
+    }
 
-  ticket.aguardandoOpcao = false;
+    if (ticket.aguardandoDados) {
+      ticket.aguardandoDados = false;
 
-  await send(
+      await send(
 `✅ Obrigado pelas informações! Elas já foram enviadas ao nosso sistema.
 
 ⏱️ Tempo estimado de resposta: de 15 a 30 minutos dentro do horário comercial.
 Se precisar adicionar algo mais, pode enviar agora.`
-  );
-}
-
+      );
+    }
   });
 };
 
 startSock();
-
-app.listen(port, () =>
-  console.log('✅ Servidor iniciado na porta ' + port)
-);
+app.listen(port, () => console.log('✅ Servidor iniciado na porta ' + port));
