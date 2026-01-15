@@ -260,15 +260,19 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-    if (respostas[texto]) {
-      await send(respostas[texto]);
-      await send(
+    if (ticket.aguardandoOpcao && respostas[texto]) {
+  await send(respostas[texto]);
+
+  ticket.aguardandoOpcao = false;
+
+  await send(
 `✅ Obrigado pelas informações! Elas já foram enviadas ao nosso sistema.
 
 ⏱️ Tempo estimado de resposta: de 15 a 30 minutos dentro do horário comercial.
 Se precisar adicionar algo mais, pode enviar agora.`
-      );
-    }
+  );
+}
+
   });
 };
 
