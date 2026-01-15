@@ -86,19 +86,25 @@ const startSock = async () => {
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', ({ connection, qr, lastDisconnect }) => {
-    if (qr) qrCodeString = qr;
-    if (connection === 'close') {
-      if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) startSock();
-    }
-    if (connection === 'open') {
-      qrCodeString = '';
-      setTimeout(() => {
-        sock.sendMessage(sock.user.id, {
-          text: "✅Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
-        });
-      }, 2000);
-    }
-  });
+  if (qr) {
+    qrCodeString = qr; // ✅ mantém o QR
+  }
+
+  if (connection === 'close') {
+    const statusCode = lastDisconnect?.error?.output?.statusCode;
+    if (statusCode !== DisconnectReason.loggedOut) startSock();
+  }
+
+  if (connection === 'open') {
+    // Limpa o QR Code apenas depois de alguns segundos da conexão aberta
+    setTimeout(() => {
+      qrCodeString = ''; 
+      sock.sendMessage(sock.user.id, {
+        text: "✅Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
+      });
+    }, 2000);
+  }
+});
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
