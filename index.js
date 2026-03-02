@@ -97,7 +97,7 @@ app.get('/session-info', async (req, res) => {
 });
 
 
-// CONTROLE DE SESSÃO DO BOT
+//CONTROLE DE SESSÃO DO BOT
 const tickets = new Map();
 
 const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000; // 7 dias
