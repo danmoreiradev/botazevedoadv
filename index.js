@@ -1,4 +1,4 @@
-há algum erro? import './keepAlive.js';
+import './keepAlive.js';
 import express from 'express';
 import * as baileys from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
