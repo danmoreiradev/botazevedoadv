@@ -99,10 +99,8 @@ app.get('/session-info', async (req, res) => {
 
 // CONTROLE DE SESSÃO DO BOT
 const tickets = new Map();
-const lastMenuSent = new Map();
 
-const INACTIVITY_TIMEOUT = 60 * 60 * 1000; // 1h
-const MENU_COOLDOWN = 24 * 60 * 60 * 1000; // 24h
+const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000; // 7 dias
 
 const generateTicketId = () => 'Ticket#' + Math.random().toString(36).substr(2, 6).toUpperCase();
 
@@ -161,7 +159,6 @@ const startSock = async () => {
 
     // Novo atendimento (menu a cada 24h)
     if (!ticket) {
-      if (now - (lastMenuSent.get(sender) || 0) < MENU_COOLDOWN) return;
 
       ticket = {
         id: generateTicketId(),
@@ -170,7 +167,6 @@ const startSock = async () => {
       };
 
       tickets.set(sender, ticket);
-      lastMenuSent.set(sender, now);
 
       await send(
 `${saudacao}! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️
@@ -300,15 +296,29 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
     }
 // 🔹 Se usuário respondeu após instruções, envia obrigado apenas 1 vez
 if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
+
+  const textoLimpo = texto.trim();
+
+  const MIN_DETALHE = 30;
+
+  if (textoLimpo.length < MIN_DETALHE) {
+    await send(
+`⚠️ Para que possamos analisar corretamente, precisamos de mais detalhes.
+
+Por favor, descreva melhor a situação com pelo menos ${MIN_DETALHE} caracteres.`
+    );
+    return;
+  }
+
   ticket.obrigadoEnviado = true;
+
   await send(
 `✅ Obrigado pelas informações! Elas já foram enviadas ao nosso sistema.
 
 ⏱️ Tempo estimado de resposta: de 15 a 30 minutos dentro do horário comercial.
 Se precisar adicionar algo mais, pode enviar agora.`
   );
- }
-
+}
   });
 };
 
