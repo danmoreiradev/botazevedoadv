@@ -97,7 +97,7 @@ app.get('/session-info', async (req, res) => {
 });
 
 
-//CONTROLE DE SESSÃO DO BOT
+// CONTROLE DE SESSÃO DO BOT
 const tickets = new Map();
 
 const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000; // 7 dias
@@ -188,7 +188,7 @@ Digite o número da opção desejada:
 
     ticket.lastActivity = now;
 
-    //Textos completos para cada opção
+    // Textos completos para cada opção
     const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
@@ -288,13 +288,13 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-    //  Envia texto da opção selecionada
+    // 🔹 Envia texto da opção selecionada
     if (ticket.aguardandoOpcao && respostas[texto]) {
       await send(respostas[texto]);
       ticket.aguardandoOpcao = false;
       return; // Não envia obrigado ainda
     }
-// Se usuário respondeu após instruções, envia obrigado apenas 1 vez
+// 🔹 Se usuário respondeu após instruções, envia obrigado apenas 1 vez
 if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
 
   const textoLimpo = texto.trim();
