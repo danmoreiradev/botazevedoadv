@@ -188,7 +188,7 @@ Digite o número da opção desejada:
 
     ticket.lastActivity = now;
 
-    // Textos completos para cada opção
+    //Textos completos para cada opção
     const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
