@@ -294,7 +294,7 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
       ticket.aguardandoOpcao = false;
       return; // Não envia obrigado ainda
     }
-// 🔹 Se usuário respondeu após instruções, envia obrigado apenas 1 vez
+// Se usuário respondeu após instruções, envia obrigado apenas 1 vez
 if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
 
   const textoLimpo = texto.trim();
