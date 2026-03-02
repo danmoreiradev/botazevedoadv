@@ -288,7 +288,7 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-    // 🔹 Envia texto da opção selecionada
+    // Envia texto da opção selecionada
     if (ticket.aguardandoOpcao && respostas[texto]) {
       await send(respostas[texto]);
       ticket.aguardandoOpcao = false;
