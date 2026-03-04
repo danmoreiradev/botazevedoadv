@@ -1,4 +1,4 @@
-há algum erro? import './keepAlive.js';
+import './keepAlive.js';
 import express from 'express';
 import * as baileys from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
@@ -8,11 +8,25 @@ import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import session from 'express-session';
 import bcrypt from 'bcrypt';
+import { SessionModel, connectDB } from "./mongoSession.js";
+import { makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
 
-const makeWASocket = baileys.makeWASocket;
-const useMultiFileAuthState = baileys.useMultiFileAuthState;
-const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
-const DisconnectReason = baileys.DisconnectReason;
+// 🔧 Corrige Binary do Mongo para Buffer real
+function fixBinary(obj) {
+  if (!obj) return obj;
+
+  if (obj?._bsontype === 'Binary' && obj.buffer) return Buffer.from(obj.buffer);
+
+  if (obj?.type === 'Buffer' && Array.isArray(obj.data)) return Buffer.from(obj.data);
+
+  if (Array.isArray(obj)) return obj.map(fixBinary);
+
+  if (typeof obj === 'object') {
+    for (const key in obj) obj[key] = fixBinary(obj[key]);
+  }
+
+  return obj;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -69,7 +83,6 @@ app.get('/get-qr', (req, res) => {
   else res.status(404).send('QR Code não disponível no momento.');
 });
 
-// Endpoint para retornar informações da sessão do WhatsApp
 app.get('/session-info', async (req, res) => {
   if (!req.session.logado) return res.status(401).send('Não autorizado.');
   if (!sock || !sock.user) return res.json({ connected: false });
@@ -85,9 +98,9 @@ app.get('/session-info', async (req, res) => {
     res.json({
       connected: true,
       user: {
-        id: sock.user.id,             // Número do WhatsApp
-        name: sock.user.name || '',   // Nome do contato (se disponível)
-        profilePictureUrl             // URL da foto do perfil
+        id: sock.user.id,
+        name: sock.user.name || '',
+        profilePictureUrl
       }
     });
   } catch (err) {
@@ -96,76 +109,150 @@ app.get('/session-info', async (req, res) => {
   }
 });
 
-
 // CONTROLE DE SESSÃO DO BOT
 const tickets = new Map();
-
 const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000; // 7 dias
+const generateTicketId = () => 'Ticket#' + Math.random().toString(36).slice(2, 8).toUpperCase();
 
-const generateTicketId = () => 'Ticket#' + Math.random().toString(36).substr(2, 6).toUpperCase();
-
+// ==========================
+// 🔑 FUNÇÃO PRINCIPAL: START SOCK
+// ==========================
 const startSock = async () => {
-  const { state, saveCreds } = await useMultiFileAuthState('auth');
-  const { version } = await fetchLatestBaileysVersion();
+  const sessionId = "default";
 
-  sock = makeWASocket({ version, auth: state });
-  sock.ev.on('creds.update', saveCreds);
+  // 🔁 Carrega sessão do Mongo
+  let sessionData = await SessionModel.findById(sessionId);
+  let authState;
 
-  sock.ev.on('connection.update', ({ connection, qr, lastDisconnect }) => {
-  if (qr) {
-    qrCodeString = qr; // ✅ mantém o QR
+  if (sessionData?.value) {
+    console.log("🔁 Restaurando sessão Mongo...");
+    const value = fixBinary(sessionData.value);
+
+    authState = {
+      creds: value.creds,
+      keys: makeCacheableSignalKeyStore(value.keys, console) // 👈 Corrige store.get
+    };
+  } else {
+    console.log("🆕 Criando nova sessão...");
+    authState = {
+      creds: baileys.initAuthCreds(),
+      keys: makeCacheableSignalKeyStore({}, console)
+    };
   }
 
-  if (connection === 'close') {
-    const statusCode = lastDisconnect?.error?.output?.statusCode;
-    if (statusCode !== DisconnectReason.loggedOut) startSock();
-  }
+  const { version } = await baileys.fetchLatestBaileysVersion();
 
-  if (connection === 'open') {
-    // Limpa o QR Code apenas depois de alguns segundos da conexão aberta
-    setTimeout(() => {
-      qrCodeString = ''; 
-      sock.sendMessage(sock.user.id, {
-        text: "✅Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
-      });
-    }, 2000);
-  }
-});
+  sock = baileys.makeWASocket({
+    version,
+    printQRInTerminal: false,
+    auth: authState
+  });
 
+  // 💾 Salva sessão no Mongo
+  sock.ev.on('creds.update', async () => {
+    console.log("💾 Salvando sessão real no Mongo...");
+    await SessionModel.findByIdAndUpdate(
+      sessionId,
+      { value: { creds: sock.authState.creds, keys: sock.authState.keys } },
+      { upsert: true }
+    );
+  });
+
+  // 🌐 Eventos de conexão
+  sock.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
+    if (qr) qrCodeString = qr;
+
+    if (connection === "open") console.log("✅ Conectado com sucesso");
+
+    if (connection === "close") {
+      const reason = lastDisconnect?.error?.output?.statusCode;
+      if (reason === baileys.DisconnectReason.connectionReplaced) {
+        console.log("❌ Sessão substituída. Limpando sessão...");
+        await SessionModel.findByIdAndDelete(sessionId);
+      } else {
+        console.log("❌ Conexão fechada, tentando reconectar...");
+        setTimeout(() => startSock(), 5000);
+      }
+    }
+  });
+
+  // ================================
+  // 📨 Mensagens recebidas
+  // ================================
   sock.ev.on('messages.upsert', async ({ messages }) => {
+    if (!messages?.length) return;
     const msg = messages[0];
-    if (!msg.message || msg.key.fromMe) return;
+    if (!msg.message) return;
 
     const sender = msg.key.remoteJid;
-    const texto = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-    if (!texto.trim()) return;
+    if (!sender || !sender.endsWith('@s.whatsapp.net')) return;
 
     const now = Date.now();
+    let ticket = tickets.get(sender);
+
+    // ================================
+    // 🟢 1️⃣ DETECTA HUMANO
+    // ================================
+    if (msg.key.fromMe) {
+      const ticketAtual = tickets.get(sender);
+      if (ticketAtual && ticketAtual.executionId) return;
+
+      console.log(`🤝 HUMANO assumiu o atendimento de ${sender}`);
+      tickets.set(sender, {
+        ...(ticketAtual || {}),
+        atendimentoHumano: true,
+        bloqueadoAte: Date.now() + INACTIVITY_TIMEOUT,
+        lastActivity: Date.now(),
+        executionId: null
+      });
+      return;
+    }
+
+    // 🚫 2️⃣ SE ESTÁ BLOQUEADO
+    if (ticket?.atendimentoHumano && ticket.bloqueadoAte > now) return;
+
+    const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+    if (!texto.trim()) return;
+
     const nome = msg.pushName || '';
     const saudacao = nome ? `Olá, ${nome}` : 'Olá';
 
     const send = async (text) => {
-      await delay(1200 + Math.random() * 800);
+      let currentTicket = tickets.get(sender);
+      if (!currentTicket || currentTicket.atendimentoHumano) return;
+
+      const execId = currentTicket.executionId;
+      await delay(1500);
+
+      currentTicket = tickets.get(sender);
+      if (!currentTicket || currentTicket.atendimentoHumano || currentTicket.executionId !== execId) return;
+
+      await sock.sendPresenceUpdate('composing', sender);
+      await delay(800);
+
+      currentTicket = tickets.get(sender);
+      if (!currentTicket || currentTicket.atendimentoHumano || currentTicket.executionId !== execId) return;
+
       await sock.sendMessage(sender, { text });
     };
 
-    let ticket = tickets.get(sender);
-
-    // ⏱️ Inatividade de 1 hora
+    // ⏱️ EXPIRAÇÃO DE 7 DIAS
     if (ticket && now - ticket.lastActivity > INACTIVITY_TIMEOUT) {
       tickets.delete(sender);
       ticket = null;
     }
 
-    // Novo atendimento (menu a cada 24h)
+    // 🆕 NOVO TICKET
     if (!ticket) {
-
       ticket = {
         id: generateTicketId(),
         lastActivity: now,
-        aguardandoOpcao: true
+        aguardandoOpcao: true,
+        obrigadoEnviado: false,
+        atendimentoHumano: false,
+        bloqueadoAte: null,
+        executionId: Date.now()
       };
-
       tickets.set(sender, ticket);
 
       await send(
@@ -187,6 +274,10 @@ Digite o número da opção desejada:
     }
 
     ticket.lastActivity = now;
+
+    // 🔥 invalida fluxos anteriores
+    ticket.executionId = Date.now();
+    tickets.set(sender, ticket);
 
     // Textos completos para cada opção
     const respostas = {
@@ -288,13 +379,13 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-    // 🔹 Envia texto da opção selecionada
     if (ticket.aguardandoOpcao && respostas[texto]) {
-      await send(respostas[texto]);
-      ticket.aguardandoOpcao = false;
-      return; // Não envia obrigado ainda
-    }
-// 🔹 Se usuário respondeu após instruções, envia obrigado apenas 1 vez
+    await send(respostas[texto]);
+    ticket.aguardandoOpcao = false;
+    tickets.set(sender, ticket); // 🔥 garante persistência
+    return;
+  }
+// Se usuário respondeu após instruções, envia obrigado apenas 1 vez
 if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
 
   const textoLimpo = texto.trim();
@@ -322,6 +413,9 @@ Se precisar adicionar algo mais, pode enviar agora.`
   });
 };
 
+// ==========================
+// 🔌 INICIALIZAÇÃO
+// ==========================
+await connectDB(process.env.MONGO_URI);
 startSock();
-
 app.listen(port, () => console.log('✅ Servidor iniciado na porta ' + port));
