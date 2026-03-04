@@ -10,6 +10,29 @@ import session from 'express-session';
 import bcrypt from 'bcrypt';
 import { SessionModel, connectDB } from "./mongoSession.js";
 
+// 🔧 Corrige Binary do Mongo para Buffer real
+function fixBinary(obj) {
+  if (!obj) return obj;
+
+  // Se for BSON Binary
+  if (obj?._bsontype === 'Binary' && obj.buffer) {
+    return Buffer.from(obj.buffer);
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(fixBinary);
+  }
+
+  if (typeof obj === 'object') {
+    for (const key in obj) {
+      obj[key] = fixBinary(obj[key]);
+    }
+  }
+
+  return obj;
+}
+// 🔐 SERIALIZAÇÃO PARA MONGODB (corrige Buffer -> Binary)
+
 const makeWASocket = baileys.makeWASocket;
 const useMultiFileAuthState = baileys.useMultiFileAuthState;
 const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
@@ -105,59 +128,68 @@ const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000; // 7 dias
 
 const generateTicketId = () => 'Ticket#' + Math.random().toString(36).slice(2, 8).toUpperCase();
 
-const startSock = async () => {
+import { makeCacheableSignalKeyStore } from '@whiskeysockets/baileys'
 
-  await connectDB(process.env.MONGO_URI);
+const startSock = async () => {
 
   const sessionId = "default";
 
-  const { state, saveCreds } = await useMultiFileAuthState("auth_info");
+  // 🔥 carrega direto do mongo puro
+  let session = await SessionModel.findById(sessionId);
 
-  const existing = await SessionModel.findById(sessionId);
+  let authState;
 
-  if (existing?.value?.creds) {
-    state.creds = existing.value.creds;
-  }
+  if (session?.value) {
+  console.log("🔁 Restaurando sessão Mongo...");
+  authState = fixBinary(session.value);
+} else {
+  console.log("🆕 Criando nova sessão...");
+  authState = {
+    creds: baileys.initAuthCreds(),
+    keys: {}
+  };
+}
 
   const { version } = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
     version,
-    auth: state,
-    printQRInTerminal: false
+    printQRInTerminal: false,
+    auth: {
+      creds: authState.creds,
+      keys: makeCacheableSignalKeyStore(authState.keys, console)
+    }
   });
 
-  sock.ev.on("creds.update", async () => {
-    await saveCreds();
+  sock.ev.on('creds.update', async () => {
+    console.log("💾 Salvando sessão real no Mongo...");
+
+    const dataToSave = {
+      creds: sock.authState.creds,
+      keys: sock.authState.keys
+    };
 
     await SessionModel.findByIdAndUpdate(
       sessionId,
-      { value: { creds: state.creds } },
+      { value: dataToSave },
       { upsert: true }
     );
   });
 
-  sock.ev.on("connection.update", ({ connection, qr, lastDisconnect }) => {
+  sock.ev.on("connection.update", ({ connection, qr }) => {
 
     if (qr) {
+      console.log("📱 QR recebido");
       qrCodeString = qr;
     }
 
-    if (connection === "close") {
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-
-      if (statusCode !== DisconnectReason.loggedOut) {
-        startSock();
-      }
+    if (connection === "open") {
+      console.log("✅ Conectado com sucesso");
     }
 
-    if (connection === "open") {
-      setTimeout(() => {
-        qrCodeString = "";
-        sock.sendMessage(sock.user.id, {
-          text: "✅ Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
-        });
-      }, 2000);
+    if (connection === "close") {
+      console.log("❌ Conexão fechada, reiniciando...");
+      setTimeout(() => startSock(), 5000);
     }
   });
 
@@ -428,6 +460,7 @@ Se precisar adicionar algo mais, pode enviar agora.`
   });
 };
 
+await connectDB(process.env.MONGO_URI);
 startSock();
 
 app.listen(port, () => console.log('✅ Servidor iniciado na porta ' + port));
