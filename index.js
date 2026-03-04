@@ -150,36 +150,46 @@ const generateTicketId = () => 'Ticket#' + Math.random().toString(36).slice(2, 8
 import { makeCacheableSignalKeyStore } from '@whiskeysockets/baileys'
 
 const startSock = async () => {
-
   const sessionId = "default";
 
-  // 🔥 carrega direto do mongo puro
+  // 🔥 OPCIONAL: apagar sessão antiga para evitar store corrompido
+  // Use apenas uma vez, ou quando quiser resetar a sessão
+  // await SessionModel.findByIdAndDelete(sessionId);
+
+  // 🔁 Carrega sessão do Mongo
   let session = await SessionModel.findById(sessionId);
 
   let authState;
 
   if (session?.value) {
-  console.log("🔁 Restaurando sessão Mongo...");
-  authState = fixBinary(session.value);
-} else {
-  console.log("🆕 Criando nova sessão...");
-  authState = {
-    creds: baileys.initAuthCreds(),
-    keys: {}
-  };
-}
+    console.log("🔁 Restaurando sessão Mongo...");
+
+    // Corrige buffers vindos do Mongo
+    const fixed = fixBinary(session.value);
+
+    // 🔹 Cria o SignalKeyStore compatível
+    authState = {
+      creds: fixed.creds,
+      keys: makeCacheableSignalKeyStore(fixed.keys || {}, console)
+    };
+  } else {
+    console.log("🆕 Criando nova sessão...");
+
+    authState = {
+      creds: baileys.initAuthCreds(),
+      keys: makeCacheableSignalKeyStore({}, console)
+    };
+  }
 
   const { version } = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
     version,
     printQRInTerminal: false,
-    auth: {
-      creds: authState.creds,
-      keys: makeCacheableSignalKeyStore(authState.keys, console)
-    }
+    auth: authState
   });
 
+  // 💾 Atualiza credenciais no Mongo
   sock.ev.on('creds.update', async () => {
     console.log("💾 Salvando sessão real no Mongo...");
 
@@ -196,7 +206,6 @@ const startSock = async () => {
   });
 
   sock.ev.on("connection.update", ({ connection, qr }) => {
-
     if (qr) {
       console.log("📱 QR recebido");
       qrCodeString = qr;
@@ -212,18 +221,16 @@ const startSock = async () => {
     }
   });
 
- sock.ev.on('messages.upsert', async ({ messages }) => {
-  if (!messages?.length) return;
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    if (!messages?.length) return;
+    const msg = messages[0];
+    if (!msg.message) return;
 
-  const msg = messages[0];
-  if (!msg.message) return;
+    const sender = msg.key.remoteJid;
+    if (!sender || !sender.endsWith('@s.whatsapp.net')) return;
 
-  const sender = msg.key.remoteJid;
-  if (!sender || !sender.endsWith('@s.whatsapp.net')) return;
-
-  const now = Date.now();
-  const agoraSegundos = Math.floor(now / 1000);
-  let ticket = tickets.get(sender);
+    const now = Date.now();
+    let ticket = tickets.get(sender);
 
   // =============================
 // 🟢 1️⃣ DETECTA HUMANO CORRETAMENTE
