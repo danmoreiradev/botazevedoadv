@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import session from 'express-session';
 import bcrypt from 'bcrypt';
-import { SessionModel, connectDB } from "./mongoSession.js";
+import { SessionModel, connectDB, mongoStore } from "./mongoSession.js";
 import { makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
 
 // Corrige Binary do Mongo para Buffer real
@@ -88,14 +88,14 @@ const startSock = async () => {
     console.log("🔁 Restaurando sessão Mongo...");
     const value = fixBinary(sessionData.value);
     authState = {
-      creds: value.creds,
-      keys: makeCacheableSignalKeyStore(value.keys, console)
+      creds: value.creds || baileys.initAuthCreds(),
+      keys: makeCacheableSignalKeyStore(value.keys || {}, console)
     };
   } else {
     console.log("🆕 Criando nova sessão...");
     authState = {
       creds: baileys.initAuthCreds(),
-      keys: makeCacheableSignalKeyStore({}, console)
+      keys: makeCacheableSignalKeyStore(mongoStore, console) // 👈 Aqui usamos MongoStore real
     };
   }
 
