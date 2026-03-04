@@ -1,9 +1,16 @@
 {
+  "name": "bot-baileys-mongo",
+  "version": "1.0.0",
+  "description": "Bot WhatsApp com MongoDB no Render",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
+    "@whiskeysockets/baileys": "^6.6.0",
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
-    "mongodb": "^7.1.0",
-    "pino": "^10.3.1",
+    "mongodb": "^6.3.0",
+    "pino": "^8.16.2",
     "qrcode-terminal": "^0.12.0"
   }
 }
