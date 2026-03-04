@@ -68,19 +68,21 @@ app.post('/login', async (req, res) => {
 // ==========================
 app.get('/', (req, res) => res.redirect('/qr'));
 app.get('/qr', (req, res) => !req.session.logado ? res.redirect('/login') : res.sendFile(path.join(__dirname, 'views', 'qr.html')));
+
+let qrCodeString = '';
 app.get('/get-qr', (req, res) => {
   if (!req.session.logado) return res.status(401).send('Não autorizado.');
   qrCodeString ? res.json({ qr: qrCodeString }) : res.status(404).send('QR Code não disponível no momento.');
 });
+
+let sock;
 app.get('/session-info', async (req, res) => {
   if (!req.session.logado) return res.status(401).send('Não autorizado.');
   if (!sock || !sock.user) return res.json({ connected: false });
 
   let profilePictureUrl = 'https://via.placeholder.com/80';
-  try {
-    profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image');
-  } catch {}
-  
+  try { profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch {}
+
   res.json({ 
     connected: true, 
     user: { id: sock.user.id, name: sock.user.name || '', profilePictureUrl } 
@@ -88,28 +90,26 @@ app.get('/session-info', async (req, res) => {
 });
 
 // ==========================
-// 🔌 CONTROLE DE SESSÃO DO BOT
+// 🔌 CONTROLE DE TICKETS DO BOT
 // ==========================
 const tickets = new Map();
 const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000; // 7 dias
 const generateTicketId = () => 'Ticket#' + Math.random().toString(36).slice(2, 8).toUpperCase();
 
-let sock;
-let qrCodeString = '';
-
 // ==========================
-// 🔑 FUNÇÃO PRINCIPAL: INICIALIZAÇÃO DO WA SOCKET
+// 🔑 INICIALIZAÇÃO DO WA SOCKET
 // ==========================
 const startSock = async () => {
   const sessionId = "default";
 
-  // 🔁 Recupera sessão do MongoDB
+  // Recupera sessão do Mongo
   let sessionData = await SessionModel.findById(sessionId);
   let authState;
 
   if (sessionData?.value) {
     console.log("🔁 Restaurando sessão do MongoDB...");
     const value = fixBinary(sessionData.value);
+
     authState = {
       creds: value.creds || baileys.initAuthCreds(),
       keys: makeCacheableSignalKeyStore(value.keys || {}, console)
@@ -130,35 +130,43 @@ const startSock = async () => {
     auth: authState
   });
 
-  // 💾 Atualiza sessão no MongoDB
+  // Persistência no Mongo
   sock.ev.on('creds.update', async () => {
-    await SessionModel.findByIdAndUpdate(
-      sessionId,
-      { value: { creds: sock.authState.creds, keys: sock.authState.keys } },
-      { upsert: true }
-    );
+    try {
+      await SessionModel.findByIdAndUpdate(
+        sessionId,
+        { value: { creds: sock.authState.creds, keys: sock.authState.keys } },
+        { upsert: true }
+      );
+    } catch (err) {
+      console.error('❌ Erro salvando sessão no Mongo:', err);
+    }
   });
 
-  // 🌐 Eventos de conexão
-  sock.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
+  // Eventos de conexão
+  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
     if (qr) qrCodeString = qr;
-    if (connection === "open") console.log("✅ Conectado ao WhatsApp com sucesso");
-    if (connection === "close") {
+
+    if (connection === 'open') {
+      console.log('✅ Conectado ao WhatsApp com sucesso');
+      qrCodeString = '';
+    }
+
+    if (connection === 'close') {
       const reason = lastDisconnect?.error?.output?.statusCode;
       if (reason === baileys.DisconnectReason.connectionReplaced) {
-        console.log("❌ Sessão substituída. Limpando sessão...");
+        console.log('❌ Sessão substituída. Limpando sessão...');
         await SessionModel.findByIdAndDelete(sessionId);
       } else {
-        console.log("❌ Conexão fechada, tentando reconectar em 5s...");
+        console.log('❌ Conexão fechada, reconectando em 5s...');
         setTimeout(() => startSock(), 5000);
       }
     }
   });
 
-  // 📨 Mensagens recebidas
+  // Mensagens recebidas
   sock.ev.on('messages.upsert', async ({ messages }) => {
     if (!messages?.length) return;
-
     const msg = messages[0];
     if (!msg.message) return;
 
@@ -168,10 +176,8 @@ const startSock = async () => {
     const now = Date.now();
     let ticket = tickets.get(sender);
 
-    // Se mensagem enviada pelo bot, marca atendimento humano
     if (msg.key.fromMe) {
       const ticketAtual = tickets.get(sender);
-      if (ticketAtual && ticketAtual.executionId) return;
       tickets.set(sender, {
         ...(ticketAtual || {}),
         atendimentoHumano: true,
@@ -182,34 +188,11 @@ const startSock = async () => {
       return;
     }
 
-    // Bloqueia se já estiver em atendimento humano
     if (ticket?.atendimentoHumano && ticket.bloqueadoAte > now) return;
 
     const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
     if (!texto.trim()) return;
 
-    // Função para enviar mensagem com delay e controle de execução
-    const send = async (text) => {
-      let currentTicket = tickets.get(sender);
-      if (!currentTicket || currentTicket.atendimentoHumano) return;
-
-      const execId = currentTicket.executionId;
-      await delay(1500);
-      currentTicket = tickets.get(sender);
-      if (!currentTicket || currentTicket.atendimentoHumano || currentTicket.executionId !== execId) return;
-
-      await sock.sendPresenceUpdate('composing', sender);
-      await delay(800);
-      currentTicket = tickets.get(sender);
-      if (!currentTicket || currentTicket.atendimentoHumano || currentTicket.executionId !== execId) return;
-
-      await sock.sendMessage(sender, { text });
-    };
-
-    // Expira tickets inativos
-    if (ticket && now - ticket.lastActivity > INACTIVITY_TIMEOUT) tickets.delete(sender);
-
-    // Cria novo ticket se não existir
     if (!ticket) {
       ticket = {
         id: generateTicketId(),
