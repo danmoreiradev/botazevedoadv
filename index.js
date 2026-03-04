@@ -11,7 +11,7 @@ import bcrypt from 'bcrypt';
 import { SessionModel, connectDB } from "./mongoSession.js";
 import { makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
 
-// 🔧 Corrige Binary do Mongo para Buffer real
+// Corrige Binary do Mongo para Buffer real
 function fixBinary(obj) {
   if (!obj) return obj;
 
