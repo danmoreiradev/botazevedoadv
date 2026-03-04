@@ -1,59 +1,48 @@
-import mongoose from "mongoose";
+// mongoSession.js
+import mongoose from 'mongoose';
+import MongoStore from 'connect-mongo';
+import session from 'express-session';
 
-/**
- * 🔗 Conecta ao MongoDB
- */
+// ==========================
+// 🔗 CONEXÃO COM O MONGO
+// ==========================
 export const connectDB = async (uri) => {
-  if (!uri) throw new Error("❌ MONGO_URI não definida.");
-
+  if (!uri) throw new Error('❌ MONGO_URI não definida.');
   try {
     await mongoose.connect(uri);
-    console.log("✅ Conectado ao MongoDB com sucesso!");
-  } catch (error) {
-    console.error("❌ Erro ao conectar no MongoDB:", error);
-    process.exit(1);
+    console.log('✅ Conectado ao MongoDB com sucesso!');
+  } catch (err) {
+    console.error('❌ Erro ao conectar ao MongoDB:', err);
   }
 };
 
-/**
- * 📄 Schema da Sessão Baileys
- */
-const sessionSchema = new mongoose.Schema(
-  {
-    _id: { type: String, required: true },          // ID da sessão, ex: "default"
-    value: { type: mongoose.Schema.Types.Mixed },   // creds + keys
-  },
-  { versionKey: false, timestamps: true }
-);
+// ==========================
+// 🔑 MODELO DE SESSÃO
+// ==========================
+const SessionSchema = new mongoose.Schema({
+  _id: { type: String }, // usar "default" como id da sessão
+  value: { type: mongoose.Schema.Types.Mixed }
+}, { strict: false });
 
-export const SessionModel = mongoose.model("BaileysAuth", sessionSchema);
+export const SessionModel = mongoose.model('Session', SessionSchema);
 
-/**
- * 🔧 Converte Binary do Mongo para Buffer real
- */
-function fixBinary(obj) {
-  if (!obj) return obj;
-  if (obj?._bsontype === "Binary" && obj.buffer) return Buffer.from(obj.buffer);
-  if (obj?.type === "Buffer" && Array.isArray(obj.data)) return Buffer.from(obj.data);
-  if (Array.isArray(obj)) return obj.map(fixBinary);
-  if (typeof obj === "object") for (const key in obj) obj[key] = fixBinary(obj[key]);
-  return obj;
-}
-
-/**
- * 🗄 Funções utilitárias para salvar e recuperar sessão
- */
-export const saveSession = async (sessionId, auth) => {
-  await SessionModel.findByIdAndUpdate(
-    sessionId,
-    { value: { creds: auth.creds, keys: auth.keys } },
-    { upsert: true }
-  );
+// ==========================
+// 🔌 ARMAZENAMENTO DE SESSÃO PARA EXPRESS
+// ==========================
+export const mongoStore = (uri) => {
+  return MongoStore.create({
+    mongoUrl: uri,
+    collectionName: 'sessions',
+    ttl: 14 * 24 * 60 * 60 // 14 dias
+  });
 };
 
-export const loadSession = async (sessionId) => {
-  const sessionData = await SessionModel.findById(sessionId);
-  if (!sessionData?.value) return null;
-  const value = fixBinary(sessionData.value);
-  return { creds: value.creds, keys: value.keys };
-};
+// ==========================
+// 💡 USO NO EXPRESS
+// ==========================
+// app.use(session({
+//   secret: 'chave-secreta-bot',
+//   resave: false,
+//   saveUninitialized: false,
+//   store: mongoStore(process.env.MONGO_URI)
+// }));
