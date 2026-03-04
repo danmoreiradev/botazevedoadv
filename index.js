@@ -146,29 +146,30 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
   let ticket = tickets.get(sender);
 
   // =============================
-  // 🟢 1️⃣ SE ADVOGADO RESPONDER → BLOQUEIA REAL
-  // =============================
-  if (
-    msg.key.fromMe &&
-    msg.message &&
-    msg.messageTimestamp &&
-    (agoraSegundos - Number(msg.messageTimestamp)) < 10 &&
-    !msg.key.id?.startsWith('BAE5') &&
-    !msg.message?.protocolMessage
-  ) {
+// 🟢 1️⃣ DETECTA HUMANO CORRETAMENTE
+// =============================
+if (msg.key.fromMe) {
 
-    console.log(`🤝 HUMANO assumiu o atendimento de ${sender}`);
+  const ticketAtual = tickets.get(sender);
 
-    tickets.set(sender, {
-      ...(ticket || {}),
-      atendimentoHumano: true,
-      bloqueadoAte: now + INACTIVITY_TIMEOUT,
-      lastActivity: now,
-      executionId: null
-    });
-
-    return; // 🔒 PARA TUDO
+  // 🔥 Se existe executionId ativa, foi o BOT
+  if (ticketAtual && ticketAtual.executionId) {
+    return;
   }
+
+  // 👉 Se não há execution ativa, foi humano
+  console.log(`🤝 HUMANO assumiu o atendimento de ${sender}`);
+
+  tickets.set(sender, {
+    ...(ticketAtual || {}),
+    atendimentoHumano: true,
+    bloqueadoAte: Date.now() + INACTIVITY_TIMEOUT,
+    lastActivity: Date.now(),
+    executionId: null
+  });
+
+  return;
+}
 
   // =============================
   // 🚫 2️⃣ SE ESTÁ BLOQUEADO
