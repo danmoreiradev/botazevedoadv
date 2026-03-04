@@ -145,34 +145,27 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
   let ticket = tickets.get(sender);
 
   // =============================
-  // 🟢 1️⃣ Detecta mensagem enviada pelo próprio número
+  // 🟢 1️⃣ SE ADVOGADO RESPONDER → BLOQUEIA
   // =============================
-  if (msg.key.fromMe) {
+ if (msg.key.fromMe) {
 
-    if (!ticket) return;
+  console.log(`🤝 HUMANO assumiu o atendimento de ${sender}`);
 
-    // Se foi o BOT enviando
-    if (ticket.botEnviando) {
-      ticket.botEnviando = false;
-      tickets.set(sender, ticket);
-      return;
-    }
+  const ticketAtual = tickets.get(sender) || {};
 
-    // Se NÃO foi o bot → foi HUMANO
-    console.log(`🤝 HUMANO assumiu atendimento de ${sender}`);
+  tickets.set(sender, {
+    ...ticketAtual,
+    atendimentoHumano: true,
+    bloqueadoAte: now + INACTIVITY_TIMEOUT,
+    lastActivity: now,
+    executionId: null // 🔥 invalida qualquer envio pendente
+  });
 
-    tickets.set(sender, {
-      ...ticket,
-      atendimentoHumano: true,
-      bloqueadoAte: now + INACTIVITY_TIMEOUT,
-      lastActivity: now
-    });
-
-    return;
-  }
+  return;
+}
 
   // =============================
-  // 🚫 2️⃣ Se estiver em atendimento humano, bloqueia o bot
+  // 🚫 2️⃣ SE JÁ ESTÁ BLOQUEADO
   // =============================
   if (ticket?.atendimentoHumano && ticket.bloqueadoAte > now) {
     console.log(`🚫 Bot bloqueado para ${sender}`);
@@ -190,17 +183,32 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
   const saudacao = nome ? `Olá, ${nome}` : 'Olá';
 
   const send = async (text) => {
+
   let currentTicket = tickets.get(sender);
-  if (!currentTicket || currentTicket.atendimentoHumano) return;
 
-  currentTicket.botEnviando = true;
-  tickets.set(sender, currentTicket);
+  if (!currentTicket) return;
+  if (currentTicket.atendimentoHumano) return;
 
-  await delay(1200 + Math.random() * 800);
+  // 🔥 Guarda o executionId atual
+  const execId = currentTicket.executionId;
 
-  // VERIFICA DE NOVO ANTES DE ENVIAR
+  await delay(1500);
+
   currentTicket = tickets.get(sender);
-  if (!currentTicket || currentTicket.atendimentoHumano) return;
+
+  // 🔥 Se ticket mudou ou humano assumiu, NÃO ENVIA
+  if (!currentTicket) return;
+  if (currentTicket.atendimentoHumano) return;
+  if (currentTicket.executionId !== execId) return;
+
+  await sock.sendPresenceUpdate('composing', sender);
+  await delay(800);
+
+  currentTicket = tickets.get(sender);
+
+  if (!currentTicket) return;
+  if (currentTicket.atendimentoHumano) return;
+  if (currentTicket.executionId !== execId) return;
 
   await sock.sendMessage(sender, { text });
 };
@@ -213,12 +221,15 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
 
   // 🆕 Novo atendimento
   if (!ticket) {
-    ticket = {
-      id: generateTicketId(),
-      lastActivity: now,
-      aguardandoOpcao: true,
-      obrigadoEnviado: false
-    };
+   ticket = {
+    id: generateTicketId(),
+    lastActivity: now,
+    aguardandoOpcao: true,
+    obrigadoEnviado: false,
+    atendimentoHumano: false,
+    bloqueadoAte: null,
+    executionId: Date.now() // 🔥 controle de execução
+  };
 
     tickets.set(sender, ticket);
 
@@ -241,6 +252,10 @@ Digite o número da opção desejada:
     }
 
     ticket.lastActivity = now;
+
+    // 🔥 invalida fluxos anteriores
+    ticket.executionId = Date.now();
+    tickets.set(sender, ticket);
 
     // Textos completos para cada opção
     const respostas = {
