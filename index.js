@@ -146,17 +146,26 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
   // 🔴 Atendimento humano detectado (mensagem enviada por nós)
   if (msg.key.fromMe) {
 
-    ticket = ticket || {};
+  const ticketAtual = tickets.get(sender);
 
-    ticket.atendimentoHumano = true;
-    ticket.bloqueadoAte = now + (7 * 24 * 60 * 60 * 1000); // 7 dias
-    ticket.lastActivity = now;
-
-    tickets.set(sender, ticket);
-
-    console.log(`🤝 Atendimento humano iniciado para ${sender}. Bot bloqueado por 7 dias.`);
+  // Se foi o próprio bot que enviou, ignora
+  if (ticketAtual?.ultimaMensagemBot) {
+    ticketAtual.ultimaMensagemBot = false; // limpa flag
+    tickets.set(sender, ticketAtual);
     return;
   }
+
+  // Se NÃO foi o bot → foi humano
+  ticket = ticket || {};
+  ticket.atendimentoHumano = true;
+  ticket.bloqueadoAte = now + (7 * 24 * 60 * 60 * 1000);
+  ticket.lastActivity = now;
+
+  tickets.set(sender, ticket);
+
+  console.log(`🤝 Atendimento humano iniciado para ${sender}. Bot bloqueado.`);
+  return;
+}
 
   // 🚫 Se estiver bloqueado por atendimento humano
   if (ticket?.atendimentoHumano && ticket.bloqueadoAte > now) {
@@ -182,6 +191,10 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
 
   const currentTicketAfter = tickets.get(sender);
   if (!currentTicketAfter || currentTicketAfter.atendimentoHumano) return;
+
+  // Marca que o bot está enviando
+  currentTicketAfter.ultimaMensagemBot = true;
+  tickets.set(sender, currentTicketAfter);
 
   await sock.sendMessage(sender, { text });
 };
