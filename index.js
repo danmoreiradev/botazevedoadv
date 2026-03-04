@@ -7,20 +7,30 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// 🔹 Configuração do __dirname em ES Module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// 🔹 Conecta MongoDB
+// 🔹 Caminho para salvar a sessão do Baileys
+const SESSION_FILE_PATH = path.join(__dirname, 'baileys_auth_state.json');
+
+// =======================
+// MongoDB
+// =======================
 const connectDB = async () => {
   if (!process.env.MONGO_URI) throw new Error('❌ MONGO_URI não definida.');
   await mongoose.connect(process.env.MONGO_URI);
   console.log('✅ Conectado ao MongoDB com sucesso!');
 };
-await connectDB();
+
+try {
+  await connectDB();
+} catch (err) {
+  console.error('❌ Erro ao conectar no MongoDB:', err);
+  process.exit(1);
+}
 
 // 🔹 Configura session do Express com MongoStore
 app.use(session({
@@ -30,57 +40,67 @@ app.use(session({
   store: MongoStore.create({ mongoUrl: process.env.MONGO_URI })
 }));
 
-// 🔹 Inicializa servidor
+// 🔹 Inicializa servidor Express
 app.listen(PORT, () => {
   console.log(`✅ Servidor iniciado na porta ${PORT}`);
 });
 
-// 🔹 Caminho para salvar a sessão do Baileys
-const SESSION_FILE_PATH = path.join(__dirname, 'baileys_auth_state.json');
+// =======================
+// WhatsApp Baileys
+// =======================
+let sock; // variável global do socket
 
-// 🔹 Import do Baileys adaptado para CommonJS
-import baileysPkg from '@whiskeysockets/baileys';
-const { useSingleFileAuthState, makeWASocket, DisconnectReason } = baileysPkg;
-const { state, saveState } = useSingleFileAuthState(SESSION_FILE_PATH);
-
-// 🔹 Inicializa WhatsApp
 const startWhatsApp = async () => {
-  const sock = makeWASocket({
-    printQRInTerminal: true,
-    auth: state,
-    browser: ['Ubuntu', 'Chrome', '22.04.4']
-  });
+  try {
+    // 🔹 Import dinâmico do Baileys
+    const baileysPkg = await import('@whiskeysockets/baileys');
+    const { useSingleFileAuthState, makeWASocket, DisconnectReason } = baileysPkg;
 
-  // 🔹 Salva sessão sempre que houver mudança
-  sock.ev.on('creds.update', saveState);
+    // 🔹 Carrega ou cria sessão
+    const { state, saveState } = useSingleFileAuthState(SESSION_FILE_PATH);
 
-  // 🔹 Conexão aberta / fechada
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update;
-    if(connection === 'close') {
-      const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-      const shouldReconnect = statusCode !== 401;
-      console.log('❌ Conexão fechada.', lastDisconnect?.error?.message || '');
-      if(shouldReconnect) startWhatsApp(); // reconecta automaticamente
-    } else if(connection === 'open') {
-      console.log('✅ WhatsApp conectado com sucesso!');
-    }
-  });
+    sock = makeWASocket({
+      printQRInTerminal: true,
+      auth: state,
+      browser: ['Ubuntu', 'Chrome', '22.04.4']
+    });
 
-  // 🔹 Evento de mensagens recebidas
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if(type !== 'notify') return;
-    const msg = messages[0];
-    if(!msg.message) return;
+    // 🔹 Salva sessão sempre que houver atualização
+    sock.ev.on('creds.update', saveState);
 
-    const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-    console.log(`Mensagem recebida de ${msg.key.remoteJid}:`, text);
+    // 🔹 Atualização de conexão
+    sock.ev.on('connection.update', (update) => {
+      const { connection, lastDisconnect } = update;
+      if (connection === 'close') {
+        const statusCode = (lastDisconnect?.error?.output?.statusCode) || null;
+        console.log(`❌ Conexão fechada. Código: ${statusCode}. Reconectando...`);
+        // Reconecta se não for erro 401 (sessão inválida)
+        if (statusCode !== 401) startWhatsApp();
+      } else if (connection === 'open') {
+        console.log('✅ WhatsApp conectado com sucesso!');
+      }
+    });
 
-    // Exemplo simples de resposta automática
-    if(text?.toLowerCase() === 'oi') {
-      await sock.sendMessage(msg.key.remoteJid, { text: 'Olá! Bot funcionando ✅' });
-    }
-  });
+    // 🔹 Mensagens recebidas
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      if (type !== 'notify') return;
+      const msg = messages[0];
+      if (!msg.message) return;
+
+      const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+      console.log(`Mensagem recebida de ${msg.key.remoteJid}:`, text);
+
+      // Resposta automática de teste
+      if (text?.toLowerCase() === 'oi') {
+        await sock.sendMessage(msg.key.remoteJid, { text: 'Olá! Bot funcionando ✅' });
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Erro ao iniciar WhatsApp:', err);
+    setTimeout(startWhatsApp, 5000); // tenta reiniciar após 5s
+  }
 };
 
+// 🔹 Inicializa WhatsApp
 startWhatsApp();
