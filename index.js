@@ -10,7 +10,11 @@ import bcrypt from 'bcrypt';
 import { SessionModel, connectDB, mongoStore } from "./mongoSession.js";
 import { makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
 
-// Corrige Binary do Mongo para Buffer real
+// ==========================
+// 🔧 UTILITÁRIOS
+// ==========================
+
+// Converte Binário do Mongo para Buffer real
 function fixBinary(obj) {
   if (!obj) return obj;
   if (obj?._bsontype === 'Binary' && obj.buffer) return Buffer.from(obj.buffer);
@@ -20,14 +24,15 @@ function fixBinary(obj) {
   return obj;
 }
 
+// Delay assíncrono
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// ==========================
+// 🌐 CONFIGURAÇÕES DO SERVIDOR
+// ==========================
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3000;
-
-const SENHA_HASH = '$2b$10$yZxId/b5NiW6gq/Nb8EFbusyvFZpBFBCOrd36rpyDfcPuhbNAynNK';
-let sock;
-let qrCodeString = '';
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -41,12 +46,16 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Keep-alive Render
+// Keep-alive para Render
 setInterval(() => {
   fetch('https://botazevedoadv.onrender.com').catch(() => {});
 }, 1000 * 60 * 10);
 
-// LOGIN
+// ==========================
+// 🔑 AUTENTICAÇÃO
+// ==========================
+const SENHA_HASH = '$2b$10$yZxId/b5NiW6gq/Nb8EFbusyvFZpBFBCOrd36rpyDfcPuhbNAynNK';
+
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'views', 'login.html')));
 app.post('/login', async (req, res) => {
   const match = await bcrypt.compare(req.body.senha, SENHA_HASH);
@@ -54,6 +63,9 @@ app.post('/login', async (req, res) => {
   res.json({ success: match, message: match ? '' : 'Senha incorreta' });
 });
 
+// ==========================
+// 🔗 ROTAS PRINCIPAIS
+// ==========================
 app.get('/', (req, res) => res.redirect('/qr'));
 app.get('/qr', (req, res) => !req.session.logado ? res.redirect('/login') : res.sendFile(path.join(__dirname, 'views', 'qr.html')));
 app.get('/get-qr', (req, res) => {
@@ -65,27 +77,38 @@ app.get('/session-info', async (req, res) => {
   if (!sock || !sock.user) return res.json({ connected: false });
 
   let profilePictureUrl = 'https://via.placeholder.com/80';
-  try { profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch {}
-  res.json({ connected: true, user: { id: sock.user.id, name: sock.user.name || '', profilePictureUrl } });
+  try {
+    profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image');
+  } catch {}
+  
+  res.json({ 
+    connected: true, 
+    user: { id: sock.user.id, name: sock.user.name || '', profilePictureUrl } 
+  });
 });
 
-// CONTROLE DE SESSÃO DO BOT
+// ==========================
+// 🔌 CONTROLE DE SESSÃO DO BOT
+// ==========================
 const tickets = new Map();
 const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000; // 7 dias
 const generateTicketId = () => 'Ticket#' + Math.random().toString(36).slice(2, 8).toUpperCase();
 
+let sock;
+let qrCodeString = '';
+
 // ==========================
-// 🔑 FUNÇÃO PRINCIPAL: START SOCK
+// 🔑 FUNÇÃO PRINCIPAL: INICIALIZAÇÃO DO WA SOCKET
 // ==========================
 const startSock = async () => {
   const sessionId = "default";
 
-  // 🔁 Carrega sessão do Mongo
+  // 🔁 Recupera sessão do MongoDB
   let sessionData = await SessionModel.findById(sessionId);
   let authState;
 
   if (sessionData?.value) {
-    console.log("🔁 Restaurando sessão Mongo...");
+    console.log("🔁 Restaurando sessão do MongoDB...");
     const value = fixBinary(sessionData.value);
     authState = {
       creds: value.creds || baileys.initAuthCreds(),
@@ -95,7 +118,7 @@ const startSock = async () => {
     console.log("🆕 Criando nova sessão...");
     authState = {
       creds: baileys.initAuthCreds(),
-      keys: makeCacheableSignalKeyStore(mongoStore, console) // 👈 Aqui usamos MongoStore real
+      keys: makeCacheableSignalKeyStore(mongoStore, console)
     };
   }
 
@@ -107,7 +130,7 @@ const startSock = async () => {
     auth: authState
   });
 
-  // 💾 Salva sessão no Mongo
+  // 💾 Atualiza sessão no MongoDB
   sock.ev.on('creds.update', async () => {
     await SessionModel.findByIdAndUpdate(
       sessionId,
@@ -126,7 +149,7 @@ const startSock = async () => {
         console.log("❌ Sessão substituída. Limpando sessão...");
         await SessionModel.findByIdAndDelete(sessionId);
       } else {
-        console.log("❌ Conexão fechada, tentando reconectar...");
+        console.log("❌ Conexão fechada, tentando reconectar em 5s...");
         setTimeout(() => startSock(), 5000);
       }
     }
@@ -135,6 +158,7 @@ const startSock = async () => {
   // 📨 Mensagens recebidas
   sock.ev.on('messages.upsert', async ({ messages }) => {
     if (!messages?.length) return;
+
     const msg = messages[0];
     if (!msg.message) return;
 
@@ -144,42 +168,48 @@ const startSock = async () => {
     const now = Date.now();
     let ticket = tickets.get(sender);
 
-    // HUMANO assume atendimento
+    // Se mensagem enviada pelo bot, marca atendimento humano
     if (msg.key.fromMe) {
       const ticketAtual = tickets.get(sender);
       if (ticketAtual && ticketAtual.executionId) return;
       tickets.set(sender, {
         ...(ticketAtual || {}),
         atendimentoHumano: true,
-        bloqueadoAte: Date.now() + INACTIVITY_TIMEOUT,
-        lastActivity: Date.now(),
+        bloqueadoAte: now + INACTIVITY_TIMEOUT,
+        lastActivity: now,
         executionId: null
       });
       return;
     }
 
+    // Bloqueia se já estiver em atendimento humano
     if (ticket?.atendimentoHumano && ticket.bloqueadoAte > now) return;
 
     const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
     if (!texto.trim()) return;
 
+    // Função para enviar mensagem com delay e controle de execução
     const send = async (text) => {
       let currentTicket = tickets.get(sender);
       if (!currentTicket || currentTicket.atendimentoHumano) return;
+
       const execId = currentTicket.executionId;
       await delay(1500);
       currentTicket = tickets.get(sender);
       if (!currentTicket || currentTicket.atendimentoHumano || currentTicket.executionId !== execId) return;
+
       await sock.sendPresenceUpdate('composing', sender);
       await delay(800);
       currentTicket = tickets.get(sender);
       if (!currentTicket || currentTicket.atendimentoHumano || currentTicket.executionId !== execId) return;
+
       await sock.sendMessage(sender, { text });
     };
 
-    // Expira tickets
+    // Expira tickets inativos
     if (ticket && now - ticket.lastActivity > INACTIVITY_TIMEOUT) tickets.delete(sender);
 
+    // Cria novo ticket se não existir
     if (!ticket) {
       ticket = {
         id: generateTicketId(),
@@ -188,14 +218,14 @@ const startSock = async () => {
         obrigadoEnviado: false,
         atendimentoHumano: false,
         bloqueadoAte: null,
-        executionId: Date.now()
+        executionId: now
       };
       tickets.set(sender, ticket);
       return;
     }
 
     ticket.lastActivity = now;
-    ticket.executionId = Date.now();
+    ticket.executionId = now;
     tickets.set(sender, ticket);
   });
 };
@@ -205,4 +235,5 @@ const startSock = async () => {
 // ==========================
 await connectDB(process.env.MONGO_URI);
 startSock();
+
 app.listen(port, () => console.log(`✅ Servidor iniciado na porta ${port}`));
