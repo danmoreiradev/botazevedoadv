@@ -102,7 +102,7 @@ const tickets = new Map();
 
 const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000; // 7 dias
 
-const generateTicketId = () => 'Ticket#' + Math.random().toString(36).substr(2, 6).toUpperCase();
+const generateTicketId = () => 'Ticket#' + Math.random().toString(36).slice(2, 8).toUpperCase();
 
 const startSock = async () => {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
@@ -132,41 +132,76 @@ const startSock = async () => {
   }
 });
 
-  sock.ev.on('messages.upsert', async ({ messages }) => {
-    const msg = messages[0];
-    if (!msg.message || msg.key.fromMe) return;
+sock.ev.on('messages.upsert', async ({ messages }) => {
+  if (!messages || !messages.length) return;
+  const msg = messages[0];
+  if (!msg?.message) return;
 
-    const sender = msg.key.remoteJid;
-    const texto = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-    if (!texto.trim()) return;
+  const sender = msg.key.remoteJid;
+  if (!sender.endsWith('@s.whatsapp.net')) return;
+  const now = Date.now();
 
-    const now = Date.now();
-    const nome = msg.pushName || '';
-    const saudacao = nome ? `Olá, ${nome}` : 'Olá';
+  let ticket = tickets.get(sender);
 
-    const send = async (text) => {
-      await delay(1200 + Math.random() * 800);
-      await sock.sendMessage(sender, { text });
+  // 🔴 Atendimento humano detectado (mensagem enviada por nós)
+  if (msg.key.fromMe) {
+
+    ticket = ticket || {};
+
+    ticket.atendimentoHumano = true;
+    ticket.bloqueadoAte = now + (7 * 24 * 60 * 60 * 1000); // 7 dias
+    ticket.lastActivity = now;
+
+    tickets.set(sender, ticket);
+
+    console.log(`🤝 Atendimento humano iniciado para ${sender}. Bot bloqueado por 7 dias.`);
+    return;
+  }
+
+  // 🚫 Se estiver bloqueado por atendimento humano
+  if (ticket?.atendimentoHumano && ticket.bloqueadoAte > now) {
+    console.log(`🚫 Bot bloqueado para ${sender} até ${new Date(ticket.bloqueadoAte)}`);
+    return;
+  }
+
+  const texto =
+    msg.message?.conversation ||
+    msg.message?.extendedTextMessage?.text ||
+    '';
+
+  if (!texto.trim()) return;
+
+  const nome = msg.pushName || '';
+  const saudacao = nome ? `Olá, ${nome}` : 'Olá';
+
+  const send = async (text) => {
+  const currentTicketBefore = tickets.get(sender);
+  if (!currentTicketBefore || currentTicketBefore.atendimentoHumano) return;
+
+  await delay(1200 + Math.random() * 800);
+
+  const currentTicketAfter = tickets.get(sender);
+  if (!currentTicketAfter || currentTicketAfter.atendimentoHumano) return;
+
+  await sock.sendMessage(sender, { text });
+};
+
+  // ⏱️ Verifica inatividade
+  if (ticket && now - ticket.lastActivity > INACTIVITY_TIMEOUT) {
+    tickets.delete(sender);
+    ticket = null;
+  }
+
+  // 🆕 Novo atendimento
+  if (!ticket) {
+    ticket = {
+      id: generateTicketId(),
+      lastActivity: now,
+      aguardandoOpcao: true,
+      obrigadoEnviado: false
     };
 
-    let ticket = tickets.get(sender);
-
-    // ⏱️ Inatividade de 1 hora
-    if (ticket && now - ticket.lastActivity > INACTIVITY_TIMEOUT) {
-      tickets.delete(sender);
-      ticket = null;
-    }
-
-    // Novo atendimento (menu a cada 24h)
-    if (!ticket) {
-
-      ticket = {
-        id: generateTicketId(),
-        lastActivity: now,
-        aguardandoOpcao: true
-      };
-
-      tickets.set(sender, ticket);
+    tickets.set(sender, ticket);
 
       await send(
 `${saudacao}! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️
