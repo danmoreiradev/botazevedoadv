@@ -14,11 +14,7 @@
     "express": "^4.18.2",
     "express-session": "^1.18.2",
     "ioredis": "^5.6.1",
-<<<<<<< HEAD
     "mongoose": "^9.2.4",
-=======
-    "mongoose": "^8.23.0",
->>>>>>> 41a43d00a411a7b582b157644d185070a2d9f2fa
     "node-fetch": "^3.3.2"
   },
   "keywords": [],
