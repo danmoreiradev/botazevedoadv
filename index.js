@@ -143,27 +143,27 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
 
   let ticket = tickets.get(sender);
 
-  // 🔴 Atendimento humano detectado (mensagem enviada por nós)
-  if (msg.key.fromMe) {
+  //  Qualquer mensagem enviada pelo número conectado
+if (msg.key.fromMe) {
 
-  const ticketAtual = tickets.get(sender);
+  let ticketAtual = tickets.get(sender);
 
-  // Se foi o próprio bot que enviou, ignora
-  if (ticketAtual?.ultimaMensagemBot) {
-    ticketAtual.ultimaMensagemBot = false; // limpa flag
+  // Se foi o bot que acabou de enviar mensagem, apenas limpa a flag
+  if (ticketAtual?.botEnviando) {
+    ticketAtual.botEnviando = false;
     tickets.set(sender, ticketAtual);
     return;
   }
 
-  // Se NÃO foi o bot → foi humano
-  ticket = ticket || {};
-  ticket.atendimentoHumano = true;
-  ticket.bloqueadoAte = now + (7 * 24 * 60 * 60 * 1000);
-  ticket.lastActivity = now;
+  // Foi humano digitando manualmente
+  console.log(`🤝 HUMANO assumiu atendimento de ${sender}`);
 
-  tickets.set(sender, ticket);
+  tickets.set(sender, {
+    atendimentoHumano: true,
+    bloqueadoAte: Date.now() + INACTIVITY_TIMEOUT,
+    lastActivity: Date.now()
+  });
 
-  console.log(`🤝 Atendimento humano iniciado para ${sender}. Bot bloqueado.`);
   return;
 }
 
@@ -184,17 +184,13 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
   const saudacao = nome ? `Olá, ${nome}` : 'Olá';
 
   const send = async (text) => {
-  const currentTicketBefore = tickets.get(sender);
-  if (!currentTicketBefore || currentTicketBefore.atendimentoHumano) return;
+  const currentTicket = tickets.get(sender);
+  if (!currentTicket || currentTicket.atendimentoHumano) return;
+
+  currentTicket.botEnviando = true;
+  tickets.set(sender, currentTicket);
 
   await delay(1200 + Math.random() * 800);
-
-  const currentTicketAfter = tickets.get(sender);
-  if (!currentTicketAfter || currentTicketAfter.atendimentoHumano) return;
-
-  // Marca que o bot está enviando
-  currentTicketAfter.ultimaMensagemBot = true;
-  tickets.set(sender, currentTicketAfter);
 
   await sock.sendMessage(sender, { text });
 };
