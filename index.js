@@ -133,49 +133,55 @@ const startSock = async () => {
 });
 
 sock.ev.on('messages.upsert', async ({ messages }) => {
-  if (!messages || !messages.length) return;
+  if (!messages?.length) return;
+
   const msg = messages[0];
-  if (!msg?.message) return;
+  if (!msg.message) return;
 
   const sender = msg.key.remoteJid;
   if (!sender.endsWith('@s.whatsapp.net')) return;
-  const now = Date.now();
 
+  const now = Date.now();
   let ticket = tickets.get(sender);
 
-  //  Qualquer mensagem enviada pelo número conectado
-if (msg.key.fromMe) {
+  // =============================
+  // 🟢 1️⃣ Detecta mensagem enviada pelo próprio número
+  // =============================
+  if (msg.key.fromMe) {
 
-  let ticketAtual = tickets.get(sender);
+    if (!ticket) return;
 
-  // Se foi o bot que acabou de enviar mensagem, apenas limpa a flag
-  if (ticketAtual?.botEnviando) {
-    ticketAtual.botEnviando = false;
-    tickets.set(sender, ticketAtual);
+    // Se foi o BOT enviando
+    if (ticket.botEnviando) {
+      ticket.botEnviando = false;
+      tickets.set(sender, ticket);
+      return;
+    }
+
+    // Se NÃO foi o bot → foi HUMANO
+    console.log(`🤝 HUMANO assumiu atendimento de ${sender}`);
+
+    tickets.set(sender, {
+      ...ticket,
+      atendimentoHumano: true,
+      bloqueadoAte: now + INACTIVITY_TIMEOUT,
+      lastActivity: now
+    });
+
     return;
   }
 
-  // Foi humano digitando manualmente
-  console.log(`🤝 HUMANO assumiu atendimento de ${sender}`);
-
-  tickets.set(sender, {
-    atendimentoHumano: true,
-    bloqueadoAte: Date.now() + INACTIVITY_TIMEOUT,
-    lastActivity: Date.now()
-  });
-
-  return;
-}
-
-  // 🚫 Se estiver bloqueado por atendimento humano
+  // =============================
+  // 🚫 2️⃣ Se estiver em atendimento humano, bloqueia o bot
+  // =============================
   if (ticket?.atendimentoHumano && ticket.bloqueadoAte > now) {
-    console.log(`🚫 Bot bloqueado para ${sender} até ${new Date(ticket.bloqueadoAte)}`);
+    console.log(`🚫 Bot bloqueado para ${sender}`);
     return;
   }
 
   const texto =
-    msg.message?.conversation ||
-    msg.message?.extendedTextMessage?.text ||
+    msg.message.conversation ||
+    msg.message.extendedTextMessage?.text ||
     '';
 
   if (!texto.trim()) return;
@@ -336,12 +342,12 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-    // 🔹 Envia texto da opção selecionada
     if (ticket.aguardandoOpcao && respostas[texto]) {
-      await send(respostas[texto]);
-      ticket.aguardandoOpcao = false;
-      return; // Não envia obrigado ainda
-    }
+    await send(respostas[texto]);
+    ticket.aguardandoOpcao = false;
+    tickets.set(sender, ticket); // 🔥 garante persistência
+    return;
+  }
 // 🔹 Se usuário respondeu após instruções, envia obrigado apenas 1 vez
 if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
 
