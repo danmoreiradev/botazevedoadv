@@ -3,11 +3,11 @@ import express from 'express';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
 import mongoose from 'mongoose';
-import * as baileys from '@whiskeysockets/baileys';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// 🔹 Configuração do __dirname em ES Module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -38,29 +38,29 @@ app.listen(PORT, () => {
 // 🔹 Caminho para salvar a sessão do Baileys
 const SESSION_FILE_PATH = path.join(__dirname, 'baileys_auth_state.json');
 
-// 🔹 Carrega ou cria nova sessão
-import { useSingleFileAuthState } from '@whiskeysockets/baileys';
+// 🔹 Import do Baileys adaptado para CommonJS
+import baileysPkg from '@whiskeysockets/baileys';
+const { useSingleFileAuthState, makeWASocket, DisconnectReason } = baileysPkg;
 const { state, saveState } = useSingleFileAuthState(SESSION_FILE_PATH);
 
 // 🔹 Inicializa WhatsApp
 const startWhatsApp = async () => {
-  const sock = baileys.makeWASocket({
+  const sock = makeWASocket({
     printQRInTerminal: true,
     auth: state,
-    browser: ['Ubuntu','Chrome','22.04.4']
+    browser: ['Ubuntu', 'Chrome', '22.04.4']
   });
 
   // 🔹 Salva sessão sempre que houver mudança
   sock.ev.on('creds.update', saveState);
 
-  // 🔹 Conexão aberta
+  // 🔹 Conexão aberta / fechada
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect } = update;
-
     if(connection === 'close') {
-      const err = lastDisconnect?.error;
-      const shouldReconnect = !(err && err.output && err.output.statusCode === 401);
-      console.log('❌ Conexão fechada. Reconectando...', err?.message || '');
+      const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+      const shouldReconnect = statusCode !== 401;
+      console.log('❌ Conexão fechada.', lastDisconnect?.error?.message || '');
       if(shouldReconnect) startWhatsApp(); // reconecta automaticamente
     } else if(connection === 'open') {
       console.log('✅ WhatsApp conectado com sucesso!');
@@ -83,5 +83,4 @@ const startWhatsApp = async () => {
   });
 };
 
-// 🔹 Inicia o WhatsApp
 startWhatsApp();
