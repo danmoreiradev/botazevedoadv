@@ -1,16 +1,14 @@
-import { AxiosRequestConfig } from 'axios';
-import { proto } from '../../WAProto';
-import { BaileysEventEmitter, BaileysEventMap, BrowsersMap, ConnectionState, WACallUpdateType, WAVersion } from '../Types';
-import { BinaryNode } from '../WABinary';
-export declare const Browsers: BrowsersMap;
-export declare const getPlatformId: (browser: string) => any;
+import { proto } from '../../WAProto/index.js';
+import type { BaileysEventEmitter, BaileysEventMap, ConnectionState, WACallUpdateType, WAMessageKey, WAVersion } from '../Types/index.js';
+import { type BinaryNode } from '../WABinary/index.js';
 export declare const BufferJSON: {
     replacer: (k: any, value: any) => any;
     reviver: (_: any, value: any) => any;
 };
-export declare const getKeyAuthor: (key: proto.IMessageKey | undefined | null, meId?: string) => string;
+export declare const getKeyAuthor: (key: WAMessageKey | undefined | null, meId?: string) => string;
 export declare const writeRandomPadMax16: (msg: Uint8Array) => Buffer<ArrayBuffer>;
 export declare const unpadRandomMax16: (e: Uint8Array | Buffer) => Uint8Array<ArrayBuffer>;
+export declare const generateParticipantHashV2: (participants: string[]) => string;
 export declare const encodeWAMessage: (message: proto.IMessage) => Buffer<ArrayBuffer>;
 export declare const generateRegistrationId: () => number;
 export declare const encodeBigEndian: (e: number, t?: number) => Uint8Array<ArrayBuffer>;
@@ -38,27 +36,27 @@ export declare const bindWaitForConnectionUpdate: (ev: BaileysEventEmitter) => (
  * utility that fetches latest baileys version from the master branch.
  * Use to ensure your WA connection is always on the latest version
  */
-export declare const fetchLatestBaileysVersion: (options?: AxiosRequestConfig<{}>) => Promise<{
+export declare const fetchLatestBaileysVersion: (options?: RequestInit) => Promise<{
     version: WAVersion;
     isLatest: boolean;
     error?: undefined;
 } | {
     version: WAVersion;
     isLatest: boolean;
-    error: any;
+    error: unknown;
 }>;
 /**
  * A utility that fetches the latest web version of whatsapp.
  * Use to ensure your WA connection is always on the latest version
  */
-export declare const fetchLatestWaWebVersion: (options: AxiosRequestConfig<{}>) => Promise<{
+export declare const fetchLatestWaWebVersion: (options?: RequestInit) => Promise<{
     version: WAVersion;
     isLatest: boolean;
     error?: undefined;
 } | {
     version: WAVersion;
     isLatest: boolean;
-    error: any;
+    error: unknown;
 }>;
 /** unique message tag prefix for MD clients */
 export declare const generateMdTagPrefix: () => string;
@@ -66,7 +64,7 @@ export declare const generateMdTagPrefix: () => string;
  * Given a type of receipt, returns what the new status of the message should be
  * @param type type from receipt
  */
-export declare const getStatusFromReceiptType: (type: string | undefined) => proto.WebMessageInfo.Status;
+export declare const getStatusFromReceiptType: (type: string | undefined) => proto.WebMessageInfo.Status | undefined;
 /**
  * Stream errors generally provide a reason, map that to a baileys DisconnectReason
  * @param reason the string reason given, eg. "conflict"
@@ -81,10 +79,12 @@ export declare const getCodeFromWSError: (error: Error) => number;
  * Is the given platform WA business
  * @param platform AuthenticationCreds.platform
  */
-export declare const isWABusinessPlatform: (platform: string) => platform is "smbi" | "smba";
+export declare const isWABusinessPlatform: (platform: string) => platform is "smba" | "smbi";
 export declare function trimUndefined(obj: {
     [_: string]: any;
 }): {
     [_: string]: any;
 };
 export declare function bytesToCrockford(buffer: Buffer): string;
+export declare function encodeNewsletterMessage(message: proto.IMessage): Uint8Array;
+//# sourceMappingURL=generics.d.ts.map

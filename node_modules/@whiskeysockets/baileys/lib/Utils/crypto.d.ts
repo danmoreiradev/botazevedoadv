@@ -1,15 +1,15 @@
-import { KeyPair } from '../Types';
+import type { KeyPair } from '../Types/index.js';
 /** prefix version byte to the pub keys, required for some curve crypto functions */
 export declare const generateSignalPubKey: (pubKey: Uint8Array | Buffer) => Uint8Array<ArrayBufferLike> | Buffer<ArrayBufferLike>;
 export declare const Curve: {
     generateKeyPair: () => KeyPair;
-    sharedKey: (privateKey: Uint8Array, publicKey: Uint8Array) => Buffer<any>;
-    sign: (privateKey: Uint8Array, buf: Uint8Array) => any;
+    sharedKey: (privateKey: Uint8Array, publicKey: Uint8Array) => Buffer<ArrayBuffer>;
+    sign: (privateKey: Uint8Array, buf: Uint8Array) => Uint8Array<ArrayBufferLike>;
     verify: (pubKey: Uint8Array, message: Uint8Array, signature: Uint8Array) => boolean;
 };
 export declare const signedKeyPair: (identityKeyPair: KeyPair, keyId: number) => {
     keyPair: KeyPair;
-    signature: any;
+    signature: Uint8Array<ArrayBufferLike>;
     keyId: number;
 };
 /**
@@ -38,3 +38,4 @@ export declare function hkdf(buffer: Uint8Array | Buffer, expandedLength: number
     info?: string;
 }): Promise<Buffer>;
 export declare function derivePairingCodeKey(pairingCode: string, salt: Buffer): Promise<Buffer>;
+//# sourceMappingURL=crypto.d.ts.map
