@@ -139,33 +139,39 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
   if (!msg.message) return;
 
   const sender = msg.key.remoteJid;
-  if (!sender.endsWith('@s.whatsapp.net')) return;
+  if (!sender || !sender.endsWith('@s.whatsapp.net')) return;
 
   const now = Date.now();
+  const agoraSegundos = Math.floor(now / 1000);
   let ticket = tickets.get(sender);
 
   // =============================
-  // 🟢 1️⃣ SE ADVOGADO RESPONDER → BLOQUEIA
+  // 🟢 1️⃣ SE ADVOGADO RESPONDER → BLOQUEIA REAL
   // =============================
- if (msg.key.fromMe) {
+  if (
+    msg.key.fromMe &&
+    msg.message &&
+    msg.messageTimestamp &&
+    (agoraSegundos - Number(msg.messageTimestamp)) < 10 &&
+    !msg.key.id?.startsWith('BAE5') &&
+    !msg.message?.protocolMessage
+  ) {
 
-  console.log(`🤝 HUMANO assumiu o atendimento de ${sender}`);
+    console.log(`🤝 HUMANO assumiu o atendimento de ${sender}`);
 
-  const ticketAtual = tickets.get(sender) || {};
+    tickets.set(sender, {
+      ...(ticket || {}),
+      atendimentoHumano: true,
+      bloqueadoAte: now + INACTIVITY_TIMEOUT,
+      lastActivity: now,
+      executionId: null
+    });
 
-  tickets.set(sender, {
-    ...ticketAtual,
-    atendimentoHumano: true,
-    bloqueadoAte: now + INACTIVITY_TIMEOUT,
-    lastActivity: now,
-    executionId: null // 🔥 invalida qualquer envio pendente
-  });
-
-  return;
-}
+    return; // 🔒 PARA TUDO
+  }
 
   // =============================
-  // 🚫 2️⃣ SE JÁ ESTÁ BLOQUEADO
+  // 🚫 2️⃣ SE ESTÁ BLOQUEADO
   // =============================
   if (ticket?.atendimentoHumano && ticket.bloqueadoAte > now) {
     console.log(`🚫 Bot bloqueado para ${sender}`);
@@ -182,54 +188,55 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
   const nome = msg.pushName || '';
   const saudacao = nome ? `Olá, ${nome}` : 'Olá';
 
+  // =============================
+  // 🔐 FUNÇÃO DE ENVIO BLINDADA
+  // =============================
   const send = async (text) => {
+    let currentTicket = tickets.get(sender);
+    if (!currentTicket) return;
+    if (currentTicket.atendimentoHumano) return;
 
-  let currentTicket = tickets.get(sender);
+    const execId = currentTicket.executionId;
 
-  if (!currentTicket) return;
-  if (currentTicket.atendimentoHumano) return;
+    await delay(1500);
 
-  // 🔥 Guarda o executionId atual
-  const execId = currentTicket.executionId;
+    currentTicket = tickets.get(sender);
+    if (!currentTicket) return;
+    if (currentTicket.atendimentoHumano) return;
+    if (currentTicket.executionId !== execId) return;
 
-  await delay(1500);
+    await sock.sendPresenceUpdate('composing', sender);
+    await delay(800);
 
-  currentTicket = tickets.get(sender);
+    currentTicket = tickets.get(sender);
+    if (!currentTicket) return;
+    if (currentTicket.atendimentoHumano) return;
+    if (currentTicket.executionId !== execId) return;
 
-  // 🔥 Se ticket mudou ou humano assumiu, NÃO ENVIA
-  if (!currentTicket) return;
-  if (currentTicket.atendimentoHumano) return;
-  if (currentTicket.executionId !== execId) return;
+    await sock.sendMessage(sender, { text });
+  };
 
-  await sock.sendPresenceUpdate('composing', sender);
-  await delay(800);
-
-  currentTicket = tickets.get(sender);
-
-  if (!currentTicket) return;
-  if (currentTicket.atendimentoHumano) return;
-  if (currentTicket.executionId !== execId) return;
-
-  await sock.sendMessage(sender, { text });
-};
-
-  // ⏱️ Verifica inatividade
+  // =============================
+  // ⏱️ EXPIRAÇÃO DE 7 DIAS
+  // =============================
   if (ticket && now - ticket.lastActivity > INACTIVITY_TIMEOUT) {
     tickets.delete(sender);
     ticket = null;
   }
 
-  // 🆕 Novo atendimento
+  // =============================
+  // 🆕 NOVO TICKET
+  // =============================
   if (!ticket) {
-   ticket = {
-    id: generateTicketId(),
-    lastActivity: now,
-    aguardandoOpcao: true,
-    obrigadoEnviado: false,
-    atendimentoHumano: false,
-    bloqueadoAte: null,
-    executionId: Date.now() // 🔥 controle de execução
-  };
+    ticket = {
+      id: generateTicketId(),
+      lastActivity: now,
+      aguardandoOpcao: true,
+      obrigadoEnviado: false,
+      atendimentoHumano: false,
+      bloqueadoAte: null,
+      executionId: Date.now()
+    };
 
     tickets.set(sender, ticket);
 
