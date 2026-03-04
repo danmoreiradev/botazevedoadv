@@ -184,13 +184,17 @@ if (msg.key.fromMe) {
   const saudacao = nome ? `Olá, ${nome}` : 'Olá';
 
   const send = async (text) => {
-  const currentTicket = tickets.get(sender);
+  let currentTicket = tickets.get(sender);
   if (!currentTicket || currentTicket.atendimentoHumano) return;
 
   currentTicket.botEnviando = true;
   tickets.set(sender, currentTicket);
 
   await delay(1200 + Math.random() * 800);
+
+  // VERIFICA DE NOVO ANTES DE ENVIAR
+  currentTicket = tickets.get(sender);
+  if (!currentTicket || currentTicket.atendimentoHumano) return;
 
   await sock.sendMessage(sender, { text });
 };
