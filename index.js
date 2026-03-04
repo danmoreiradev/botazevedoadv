@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import session from 'express-session';
 import bcrypt from 'bcrypt';
+import { SessionModel, connectDB } from "./mongoSession.js";
 
 const makeWASocket = baileys.makeWASocket;
 const useMultiFileAuthState = baileys.useMultiFileAuthState;
@@ -105,34 +106,62 @@ const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000; // 7 dias
 const generateTicketId = () => 'Ticket#' + Math.random().toString(36).slice(2, 8).toUpperCase();
 
 const startSock = async () => {
-  const { state, saveCreds } = await useMultiFileAuthState('auth');
+
+  await connectDB(process.env.MONGO_URI);
+
+  const sessionId = "default";
+
+  const { state, saveCreds } = await useMultiFileAuthState("auth_info");
+
+  const existing = await SessionModel.findById(sessionId);
+
+  if (existing?.value?.creds) {
+    state.creds = existing.value.creds;
+  }
+
   const { version } = await fetchLatestBaileysVersion();
 
-  sock = makeWASocket({ version, auth: state });
-  sock.ev.on('creds.update', saveCreds);
+  sock = makeWASocket({
+    version,
+    auth: state,
+    printQRInTerminal: false
+  });
 
-  sock.ev.on('connection.update', ({ connection, qr, lastDisconnect }) => {
-  if (qr) {
-    qrCodeString = qr; // ✅ mantém o QR
-  }
+  sock.ev.on("creds.update", async () => {
+    await saveCreds();
 
-  if (connection === 'close') {
-    const statusCode = lastDisconnect?.error?.output?.statusCode;
-    if (statusCode !== DisconnectReason.loggedOut) startSock();
-  }
+    await SessionModel.findByIdAndUpdate(
+      sessionId,
+      { value: { creds: state.creds } },
+      { upsert: true }
+    );
+  });
 
-  if (connection === 'open') {
-    // Limpa o QR Code apenas depois de alguns segundos da conexão aberta
-    setTimeout(() => {
-      qrCodeString = ''; 
-      sock.sendMessage(sock.user.id, {
-        text: "✅Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
-      });
-    }, 2000);
-  }
-});
+  sock.ev.on("connection.update", ({ connection, qr, lastDisconnect }) => {
 
-sock.ev.on('messages.upsert', async ({ messages }) => {
+    if (qr) {
+      qrCodeString = qr;
+    }
+
+    if (connection === "close") {
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+
+      if (statusCode !== DisconnectReason.loggedOut) {
+        startSock();
+      }
+    }
+
+    if (connection === "open") {
+      setTimeout(() => {
+        qrCodeString = "";
+        sock.sendMessage(sock.user.id, {
+          text: "✅ Conectado com sucesso ao bot do Azevedo - Advogados Associados!"
+        });
+      }, 2000);
+    }
+  });
+
+ sock.ev.on('messages.upsert', async ({ messages }) => {
   if (!messages?.length) return;
 
   const msg = messages[0];
@@ -371,7 +400,7 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
     tickets.set(sender, ticket); // 🔥 garante persistência
     return;
   }
-// 🔹 Se usuário respondeu após instruções, envia obrigado apenas 1 vez
+// Se usuário respondeu após instruções, envia obrigado apenas 1 vez
 if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
 
   const textoLimpo = texto.trim();
