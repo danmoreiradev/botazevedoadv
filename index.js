@@ -15,9 +15,28 @@ function fixBinary(obj) {
   if (!obj) return obj;
 
   // Se for BSON Binary
+  function fixBinary(obj) {
+  if (!obj) return obj;
+
+  // Caso seja BSON Binary ou JSON serializado do Buffer
   if (obj?._bsontype === 'Binary' && obj.buffer) {
     return Buffer.from(obj.buffer);
   }
+
+  if (obj?.type === 'Buffer' && Array.isArray(obj.data)) {
+    return Buffer.from(obj.data);
+  }
+
+  if (Array.isArray(obj)) return obj.map(fixBinary);
+
+  if (typeof obj === 'object') {
+    for (const key in obj) {
+      obj[key] = fixBinary(obj[key]);
+    }
+  }
+
+  return obj;
+}
 
   if (Array.isArray(obj)) {
     return obj.map(fixBinary);
