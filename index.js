@@ -7,30 +7,17 @@ import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import session from 'express-session';
 import bcrypt from 'bcrypt';
-import { SessionModel, connectDB, mongoStore } from "./mongoSession.js";
-import { makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
+import { connectDB, SessionModel, saveSession, loadSession } from './mongoSession.js';
 
 // ==========================
 // 🔧 UTILITÁRIOS
 // ==========================
-
-// Converte Binário do Mongo para Buffer real
-function fixBinary(obj) {
-  if (!obj) return obj;
-  if (obj?._bsontype === 'Binary' && obj.buffer) return Buffer.from(obj.buffer);
-  if (obj?.type === 'Buffer' && Array.isArray(obj.data)) return Buffer.from(obj.data);
-  if (Array.isArray(obj)) return obj.map(fixBinary);
-  if (typeof obj === 'object') for (const key in obj) obj[key] = fixBinary(obj[key]);
-  return obj;
-}
-
-// Delay assíncrono
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ==========================
 // 🌐 CONFIGURAÇÕES DO SERVIDOR
 // ==========================
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -46,7 +33,7 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Keep-alive para Render
+// Keep-alive Render
 setInterval(() => {
   fetch('https://botazevedoadv.onrender.com').catch(() => {});
 }, 1000 * 60 * 10);
@@ -67,13 +54,9 @@ app.post('/login', async (req, res) => {
 // 🔗 ROTAS PRINCIPAIS
 // ==========================
 app.get('/', (req, res) => res.redirect('/qr'));
-app.get('/qr', (req, res) => !req.session.logado ? res.redirect('/login') : res.sendFile(path.join(__dirname, 'views', 'qr.html')));
-
 let qrCodeString = '';
-app.get('/get-qr', (req, res) => {
-  if (!req.session.logado) return res.status(401).send('Não autorizado.');
-  qrCodeString ? res.json({ qr: qrCodeString }) : res.status(404).send('QR Code não disponível no momento.');
-});
+app.get('/qr', (req, res) => !req.session.logado ? res.redirect('/login') : res.sendFile(path.join(__dirname, 'views', 'qr.html')));
+app.get('/get-qr', (req, res) => !req.session.logado ? res.status(401).send('Não autorizado.') : qrCodeString ? res.json({ qr: qrCodeString }) : res.status(404).send('QR Code não disponível no momento.'));
 
 let sock;
 app.get('/session-info', async (req, res) => {
@@ -83,88 +66,56 @@ app.get('/session-info', async (req, res) => {
   let profilePictureUrl = 'https://via.placeholder.com/80';
   try { profilePictureUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch {}
 
-  res.json({ 
-    connected: true, 
-    user: { id: sock.user.id, name: sock.user.name || '', profilePictureUrl } 
-  });
+  res.json({ connected: true, user: { id: sock.user.id, name: sock.user.name || '', profilePictureUrl } });
 });
 
 // ==========================
-// 🔌 CONTROLE DE TICKETS DO BOT
+// 🔌 TICKETS
 // ==========================
 const tickets = new Map();
-const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000; // 7 dias
+const INACTIVITY_TIMEOUT = 7 * 24 * 60 * 60 * 1000;
 const generateTicketId = () => 'Ticket#' + Math.random().toString(36).slice(2, 8).toUpperCase();
 
 // ==========================
-// 🔑 INICIALIZAÇÃO DO WA SOCKET
+// 🔑 INICIALIZAÇÃO WA SOCKET
 // ==========================
 const startSock = async () => {
-  const sessionId = "default";
+  const sessionId = 'default';
+  let authState = await loadSession(sessionId);
 
-  // Recupera sessão do Mongo
-  let sessionData = await SessionModel.findById(sessionId);
-  let authState;
-
-  if (sessionData?.value) {
-    console.log("🔁 Restaurando sessão do MongoDB...");
-    const value = fixBinary(sessionData.value);
-
-    authState = {
-      creds: value.creds || baileys.initAuthCreds(),
-      keys: makeCacheableSignalKeyStore(value.keys || {}, console)
-    };
+  if (!authState) {
+    console.log('🆕 Criando nova sessão...');
+    authState = { creds: baileys.initAuthCreds(), keys: {} };
   } else {
-    console.log("🆕 Criando nova sessão...");
-    authState = {
-      creds: baileys.initAuthCreds(),
-      keys: makeCacheableSignalKeyStore(mongoStore, console)
-    };
+    console.log('🔁 Restaurando sessão do MongoDB...');
   }
 
   const { version } = await baileys.fetchLatestBaileysVersion();
-
-  sock = baileys.makeWASocket({
-    version,
-    printQRInTerminal: false,
-    auth: authState
-  });
+  sock = baileys.makeWASocket({ version, printQRInTerminal: false, auth: authState });
 
   // Persistência no Mongo
   sock.ev.on('creds.update', async () => {
-    try {
-      await SessionModel.findByIdAndUpdate(
-        sessionId,
-        { value: { creds: sock.authState.creds, keys: sock.authState.keys } },
-        { upsert: true }
-      );
-    } catch (err) {
-      console.error('❌ Erro salvando sessão no Mongo:', err);
-    }
+    try { await saveSession(sessionId, sock.authState); } 
+    catch (err) { console.error('❌ Erro salvando sessão no Mongo:', err); }
   });
 
-  // Eventos de conexão
-  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+  // Conexão / reconexão
+  sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
     if (qr) qrCodeString = qr;
-
-    if (connection === 'open') {
-      console.log('✅ Conectado ao WhatsApp com sucesso');
-      qrCodeString = '';
-    }
-
+    if (connection === 'open') { console.log('✅ Conectado ao WhatsApp'); qrCodeString = ''; }
     if (connection === 'close') {
       const reason = lastDisconnect?.error?.output?.statusCode;
       if (reason === baileys.DisconnectReason.connectionReplaced) {
         console.log('❌ Sessão substituída. Limpando sessão...');
-        await SessionModel.findByIdAndDelete(sessionId);
+        SessionModel.findByIdAndDelete(sessionId).catch(() => {});
       } else {
-        console.log('❌ Conexão fechada, reconectando em 5s...');
-        setTimeout(() => startSock(), 5000);
+        console.log('❌ Conexão fechada. Reconectando em 5s...');
+        setTimeout(startSock, 5000);
       }
     }
   });
 
-  // Mensagens recebidas
+  // Mensagens
   sock.ev.on('messages.upsert', async ({ messages }) => {
     if (!messages?.length) return;
     const msg = messages[0];
@@ -177,14 +128,7 @@ const startSock = async () => {
     let ticket = tickets.get(sender);
 
     if (msg.key.fromMe) {
-      const ticketAtual = tickets.get(sender);
-      tickets.set(sender, {
-        ...(ticketAtual || {}),
-        atendimentoHumano: true,
-        bloqueadoAte: now + INACTIVITY_TIMEOUT,
-        lastActivity: now,
-        executionId: null
-      });
+      tickets.set(sender, { ...(ticket || {}), atendimentoHumano: true, bloqueadoAte: now + INACTIVITY_TIMEOUT, lastActivity: now, executionId: null });
       return;
     }
 
@@ -194,15 +138,7 @@ const startSock = async () => {
     if (!texto.trim()) return;
 
     if (!ticket) {
-      ticket = {
-        id: generateTicketId(),
-        lastActivity: now,
-        aguardandoOpcao: true,
-        obrigadoEnviado: false,
-        atendimentoHumano: false,
-        bloqueadoAte: null,
-        executionId: now
-      };
+      ticket = { id: generateTicketId(), lastActivity: now, aguardandoOpcao: true, obrigadoEnviado: false, atendimentoHumano: false, bloqueadoAte: null, executionId: now };
       tickets.set(sender, ticket);
       return;
     }

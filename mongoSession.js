@@ -1,11 +1,10 @@
 import mongoose from "mongoose";
-import { makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
 
 /**
  * 🔗 Conecta ao MongoDB
  */
 export const connectDB = async (uri) => {
-  if (!uri) throw new Error("❌ MONGO_URI não definida nas variáveis de ambiente.");
+  if (!uri) throw new Error("❌ MONGO_URI não definida.");
 
   try {
     await mongoose.connect(uri);
@@ -21,8 +20,8 @@ export const connectDB = async (uri) => {
  */
 const sessionSchema = new mongoose.Schema(
   {
-    _id: { type: String, required: true },
-    value: { type: mongoose.Schema.Types.Mixed },
+    _id: { type: String, required: true },          // ID da sessão, ex: "default"
+    value: { type: mongoose.Schema.Types.Mixed },   // creds + keys
   },
   { versionKey: false, timestamps: true }
 );
@@ -42,50 +41,19 @@ function fixBinary(obj) {
 }
 
 /**
- * 🗄 MongoStore para Baileys
+ * 🗄 Funções utilitárias para salvar e recuperar sessão
  */
-export const mongoStore = makeCacheableSignalKeyStore({
-  // 🔹 Retorna todos os keys de um tipo
-  async get(type, ids) {
-    if (!Array.isArray(ids)) ids = [ids];
-    const docs = await SessionModel.find({ _id: { $in: ids } });
-    const result = {};
-    docs.forEach(d => {
-      result[d._id] = fixBinary(d.value?.keys || {});
-    });
-    return result;
-  },
+export const saveSession = async (sessionId, auth) => {
+  await SessionModel.findByIdAndUpdate(
+    sessionId,
+    { value: { creds: auth.creds, keys: auth.keys } },
+    { upsert: true }
+  );
+};
 
-  // 🔹 Salva/atualiza keys
-  async set(type, id, data) {
-    const sessionId = id || "default";
-    const existing = await SessionModel.findById(sessionId);
-    if (existing) {
-      existing.value = existing.value || {};
-      existing.value.keys = { ...(existing.value.keys || {}), ...data };
-      await existing.save();
-    } else {
-      await SessionModel.create({ _id: sessionId, value: { keys: data, creds: {} } });
-    }
-  },
-
-  // 🔹 Remove keys
-  async remove(type, id) {
-    const sessionId = id || "default";
-    const existing = await SessionModel.findById(sessionId);
-    if (existing && existing.value?.keys) {
-      delete existing.value.keys;
-      await existing.save();
-    }
-  },
-
-  // 🔹 Retorna todas as sessões
-  async all() {
-    const docs = await SessionModel.find();
-    const result = {};
-    docs.forEach(d => {
-      result[d._id] = fixBinary(d.value?.keys || {});
-    });
-    return result;
-  }
-});
+export const loadSession = async (sessionId) => {
+  const sessionData = await SessionModel.findById(sessionId);
+  if (!sessionData?.value) return null;
+  const value = fixBinary(sessionData.value);
+  return { creds: value.creds, keys: value.keys };
+};
