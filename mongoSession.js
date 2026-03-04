@@ -26,7 +26,8 @@ const sessionSchema = new mongoose.Schema(
   { versionKey: false, timestamps: true }
 );
 
-const SessionModel = mongoose.model("BaileysAuth", sessionSchema);
+// 🔑 Exportando também o modelo
+export const SessionModel = mongoose.model("BaileysAuth", sessionSchema);
 
 /**
  * 🗄 MongoStore para Baileys
