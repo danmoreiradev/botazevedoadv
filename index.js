@@ -103,9 +103,7 @@ async function startBot() {
             const cleanNumber = rawJid.split('@')[0]; 
             const isMe = msg.key.fromMe;
 
-            // --- VINCULAÇÃO DE IDENTIDADE (@LID mapeado para o número) ---
             if (!isMe) {
-                // Sempre que o cliente manda mensagem, garantimos que o JID atual dele está no cadastro do número
                 await ticketsColl.updateOne(
                     { _id: cleanNumber },
                     { $set: { lastRawJid: rawJid } }, 
@@ -113,13 +111,11 @@ async function startBot() {
                 );
             }
 
-            // --- 1. TRAVA HUMANA (INTELIGENTE) ---
+            // --- 1. TRAVA HUMANA ---
             if (isMe) {
                 const isManual = msg.message.conversation || msg.message.extendedTextMessage || msg.message.imageMessage;
                 if (isManual && msg.key.id !== lastBotMessageId) {
                     const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
-                    
-                    // Busca qual ticket possui esse lastRawJid (conecta o @lid ao número real)
                     const linkedTicket = await ticketsColl.findOne({ lastRawJid: rawJid });
                     const targetId = linkedTicket ? linkedTicket._id : cleanNumber;
 
@@ -128,12 +124,11 @@ async function startBot() {
                         { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
                         { upsert: true }
                     );
-                    console.log(`⚠️ INTERVENÇÃO MANUAL DETECTADA: Chat ${targetId} pausado.`);
+                    console.log(`⚠️ INTERVENÇÃO MANUAL: Chat ${targetId} pausado.`);
                 }
                 return; 
             }
 
-            // Busca ticket sempre pelo número limpo
             let ticket = await ticketsColl.findOne({ _id: cleanNumber });
 
             if (ticket && ticket.paused) {
@@ -166,7 +161,7 @@ async function startBot() {
                     obrigadoEnviado: false,
                     lastActivity: Date.now(),
                     paused: false,
-                    lastRawJid: rawJid // Salva para referência futura
+                    lastRawJid: rawJid
                 }, { upsert: true });
 
                 const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio*\n🎫 Atendimento: *${ticketId}*\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Já sou cliente`;
@@ -187,22 +182,32 @@ async function startBot() {
                 '8': `📂 *Atendimento em Andamento*\n📌 Nome completo e CPF.`
             };
 
+            // ETAPA: PROCESSAR OPÇÃO DO MENU
             if (ticket.aguardandoOpcao) {
                 if (respostas[texto]) {
-                    const ok = await sendBotMsg(rawJid, { text: respostas[texto] });
-                    if (ok) await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false } });
+                    console.log(`✅ Enviando resposta da opção ${texto} para ${cleanNumber}`);
+                    await sendBotMsg(rawJid, { text: respostas[texto] });
+                    // Garante que o estado mudou ANTES de qualquer outra coisa
+                    await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false } });
                 }
                 return;
             }
 
+            // ETAPA: FINALIZAR APÓS DESCRIÇÃO
             if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
                 const isMedia = msg.message.imageMessage || msg.message.documentMessage;
-                if (texto.length < 30 && !isMedia) {
-                    await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva melhor a situação (mínimo 30 caracteres).` });
-                    return;
+                // Verificamos se ele mandou um texto longo ou um arquivo
+                if (texto.length >= 20 || isMedia) {
+                    console.log(`🏁 Enviando encerramento para ${cleanNumber}`);
+                    const ok = await sendBotMsg(rawJid, { text: `✅ Recebido! Nossa equipe analisará as informações e retornaremos em breve.` });
+                    if (ok) {
+                        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true } });
+                    }
+                } else {
+                    // Texto curto demais
+                    await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes (ou envie um documento) para que possamos ajudar.` });
                 }
-                const ok = await sendBotMsg(rawJid, { text: `✅ Recebido! Retornaremos em breve.` });
-                if (ok) await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true } });
+                return;
             }
         });
 
@@ -232,7 +237,6 @@ async function startBot() {
     }
 }
 
-// --- KEEP-ALIVE PING ---
 setInterval(async () => {
     try {
         const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
@@ -241,7 +245,6 @@ setInterval(async () => {
     } catch (e) {}
 }, 5 * 60 * 1000);
 
-// --- ROTAS ---
 io.on('connection', (socket) => {
     if (currentUser) socket.emit('connected', currentUser);
     else if (lastQr) socket.emit('qr', lastQr);
