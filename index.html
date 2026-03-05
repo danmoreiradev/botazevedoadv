@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Painel do Chatbot</title>
+    <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #f0f2f5; }
+        #container { background: white; width: 350px; margin: 50px auto; padding: 20px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        img#profilePic { width: 100px; border-radius: 50%; border: 3px solid #25d366; }
+        .hidden { display: none; }
+        #btnLogout { background: #ff4b4b; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h2>WhatsApp Bot</h2>
+        
+        <div id="qr-container">
+            <p>Escaneie o QR Code:</p>
+            <div id="qrcode" style="display: flex; justify-content: center;"></div>
+        </div>
+
+        <div id="status-container" class="hidden">
+            <img id="profilePic" src="" alt="Perfil">
+            <h3 id="userName"></h3>
+            <p id="userNumber"></p>
+            <button id="btnLogout" onclick="location.href='/logout'">Desconectar e Apagar Sessão</button>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const qrDiv = document.getElementById("qrcode");
+
+        socket.on('qr', (qr) => {
+            qrDiv.innerHTML = "";
+            new QRCode(qrDiv, qr);
+        });
+
+        socket.on('connected', (user) => {
+            document.getElementById('qr-container').classList.add('hidden');
+            document.getElementById('status-container').classList.remove('hidden');
+            document.getElementById('profilePic').src = user.pic;
+            document.getElementById('userName').innerText = user.name || 'Conectado';
+            document.getElementById('userNumber').innerText = user.number;
+        });
+
+        socket.on('disconnected', () => {
+            location.reload();
+        });
+    </script>
+</body>
+</html>

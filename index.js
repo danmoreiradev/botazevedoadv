@@ -1,38 +1,33 @@
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion 
-} = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal');
+const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { MongoClient } = require('mongodb');
+const { useMongoDBAuthState } = require('baileys-mongodb-library');
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
 const P = require('pino');
 const { Boom } = require('@hapi/boom');
-const { MongoClient } = require('mongodb');
 
-// 1. Configuração do MongoDB
-const mongoUri = process.env.MONGODB_URI; 
-if (!mongoUri) {
-    console.error("❌ ERRO: A variável MONGODB_URI não foi definida no Render!");
-    process.exit(1);
-}
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+const port = process.env.PORT || 3000;
+
+// Configuração MongoDB
+const mongoUri = process.env.MONGODB_URI;
 const client = new MongoClient(mongoUri);
 
 async function startBot() {
-    // Tenta conectar ao Mongo para validar antes de tudo
-    try {
-        await client.connect();
-        console.log("✅ Conectado ao MongoDB com sucesso!");
-    } catch (e) {
-        console.error("❌ Erro ao conectar no MongoDB:", e);
-    }
-
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    await client.connect();
+    const db = client.db('bot_whatsapp');
+    const collection = db.collection('auth');
+    const { state, saveCreds } = await useMongoDBAuthState(collection);
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
         version,
-        logger: P({ level: 'error' }),
         auth: state,
+        logger: P({ level: 'error' }),
         printQRInTerminal: false
     });
 
@@ -42,25 +37,41 @@ async function startBot() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            console.log('📌 ESCANEIE O QR CODE NO LOG ABAIXO:');
-            qrcode.generate(qr, { small: true });
+            io.emit('qr', qr); // Envia o QR para o HTML
+        }
+
+        if (connection === 'open') {
+            const user = sock.user;
+            const ppUrl = await sock.profilePictureUrl(user.id, 'image').catch(() => 'https://www.w3schools.com/howto/img_avatar.png');
+            io.emit('connected', { 
+                number: user.id.split(':')[0], 
+                name: user.name, 
+                pic: ppUrl 
+            });
+            console.log('✅ Conectado!');
         }
 
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) startBot();
-        } else if (connection === 'open') {
-            console.log('✅ WhatsApp Conectado!');
-
-            // TESTE DE VALIDAÇÃO NO MONGO
-            const db = client.db('meu_bot');
-            await db.collection('validacao').insertOne({ 
-                status: 'Bot Online', 
-                data: new Date() 
-            });
-            console.log('📝 Teste de escrita no MongoDB concluído!');
+            else io.emit('disconnected');
         }
+    });
+
+    // Rota para Desconectar
+    app.get('/logout', async (req, res) => {
+        await collection.deleteMany({}); // Limpa o Mongo
+        await sock.logout();
+        res.send('Sessão encerrada. Reinicie o bot.');
+        process.exit(0); // Força reinício no Render
     });
 }
 
-startBot();
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+server.listen(port, () => {
+    console.log(`🌐 Servidor rodando na porta ${port}`);
+    startBot();
+});
