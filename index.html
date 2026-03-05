@@ -1,53 +1,62 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-br">
 <head>
-    <title>Painel do Chatbot</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Bot Azevedo</title>
     <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; background: #f0f2f5; }
-        #container { background: white; width: 350px; margin: 50px auto; padding: 20px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        img#profilePic { width: 100px; border-radius: 50%; border: 3px solid #25d366; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 2rem; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; width: 320px; }
         .hidden { display: none; }
-        #btnLogout { background: #ff4b4b; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; }
+        #profilePic { width: 120px; height: 120px; border-radius: 50%; margin-bottom: 1rem; border: 4px solid #25d366; object-fit: cover; }
+        .btn-logout { background-color: #ea4335; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; margin-top: 1rem; width: 100%; }
+        #qrcode { display: flex; justify-content: center; margin-top: 1.5rem; }
+        .status-badge { background: #dcf8c6; color: #075e54; padding: 5px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div id="container">
+    <div class="card">
         <h2>WhatsApp Bot</h2>
         
         <div id="qr-container">
-            <p>Escaneie o QR Code:</p>
-            <div id="qrcode" style="display: flex; justify-content: center;"></div>
+            <p id="qr-status">Aguardando servidor...</p>
+            <div id="qrcode"></div>
         </div>
 
         <div id="status-container" class="hidden">
-            <img id="profilePic" src="" alt="Perfil">
-            <h3 id="userName"></h3>
-            <p id="userNumber"></p>
-            <button id="btnLogout" onclick="location.href='/logout'">Desconectar e Apagar Sessão</button>
+            <div class="status-badge">CONECTADO</div>
+            <img id="profilePic" src="" alt="Foto">
+            <h3 id="userName" style="margin: 10px 0;"></h3>
+            <p id="userNumber" style="color: #666; margin-bottom: 20px;"></p>
+            <button class="btn-logout" onclick="window.location.href='/logout'">Desconectar Bot</button>
         </div>
     </div>
 
     <script>
         const socket = io();
-        const qrDiv = document.getElementById("qrcode");
+        const qrContainer = document.getElementById('qr-container');
+        const statusContainer = document.getElementById('status-container');
+        const qrDiv = document.getElementById('qrcode');
+        const qrStatus = document.getElementById('qr-status');
 
         socket.on('qr', (qr) => {
+            qrStatus.innerText = "Escaneie o código abaixo:";
             qrDiv.innerHTML = "";
-            new QRCode(qrDiv, qr);
+            new QRCode(qrDiv, { text: qr, width: 200, height: 200 });
         });
 
         socket.on('connected', (user) => {
-            document.getElementById('qr-container').classList.add('hidden');
-            document.getElementById('status-container').classList.remove('hidden');
+            qrContainer.classList.add('hidden');
+            statusContainer.classList.remove('hidden');
             document.getElementById('profilePic').src = user.pic;
-            document.getElementById('userName').innerText = user.name || 'Conectado';
+            document.getElementById('userName').innerText = user.name;
             document.getElementById('userNumber').innerText = user.number;
         });
 
-        socket.on('disconnected', () => {
-            location.reload();
+        socket.on('disconnect', () => {
+            qrStatus.innerText = "Reconectando ao servidor...";
         });
     </script>
 </body>
