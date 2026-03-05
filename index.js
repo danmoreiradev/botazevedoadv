@@ -30,7 +30,6 @@ let lastBotMessageId = null;
 let ticketsColl;
 let authColl;
 
-// --- FUNÇÃO DE ESTADO MONGODB ---
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
     const readData = async (id) => {
@@ -99,15 +98,34 @@ async function startBot() {
 
             const from = msg.key.remoteJid;
             const isMe = msg.key.fromMe;
-            const timestamp = msg.messageTimestamp;
-            const agora = Math.floor(Date.now() / 1000);
 
+            // --- 1. TRAVA HUMANA IMEDIATA ---
+            if (isMe) {
+                // Se o ID da mensagem não é o ID da última mensagem que o BOT enviou
+                if (msg.key.id !== lastBotMessageId) {
+                    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
+                    await ticketsColl.updateOne(
+                        { _id: from }, 
+                        { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
+                        { upsert: true }
+                    );
+                    console.log(`⚠️ INTERVENÇÃO HUMANA: Bot pausado para ${from} por 3 dias.`);
+                }
+                return; 
+            }
+
+            // Busca ticket no DB para verificar pausa
             let ticket = await ticketsColl.findOne({ _id: from });
+
+            if (ticket && ticket.paused) {
+                if (Date.now() < ticket.until) return; // Ignora se estiver na folga de 3 dias
+                else await ticketsColl.updateOne({ _id: from }, { $set: { paused: false } });
+            }
 
             const sendBotMsg = async (jid, content) => {
                 try {
                     const sent = await sock.sendMessage(jid, content);
-                    lastBotMessageId = sent.key.id; 
+                    lastBotMessageId = sent.key.id; // Atualiza o ID global para não travar a si mesmo
                     return sent;
                 } catch (err) {
                     console.error("❌ Erro de Timeout contornado:", err.message);
@@ -115,31 +133,10 @@ async function startBot() {
                 }
             };
 
-            // --- 1. TRAVA HUMANA (3 DIAS) ---
-            if (isMe) {
-                const diferencaTempo = agora - timestamp;
-                if (msg.key.id !== lastBotMessageId && diferencaTempo > 1) {
-                    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
-                    await ticketsColl.updateOne(
-                        { _id: from }, 
-                        { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
-                        { upsert: true }
-                    );
-                    console.log(`⚠️ ATENDENTE ASSUMIU: Bot travado para ${from}`);
-                }
-                return;
-            }
-
-            // --- 2. VERIFICAÇÃO DE PAUSA ---
-            if (ticket && ticket.paused) {
-                if (Date.now() < ticket.until) return;
-                else await ticketsColl.updateOne({ _id: from }, { $set: { paused: false } });
-            }
-
             const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
             const texto = textoRaw.trim();
 
-            // --- 3. LÓGICA DO MENU ---
+            // --- 2. LÓGICA DO MENU ---
             const timeoutMenu = 2 * 60 * 60 * 1000; 
             if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
                 const ticketId = Math.floor(1000 + Math.random() * 9000);
@@ -191,31 +188,17 @@ async function startBot() {
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
-            
-            if (qr) { 
-                lastQr = qr; 
-                io.emit('qr', qr); 
-            }
-
+            if (qr) { lastQr = qr; io.emit('qr', qr); }
             if (connection === 'open') {
                 lastQr = null;
                 const userNumber = sock.user.id.split(':')[0];
-                
-                // Busca foto de perfil (ou usa padrão se falhar)
                 let ppUrl;
                 try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } 
                 catch { ppUrl = 'https://www.w3schools.com/howto/img_avatar.png'; }
-
-                currentUser = { 
-                    number: userNumber, 
-                    name: 'Azevedo e Juvencio', 
-                    pic: ppUrl 
-                };
-                
+                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
                 io.emit('connected', currentUser);
                 console.log('✅ Bot Online!');
             }
-
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
                 if (shouldReconnect) startBot();
@@ -229,25 +212,23 @@ async function startBot() {
     }
 }
 
-// --- PING DE SURVIVAL (KEEP-ALIVE) ---
+// --- PING KEEP-ALIVE ---
 setInterval(async () => {
     try {
         const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
         const protocol = host.includes('localhost') ? 'http' : 'https';
         await axios.get(`${protocol}://${host}/`);
-        console.log('🚀 Keep-alive: Status OK');
-    } catch (e) { console.log('Ping status: App Ativo'); }
+        console.log('🚀 Keep-alive: Ping OK');
+    } catch (e) { console.log('Ping ativo'); }
 }, 5 * 60 * 1000);
 
-// --- ROTAS DO EXPRESS E SOCKET.IO ---
+// --- ROTAS ---
 io.on('connection', (socket) => {
     if (currentUser) socket.emit('connected', currentUser);
     else if (lastQr) socket.emit('qr', lastQr);
 });
 
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.get('/logout', async (req, res) => {
     try {
@@ -259,9 +240,7 @@ app.get('/logout', async (req, res) => {
         io.emit('disconnected');
         res.send('Sessão encerrada.');
         setTimeout(() => process.exit(0), 1500);
-    } catch (err) {
-        res.status(500).send("Erro ao deslogar");
-    }
+    } catch (err) { res.status(500).send("Erro"); }
 });
 
 server.listen(port, () => startBot());
