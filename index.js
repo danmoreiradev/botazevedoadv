@@ -96,31 +96,44 @@ async function startBot() {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-            // Ignora mensagens de controle/protocolo do WhatsApp
             const messageType = Object.keys(msg.message)[0];
             if (['protocolMessage', 'senderKeyDistributionMessage'].includes(messageType)) return;
 
-            // NORMALIZAÇÃO: Extrai apenas o número (ex: 55199...)
             const rawJid = msg.key.remoteJid;
             const cleanNumber = rawJid.split('@')[0]; 
             const isMe = msg.key.fromMe;
 
-            // --- 1. TRAVA HUMANA (BASEADA NO NÚMERO LIMPO) ---
+            // --- VINCULAÇÃO DE IDENTIDADE (@LID mapeado para o número) ---
+            if (!isMe) {
+                // Sempre que o cliente manda mensagem, garantimos que o JID atual dele está no cadastro do número
+                await ticketsColl.updateOne(
+                    { _id: cleanNumber },
+                    { $set: { lastRawJid: rawJid } }, 
+                    { upsert: true }
+                );
+            }
+
+            // --- 1. TRAVA HUMANA (INTELIGENTE) ---
             if (isMe) {
                 const isManual = msg.message.conversation || msg.message.extendedTextMessage || msg.message.imageMessage;
                 if (isManual && msg.key.id !== lastBotMessageId) {
                     const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
+                    
+                    // Busca qual ticket possui esse lastRawJid (conecta o @lid ao número real)
+                    const linkedTicket = await ticketsColl.findOne({ lastRawJid: rawJid });
+                    const targetId = linkedTicket ? linkedTicket._id : cleanNumber;
+
                     await ticketsColl.updateOne(
-                        { _id: cleanNumber }, 
+                        { _id: targetId }, 
                         { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
                         { upsert: true }
                     );
-                    console.log(`⚠️ INTERVENÇÃO MANUAL: Chat ${cleanNumber} pausado.`);
+                    console.log(`⚠️ INTERVENÇÃO MANUAL DETECTADA: Chat ${targetId} pausado.`);
                 }
                 return; 
             }
 
-            // Busca ticket pelo número limpo
+            // Busca ticket sempre pelo número limpo
             let ticket = await ticketsColl.findOne({ _id: cleanNumber });
 
             if (ticket && ticket.paused) {
@@ -134,7 +147,7 @@ async function startBot() {
                     lastBotMessageId = sent.key.id; 
                     return sent;
                 } catch (err) {
-                    console.error("❌ Erro de envio contornado:", err.message);
+                    console.error("❌ Erro de envio:", err.message);
                     return null; 
                 }
             };
@@ -152,7 +165,8 @@ async function startBot() {
                     aguardandoOpcao: true,
                     obrigadoEnviado: false,
                     lastActivity: Date.now(),
-                    paused: false
+                    paused: false,
+                    lastRawJid: rawJid // Salva para referência futura
                 }, { upsert: true });
 
                 const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio*\n🎫 Atendimento: *${ticketId}*\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Já sou cliente`;
@@ -227,7 +241,7 @@ setInterval(async () => {
     } catch (e) {}
 }, 5 * 60 * 1000);
 
-// --- ROTAS EXPRESS / SOCKET ---
+// --- ROTAS ---
 io.on('connection', (socket) => {
     if (currentUser) socket.emit('connected', currentUser);
     else if (lastQr) socket.emit('qr', lastQr);
