@@ -24,6 +24,7 @@ const client = new MongoClient(mongoUri);
 let lastQr = null;
 let currentUser = null;
 let sock;
+let lastBotMessageId = null; // Armazena o ID da última mensagem enviada pelo bot
 
 const activeTickets = new Map();
 
@@ -76,7 +77,9 @@ async function startBot() {
             version,
             auth: state,
             logger: P({ level: 'silent' }),
-            browser: ['Bot Azevedo', 'Chrome', '1.0.0']
+            browser: ['Bot Azevedo', 'Chrome', '1.0.0'],
+            connectTimeoutMs: 60000,
+            defaultQueryTimeoutMs: 0,
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -87,45 +90,50 @@ async function startBot() {
 
             const from = msg.key.remoteJid;
             const isMe = msg.key.fromMe;
-            const now = Date.now();
+            const msgId = msg.key.id;
 
-            // 1. LÓGICA DE INTERVENÇÃO HUMANA (FIXED)
+            // 1. LÓGICA DE INTERVENÇÃO HUMANA (COM ESCUDO DE ID)
             if (isMe) {
-                // Só pausa se for você digitando manualmente no celular
-                // Ignora mensagens de sistema, protocolos de entrega e reações
+                // Se o ID da mensagem for o mesmo que o bot acabou de enviar, IGNORE
+                if (msgId === lastBotMessageId) return;
+
                 const messageType = Object.keys(msg.message)[0];
-                const isRealManualMessage = messageType === 'conversation' || messageType === 'extendedTextMessage';
-                
-                // IMPORTANTE: Só pausa se a mensagem NÃO for uma das que o bot costuma enviar (as respostas automáticas)
-                if (isRealManualMessage) {
-                    const blockUntil = now + (3 * 24 * 60 * 60 * 1000); 
+                const isRealText = messageType === 'conversation' || messageType === 'extendedTextMessage';
+
+                if (isRealText) {
+                    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
                     activeTickets.set(from, { paused: true, until: blockUntil });
-                    console.log(`🤖 Intervenção Humana Real em ${from}. Bot pausado por 3 dias.`);
+                    console.log(`✅ Intervenção Humana REAL detectada em ${from}. Bot pausado.`);
                 }
-                return; // Impede o bot de responder a si mesmo
+                return; 
             }
 
-            // 2. VERIFICAÇÃO DE BLOQUEIO/PAUSA
+            // 2. VERIFICAÇÃO DE PAUSA
             const ticket = activeTickets.get(from);
             if (ticket && ticket.paused) {
-                if (now < ticket.until) return; 
+                if (Date.now() < ticket.until) return; 
                 else activeTickets.delete(from);
             }
 
-            // 3. CAPTURA DE TEXTO DO CLIENTE
-            const messageType = Object.keys(msg.message)[0];
-            const textoRaw = msg.message.conversation || 
-                             msg.message.extendedTextMessage?.text || "";
+            // 3. CAPTURA DE TEXTO
+            const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
             const texto = textoRaw.trim();
 
+            // Função auxiliar para enviar e guardar o ID
+            const sendBotMsg = async (jid, content) => {
+                const sent = await sock.sendMessage(jid, content);
+                lastBotMessageId = sent.key.id; // Salva o ID da mensagem enviada
+                return sent;
+            };
+
             // 4. SAUDAÇÃO E MENU
-            if (!ticket || (now - ticket.lastActivity > 2 * 60 * 60 * 1000)) {
+            if (!ticket || (Date.now() - ticket.lastActivity > 2 * 60 * 60 * 1000)) {
                 const ticketId = Math.floor(1000 + Math.random() * 9000);
                 activeTickets.set(from, { 
                     id: ticketId, 
                     aguardandoOpcao: true, 
                     obrigadoEnviado: false, 
-                    lastActivity: now 
+                    lastActivity: Date.now() 
                 });
 
                 const hora = new Date().getHours();
@@ -134,35 +142,28 @@ async function startBot() {
                 const menuTexto = `${saudacao}! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n` +
                     `Seu atendimento foi iniciado: 🎫 *${ticketId}*\n\n` +
                     `*Digite o número da opção desejada:*\n\n` +
-                    `1️⃣ Direito Digital (desbloqueio de contas)\n` +
-                    `2️⃣ Direito Cível e Contratual\n` +
-                    `3️⃣ Direito do Consumidor\n` +
-                    `4️⃣ Direito Imobiliário\n` +
-                    `5️⃣ Direito Trabalhista\n` +
-                    `6️⃣ Direito Empresarial\n` +
-                    `7️⃣ Outros Assuntos\n` +
-                    `8️⃣ Desejo falar de um atendimento/processo em andamento`;
+                    `1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Já sou cliente`;
 
-                await sock.sendMessage(from, { text: menuTexto });
+                await sendBotMsg(from, { text: menuTexto });
                 return;
             }
 
-            ticket.lastActivity = now;
+            ticket.lastActivity = Date.now();
 
             // 5. RESPOSTAS
             const respostas = {
-                '1': `📱 *Direito Digital (Desbloqueio de Contas)*\n\n📌 Qual a plataforma?\n📌 O que aconteceu?\n📸 Envie prints.\n\nUm especialista analisará seu caso em breve.`,
-                '2': `📄 *Direito Cível e Contratual*\n\n📌 Tipo de demanda?\n📝 Resumo do caso?\n📎 Documentação?\n\nEquipe jurídica notificada.`,
-                '3': `🛒 *Direito do Consumidor*\n\n📌 Qual o problema?\n💰 Prejuízo financeiro?\n📸 Provas?\n\nUm advogado entrará em contato.`,
-                '4': `🏠 *Direito Imobiliário*\n\n📌 Objeto da consulta?\n📝 Resumo da situação?\n📎 Documentos?\n\nAnalisaremos seu caso em breve.`,
-                '5': `👷 *Direito Trabalhista*\n\n📌 Situação atual?\n📌 Reclamações?\n📝 Detalhes?\n\nEntraremos em contato em instantes.`,
-                '6': `🏢 *Direito Empresarial*\n\n📌 Natureza da demanda?\n🏷️ Empresa?\n📝 Descrição?\n\nUm advogado falará com você.`,
-                '7': `📝 *Outros Assuntos*\n\n📌 Descreva brevemente seu assunto.\n🎤 Pode enviar áudio.\n\nSua mensagem foi para nossa triagem.`,
-                '8': `📂 *Atendimento/Processo em Andamento*\n\n📌 Nome completo.\n📌 Número do processo/CPF.\n📌 Qual a sua solicitação?\n\nEstamos localizando seu histórico.`
+                '1': `📱 *Direito Digital*\n\n📌 Qual a plataforma?\n📌 O que aconteceu?\n\nAnalisaremos seu caso em breve.`,
+                '2': `📄 *Direito Cível*\n\n📌 Tipo de demanda?\n📝 Resumo do caso?\n\nEquipe notificada.`,
+                '3': `🛒 *Direito do Consumidor*\n\n📌 Qual o problema?\n💰 Prejuízo?\n\nUm advogado falará com você.`,
+                '4': `🏠 *Direito Imobiliário*\n\n📌 Objeto?\n📝 Situação?\n\nAnalisaremos em breve.`,
+                '5': `👷 *Direito Trabalhista*\n\n📌 Situação atual?\n📌 Reclamações?\n\nEntraremos em contato.`,
+                '6': `🏢 *Direito Empresarial*\n\n📌 Natureza?\n🏷️ Empresa?\n\nUm advogado falará com você.`,
+                '7': `📝 *Outros Assuntos*\n\n📌 Descreva brevemente seu assunto.\n\nSua mensagem foi para triagem.`,
+                '8': `📂 *Atendimento em Andamento*\n\n📌 Nome completo.\n📌 CPF.\n\nEstamos localizando seu histórico.`
             };
 
             if (ticket.aguardandoOpcao && respostas[texto]) {
-                await sock.sendMessage(from, { text: respostas[texto] });
+                await sendBotMsg(from, { text: respostas[texto] });
                 ticket.aguardandoOpcao = false;
                 return;
             }
@@ -170,14 +171,12 @@ async function startBot() {
             // 6. VALIDAÇÃO DE DETALHES
             if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
                 const MIN_DETALHE = 30;
-                const isMedia = msg.message.imageMessage || msg.message.documentMessage;
-                
-                if (texto.length < MIN_DETALHE && !isMedia) {
-                    await sock.sendMessage(from, { text: `⚠️ Descreva melhor a situação (mínimo ${MIN_DETALHE} caracteres).` });
+                if (texto.length < MIN_DETALHE && !msg.message.imageMessage && !msg.message.documentMessage) {
+                    await sendBotMsg(from, { text: `⚠️ Descreva melhor a situação (mínimo ${MIN_DETALHE} caracteres).` });
                     return;
                 }
                 ticket.obrigadoEnviado = true;
-                await sock.sendMessage(from, { text: `✅ Obrigado! Informações recebidas.\n\n⏱️ Retornaremos em 15-30 minutos.` });
+                await sendBotMsg(from, { text: `✅ Obrigado! Informações recebidas.\n\n⏱️ Retornaremos em breve.` });
             }
         });
 
@@ -191,7 +190,8 @@ async function startBot() {
                 console.log('✅ Bot Online!');
             }
             if (connection === 'close') {
-                if ((lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut) startBot();
+                const statusCode = (lastDisconnect.error instanceof Boom)?.output?.statusCode;
+                if (statusCode !== DisconnectReason.loggedOut) startBot();
             }
         });
 
