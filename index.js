@@ -24,7 +24,7 @@ const client = new MongoClient(mongoUri);
 let lastQr = null;
 let currentUser = null;
 let sock;
-let lastBotMessageId = null; // Armazena o ID da última mensagem enviada pelo bot
+let lastBotMessageId = null; 
 
 const activeTickets = new Map();
 
@@ -78,8 +78,7 @@ async function startBot() {
             auth: state,
             logger: P({ level: 'silent' }),
             browser: ['Bot Azevedo', 'Chrome', '1.0.0'],
-            connectTimeoutMs: 60000,
-            defaultQueryTimeoutMs: 0,
+            connectTimeoutMs: 60000
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -92,18 +91,12 @@ async function startBot() {
             const isMe = msg.key.fromMe;
             const msgId = msg.key.id;
 
-            // 1. LÓGICA DE INTERVENÇÃO HUMANA (COM ESCUDO DE ID)
+            // 1. PRIORIDADE TOTAL: INTERVENÇÃO HUMANA
             if (isMe) {
-                // Se o ID da mensagem for o mesmo que o bot acabou de enviar, IGNORE
-                if (msgId === lastBotMessageId) return;
-
-                const messageType = Object.keys(msg.message)[0];
-                const isRealText = messageType === 'conversation' || messageType === 'extendedTextMessage';
-
-                if (isRealText) {
+                if (msgId !== lastBotMessageId) {
                     const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
                     activeTickets.set(from, { paused: true, until: blockUntil });
-                    console.log(`✅ Intervenção Humana REAL detectada em ${from}. Bot pausado.`);
+                    console.log(`⚠️ ATENDENTE ASSUMIU: Bot pausado para ${from} por 3 dias.`);
                 }
                 return; 
             }
@@ -119,14 +112,13 @@ async function startBot() {
             const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
             const texto = textoRaw.trim();
 
-            // Função auxiliar para enviar e guardar o ID
             const sendBotMsg = async (jid, content) => {
                 const sent = await sock.sendMessage(jid, content);
-                lastBotMessageId = sent.key.id; // Salva o ID da mensagem enviada
+                lastBotMessageId = sent.key.id; 
                 return sent;
             };
 
-            // 4. SAUDAÇÃO E MENU
+            // 4. SAUDAÇÃO FIXA (Olá + Nome do Bot)
             if (!ticket || (Date.now() - ticket.lastActivity > 2 * 60 * 60 * 1000)) {
                 const ticketId = Math.floor(1000 + Math.random() * 9000);
                 activeTickets.set(from, { 
@@ -136,11 +128,11 @@ async function startBot() {
                     lastActivity: Date.now() 
                 });
 
-                const hora = new Date().getHours();
-                const saudacao = hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
+                // Pega o nome do bot configurado no WhatsApp
+                const nomeBot = sock.user.name || 'Azevedo e Juvencio';
 
-                const menuTexto = `${saudacao}! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n` +
-                    `Seu atendimento foi iniciado: 🎫 *${ticketId}*\n\n` +
+                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *${nomeBot} - Sociedade de Advogados* ⚖️\n` +
+                    `Atendimento: 🎫 *${ticketId}*\n\n` +
                     `*Digite o número da opção desejada:*\n\n` +
                     `1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Já sou cliente`;
 
@@ -150,7 +142,6 @@ async function startBot() {
 
             ticket.lastActivity = Date.now();
 
-            // 5. RESPOSTAS
             const respostas = {
                 '1': `📱 *Direito Digital*\n\n📌 Qual a plataforma?\n📌 O que aconteceu?\n\nAnalisaremos seu caso em breve.`,
                 '2': `📄 *Direito Cível*\n\n📌 Tipo de demanda?\n📝 Resumo do caso?\n\nEquipe notificada.`,
@@ -168,7 +159,6 @@ async function startBot() {
                 return;
             }
 
-            // 6. VALIDAÇÃO DE DETALHES
             if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
                 const MIN_DETALHE = 30;
                 if (texto.length < MIN_DETALHE && !msg.message.imageMessage && !msg.message.documentMessage) {
@@ -190,8 +180,7 @@ async function startBot() {
                 console.log('✅ Bot Online!');
             }
             if (connection === 'close') {
-                const statusCode = (lastDisconnect.error instanceof Boom)?.output?.statusCode;
-                if (statusCode !== DisconnectReason.loggedOut) startBot();
+                if ((lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut) startBot();
             }
         });
 
