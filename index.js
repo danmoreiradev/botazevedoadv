@@ -77,7 +77,7 @@ async function startBot() {
             version,
             auth: state,
             logger: P({ level: 'silent' }),
-            browser: ['Bot Azevedo', 'Chrome', '1.0.0'],
+            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
             connectTimeoutMs: 60000
         });
 
@@ -90,15 +90,21 @@ async function startBot() {
             const from = msg.key.remoteJid;
             const isMe = msg.key.fromMe;
             const msgId = msg.key.id;
+            const timestamp = msg.messageTimestamp;
+            const agora = Math.floor(Date.now() / 1000);
 
-            // 1. PRIORIDADE TOTAL: INTERVENÇÃO HUMANA
+            // 1. PRIORIDADE: INTERVENÇÃO HUMANA (COM TRAVA DE TEMPO)
             if (isMe) {
-                if (msgId !== lastBotMessageId) {
+                // Se a mensagem vinda de 'mim' tem mais de 2 segundos de vida, 
+                // significa que não é o 'eco' instantâneo do bot enviando, mas sim você digitando.
+                const diferencaTempo = agora - timestamp;
+                
+                if (msgId !== lastBotMessageId && diferencaTempo > 2) {
                     const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
                     activeTickets.set(from, { paused: true, until: blockUntil });
                     console.log(`⚠️ ATENDENTE ASSUMIU: Bot pausado para ${from} por 3 dias.`);
                 }
-                return; 
+                return; // Sempre sai se for isMe
             }
 
             // 2. VERIFICAÇÃO DE PAUSA
@@ -118,7 +124,7 @@ async function startBot() {
                 return sent;
             };
 
-            // 4. SAUDAÇÃO FIXA (Olá + Nome do Bot)
+            // 4. SAUDAÇÃO E MENU (NOME FIXO PARA EVITAR ERRO)
             if (!ticket || (Date.now() - ticket.lastActivity > 2 * 60 * 60 * 1000)) {
                 const ticketId = Math.floor(1000 + Math.random() * 9000);
                 activeTickets.set(from, { 
@@ -128,13 +134,17 @@ async function startBot() {
                     lastActivity: Date.now() 
                 });
 
-                // Pega o nome do bot configurado no WhatsApp
-                const nomeBot = sock.user.name || 'Azevedo e Juvencio';
-
-                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *${nomeBot} - Sociedade de Advogados* ⚖️\n` +
+                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n` +
                     `Atendimento: 🎫 *${ticketId}*\n\n` +
                     `*Digite o número da opção desejada:*\n\n` +
-                    `1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Já sou cliente`;
+                    `1️⃣ Direito Digital\n` +
+                    `2️⃣ Direito Cível\n` +
+                    `3️⃣ Direito do Consumidor\n` +
+                    `4️⃣ Direito Imobiliário\n` +
+                    `5️⃣ Direito Trabalhista\n` +
+                    `6️⃣ Direito Empresarial\n` +
+                    `7️⃣ Outros Assuntos\n` +
+                    `8️⃣ Já sou cliente`;
 
                 await sendBotMsg(from, { text: menuTexto });
                 return;
@@ -153,16 +163,22 @@ async function startBot() {
                 '8': `📂 *Atendimento em Andamento*\n\n📌 Nome completo.\n📌 CPF.\n\nEstamos localizando seu histórico.`
             };
 
-            if (ticket.aguardandoOpcao && respostas[texto]) {
-                await sendBotMsg(from, { text: respostas[texto] });
-                ticket.aguardandoOpcao = false;
-                return;
+            // Lógica para processar a escolha do menu
+            if (ticket.aguardandoOpcao) {
+                if (respostas[texto]) {
+                    await sendBotMsg(from, { text: respostas[texto] });
+                    ticket.aguardandoOpcao = false;
+                }
+                return; // Retorna para esperar o relato após a opção ser enviada
             }
 
+            // 5. VALIDAÇÃO DE DETALHES (O relato do cliente)
             if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
                 const MIN_DETALHE = 30;
-                if (texto.length < MIN_DETALHE && !msg.message.imageMessage && !msg.message.documentMessage) {
-                    await sendBotMsg(from, { text: `⚠️ Descreva melhor a situação (mínimo ${MIN_DETALHE} caracteres).` });
+                const isMedia = msg.message.imageMessage || msg.message.documentMessage;
+                
+                if (texto.length < MIN_DETALHE && !isMedia) {
+                    await sendBotMsg(from, { text: `⚠️ Para que possamos analisar corretamente, precisamos de mais detalhes.\n\nPor favor, descreva melhor a situação com pelo menos ${MIN_DETALHE} caracteres.` });
                     return;
                 }
                 ticket.obrigadoEnviado = true;
@@ -175,7 +191,7 @@ async function startBot() {
             if (qr) { lastQr = qr; io.emit('qr', qr); }
             if (connection === 'open') {
                 lastQr = null;
-                currentUser = { number: sock.user.id.split(':')[0], name: sock.user.name || 'Bot Azevedo', pic: 'https://www.w3schools.com/howto/img_avatar.png' };
+                currentUser = { number: sock.user.id.split(':')[0], name: 'Azevedo e Juvencio', pic: 'https://www.w3schools.com/howto/img_avatar.png' };
                 io.emit('connected', currentUser);
                 console.log('✅ Bot Online!');
             }
