@@ -26,7 +26,7 @@ let lastQr = null;
 let currentUser = null;
 let sock;
 
-// Adaptador Manual de Auth para MongoDB (Persistência Blindada)
+// Adaptador de Autenticação para MongoDB
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
     const readData = async (id) => {
@@ -45,7 +45,9 @@ async function useMongoDBAuthState(collection) {
                     const data = {};
                     await Promise.all(ids.map(async id => {
                         let value = await readData(`${type}-${id}`);
-                        if (type === 'app-state-sync-key' && value) value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                        if (type === 'app-state-sync-key' && value) {
+                            value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                        }
                         data[id] = value;
                     }));
                     return data;
@@ -68,8 +70,10 @@ async function useMongoDBAuthState(collection) {
 
 async function startBot() {
     try {
+        console.log("🔄 Conectando ao Banco de Dados...");
         await client.connect();
         const collection = client.db('bot_whatsapp').collection('auth_session');
+
         const { state, saveCreds } = await useMongoDBAuthState(collection);
         const { version } = await fetchLatestBaileysVersion();
 
@@ -82,7 +86,7 @@ async function startBot() {
 
         sock.ev.on('creds.update', saveCreds);
 
-        // Monitor de Mensagens (O TESTE DO "OI")
+        // Lógica de Resposta Automática (Teste de Vida)
         sock.ev.on('messages.upsert', async m => {
             const msg = m.messages[0];
             if (!msg.message || msg.key.fromMe) return;
@@ -92,9 +96,8 @@ async function startBot() {
                          messageType === 'extendedTextMessage' ? msg.message.extendedTextMessage.text : '';
 
             if (text.toLowerCase() === 'oi') {
-                console.log(`📩 Respondendo teste para: ${msg.key.remoteJid}`);
                 await sock.sendMessage(msg.key.remoteJid, { 
-                    text: '✅ *Conectado com sucesso!*\n\nSeu bot Baileys + MongoDB está operante no Render.' 
+                    text: '✅ *Conectado com sucesso!*\n\nSeu bot está online e o painel visual foi atualizado.' 
                 });
             }
         });
@@ -111,7 +114,11 @@ async function startBot() {
                 lastQr = null;
                 const user = sock.user;
                 let ppUrl;
-                try { ppUrl = await sock.profilePictureUrl(user.id, 'image'); } catch { ppUrl = 'https://www.w3schools.com/howto/img_avatar.png'; }
+                try { 
+                    ppUrl = await sock.profilePictureUrl(user.id, 'image'); 
+                } catch { 
+                    ppUrl = 'https://www.w3schools.com/howto/img_avatar.png'; 
+                }
                 
                 currentUser = { 
                     number: user.id.split(':')[0], 
@@ -124,35 +131,61 @@ async function startBot() {
 
             if (connection === 'close') {
                 currentUser = null;
-                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-                if (shouldReconnect) startBot();
+                const statusCode = (lastDisconnect.error instanceof Boom)?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                
+                console.log('A conexão fechou. Motivo:', lastDisconnect.error, 'Tentando reconectar?', shouldReconnect);
+                
+                if (shouldReconnect) {
+                    startBot();
+                } else {
+                    console.log('❌ Sessão encerrada manualmente.');
+                }
             }
         });
 
     } catch (err) {
-        console.error("Erro no Servidor:", err);
+        console.error("Erro fatal:", err);
     }
 }
 
-// Socket.io: Mantém a interface Web sincronizada
+// Sincronização do Socket.io para novos acessos à página
 io.on('connection', (socket) => {
     if (currentUser) socket.emit('connected', currentUser);
     else if (lastQr) socket.emit('qr', lastQr);
 });
 
+// Rotas Express
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.get('/logout', async (req, res) => {
     try {
+        // Limpa o Banco de Dados
         await client.db('bot_whatsapp').collection('auth_session').deleteMany({});
-        if (sock) await sock.logout();
+        
+        // Desloga o Socket do WhatsApp
+        if (sock) {
+            await sock.logout();
+            sock.ev.removeAllListeners();
+        }
+        
         currentUser = null;
-        res.send('<h1>Desconectado! Reiniciando...</h1><script>setTimeout(()=>window.location.href="/", 2000)</script>');
-        process.exit(0);
-    } catch (e) { res.status(500).send("Erro"); }
+        lastQr = null;
+        
+        // Avisa o Front-end para resetar
+        io.emit('disconnected');
+        
+        console.log("Sessão destruída com sucesso.");
+        res.status(200).json({ status: 'success' });
+        
+        // Pequeno delay para o Render não entrar em loop antes de limpar
+        setTimeout(() => process.exit(0), 1000); 
+    } catch (e) { 
+        res.status(500).json({ status: 'error' }); 
+    }
 });
 
 server.listen(port, () => {
-    console.log(`🌐 Servidor rodando na porta ${port}`);
+    console.log(`🌐 Servidor ativo na porta ${port}`);
     startBot();
 });
