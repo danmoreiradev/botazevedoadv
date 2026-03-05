@@ -9,6 +9,7 @@
   "dependencies": {
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "^6.7.21",
+    "axios": "^1.13.6",
     "express": "^5.2.1",
     "mongodb": "^6.21.0",
     "pino": "^8.21.0",

@@ -12,6 +12,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const P = require('pino');
 const { Boom } = require('@hapi/boom');
+const axios = require('axios');
 
 const app = express();
 const server = http.createServer(app);
@@ -26,8 +27,10 @@ let currentUser = null;
 let sock;
 let lastBotMessageId = null; 
 
-const activeTickets = new Map();
+let ticketsColl;
+let authColl;
 
+// --- FUNÇÃO DE ESTADO MONGODB ---
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
     const readData = async (id) => {
@@ -45,7 +48,9 @@ async function useMongoDBAuthState(collection) {
                     const data = {};
                     await Promise.all(ids.map(async id => {
                         let value = await readData(`${type}-${id}`);
-                        if (type === 'app-state-sync-key' && value) value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                        if (type === 'app-state-sync-key' && value) {
+                            value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                        }
                         data[id] = value;
                     }));
                     return data;
@@ -69,8 +74,11 @@ async function useMongoDBAuthState(collection) {
 async function startBot() {
     try {
         await client.connect();
-        const collection = client.db('bot_whatsapp').collection('auth_session');
-        const { state, saveCreds } = await useMongoDBAuthState(collection);
+        const db = client.db('bot_whatsapp');
+        authColl = db.collection('auth_session');
+        ticketsColl = db.collection('active_tickets');
+
+        const { state, saveCreds } = await useMongoDBAuthState(authColl);
         const { version } = await fetchLatestBaileysVersion();
 
         sock = makeWASocket({
@@ -78,7 +86,9 @@ async function startBot() {
             auth: state,
             logger: P({ level: 'silent' }),
             browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-            connectTimeoutMs: 60000
+            connectTimeoutMs: 80000,
+            defaultQueryTimeoutMs: 0, 
+            retryRequestDelayMs: 3000
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -89,100 +99,101 @@ async function startBot() {
 
             const from = msg.key.remoteJid;
             const isMe = msg.key.fromMe;
-            const msgId = msg.key.id;
             const timestamp = msg.messageTimestamp;
             const agora = Math.floor(Date.now() / 1000);
 
-            // 1. PRIORIDADE: INTERVENÇÃO HUMANA (COM TRAVA DE TEMPO)
-            if (isMe) {
-                // Se a mensagem vinda de 'mim' tem mais de 2 segundos de vida, 
-                // significa que não é o 'eco' instantâneo do bot enviando, mas sim você digitando.
-                const diferencaTempo = agora - timestamp;
-                
-                if (msgId !== lastBotMessageId && diferencaTempo > 2) {
-                    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
-                    activeTickets.set(from, { paused: true, until: blockUntil });
-                    console.log(`⚠️ ATENDENTE ASSUMIU: Bot pausado para ${from} por 3 dias.`);
+            // Busca ticket no DB
+            let ticket = await ticketsColl.findOne({ _id: from });
+
+            const sendBotMsg = async (jid, content) => {
+                try {
+                    const sent = await sock.sendMessage(jid, content);
+                    lastBotMessageId = sent.key.id; 
+                    return sent;
+                } catch (err) {
+                    console.error("❌ Erro de Timeout contornado:", err.message);
+                    return null; 
                 }
-                return; // Sempre sai se for isMe
+            };
+
+            // --- 1. TRAVA HUMANA (3 DIAS) ---
+            if (isMe) {
+                const diferencaTempo = agora - timestamp;
+                // Se a mensagem sou EU mandando e não é o ID da última mensagem do bot
+                if (msg.key.id !== lastBotMessageId && diferencaTempo > 1) {
+                    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
+                    await ticketsColl.updateOne(
+                        { _id: from }, 
+                        { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
+                        { upsert: true }
+                    );
+                    console.log(`⚠️ ATENDENTE ASSUMIU: Bot travado para ${from} por 3 dias.`);
+                }
+                return;
             }
 
-            // 2. VERIFICAÇÃO DE PAUSA
-            const ticket = activeTickets.get(from);
+            // --- 2. VERIFICAÇÃO DE PAUSA NO BANCO ---
             if (ticket && ticket.paused) {
-                if (Date.now() < ticket.until) return; 
-                else activeTickets.delete(from);
+                if (Date.now() < ticket.until) {
+                    return; // Bot ignorando porque você interviu
+                } else {
+                    // Passou os 3 dias, remove a pausa
+                    await ticketsColl.updateOne({ _id: from }, { $set: { paused: false } });
+                }
             }
 
-            // 3. CAPTURA DE TEXTO
             const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
             const texto = textoRaw.trim();
 
-            const sendBotMsg = async (jid, content) => {
-                const sent = await sock.sendMessage(jid, content);
-                lastBotMessageId = sent.key.id; 
-                return sent;
-            };
-
-            // 4. SAUDAÇÃO E MENU (NOME FIXO PARA EVITAR ERRO)
-            if (!ticket || (Date.now() - ticket.lastActivity > 2 * 60 * 60 * 1000)) {
+            // --- 3. LOGICA DO MENU ---
+            const timeoutMenu = 2 * 60 * 60 * 1000; 
+            if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
                 const ticketId = Math.floor(1000 + Math.random() * 9000);
-                activeTickets.set(from, { 
-                    id: ticketId, 
-                    aguardandoOpcao: true, 
-                    obrigadoEnviado: false, 
-                    lastActivity: Date.now() 
-                });
+                await ticketsColl.replaceOne({ _id: from }, {
+                    _id: from,
+                    id: ticketId,
+                    aguardandoOpcao: true,
+                    obrigadoEnviado: false,
+                    lastActivity: Date.now(),
+                    paused: false
+                }, { upsert: true });
 
-                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n` +
-                    `Atendimento: 🎫 *${ticketId}*\n\n` +
-                    `*Digite o número da opção desejada:*\n\n` +
-                    `1️⃣ Direito Digital\n` +
-                    `2️⃣ Direito Cível\n` +
-                    `3️⃣ Direito do Consumidor\n` +
-                    `4️⃣ Direito Imobiliário\n` +
-                    `5️⃣ Direito Trabalhista\n` +
-                    `6️⃣ Direito Empresarial\n` +
-                    `7️⃣ Outros Assuntos\n` +
-                    `8️⃣ Já sou cliente`;
-
+                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio*\n🎫 Atendimento: *${ticketId}*\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Já sou cliente`;
                 await sendBotMsg(from, { text: menuTexto });
                 return;
             }
 
-            ticket.lastActivity = Date.now();
+            // Atualiza atividade
+            await ticketsColl.updateOne({ _id: from }, { $set: { lastActivity: Date.now() } });
 
             const respostas = {
-                '1': `📱 *Direito Digital*\n\n📌 Qual a plataforma?\n📌 O que aconteceu?\n\nAnalisaremos seu caso em breve.`,
-                '2': `📄 *Direito Cível*\n\n📌 Tipo de demanda?\n📝 Resumo do caso?\n\nEquipe notificada.`,
-                '3': `🛒 *Direito do Consumidor*\n\n📌 Qual o problema?\n💰 Prejuízo?\n\nUm advogado falará com você.`,
-                '4': `🏠 *Direito Imobiliário*\n\n📌 Objeto?\n📝 Situação?\n\nAnalisaremos em breve.`,
-                '5': `👷 *Direito Trabalhista*\n\n📌 Situação atual?\n📌 Reclamações?\n\nEntraremos em contato.`,
-                '6': `🏢 *Direito Empresarial*\n\n📌 Natureza?\n🏷️ Empresa?\n\nUm advogado falará com você.`,
-                '7': `📝 *Outros Assuntos*\n\n📌 Descreva brevemente seu assunto.\n\nSua mensagem foi para triagem.`,
-                '8': `📂 *Atendimento em Andamento*\n\n📌 Nome completo.\n📌 CPF.\n\nEstamos localizando seu histórico.`
+                '1': `📱 *Direito Digital*\n📌 Qual a plataforma?\n📌 O que aconteceu?`,
+                '2': `📄 *Direito Cível*\n📌 Tipo de demanda?\n📝 Resumo do caso?`,
+                '3': `🛒 *Direito do Consumidor*\n📌 Qual o problema?`,
+                '4': `🏠 *Direito Imobiliário*\n📌 Objeto?\n📝 Situação?`,
+                '5': `👷 *Direito Trabalhista*\n📌 Situação atual?`,
+                '6': `🏢 *Direito Empresarial*\n📌 Natureza?`,
+                '7': `📝 *Outros Assuntos*\n📌 Descreva brevemente seu assunto.`,
+                '8': `📂 *Já sou cliente*\n📌 Nome completo e CPF.`
             };
 
-            // Lógica para processar a escolha do menu
             if (ticket.aguardandoOpcao) {
                 if (respostas[texto]) {
-                    await sendBotMsg(from, { text: respostas[texto] });
-                    ticket.aguardandoOpcao = false;
+                    const ok = await sendBotMsg(from, { text: respostas[texto] });
+                    if (ok) await ticketsColl.updateOne({ _id: from }, { $set: { aguardandoOpcao: false } });
                 }
-                return; // Retorna para esperar o relato após a opção ser enviada
+                return;
             }
 
-            // 5. VALIDAÇÃO DE DETALHES (O relato do cliente)
+            // Validação de detalhes
             if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
-                const MIN_DETALHE = 30;
                 const isMedia = msg.message.imageMessage || msg.message.documentMessage;
-                
-                if (texto.length < MIN_DETALHE && !isMedia) {
-                    await sendBotMsg(from, { text: `⚠️ Para que possamos analisar corretamente, precisamos de mais detalhes.\n\nPor favor, descreva melhor a situação com pelo menos ${MIN_DETALHE} caracteres.` });
+                if (texto.length < 30 && !isMedia) {
+                    await sendBotMsg(from, { text: `⚠️ Por favor, descreva melhor a situação (mínimo 30 caracteres).` });
                     return;
                 }
-                ticket.obrigadoEnviado = true;
-                await sendBotMsg(from, { text: `✅ Obrigado! Informações recebidas.\n\n⏱️ Retornaremos em breve.` });
+                const ok = await sendBotMsg(from, { text: `✅ Recebido! Retornaremos em breve.` });
+                if (ok) await ticketsColl.updateOne({ _id: from }, { $set: { obrigadoEnviado: true } });
             }
         });
 
@@ -196,23 +207,32 @@ async function startBot() {
                 console.log('✅ Bot Online!');
             }
             if (connection === 'close') {
-                if ((lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut) startBot();
+                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+                if (shouldReconnect) startBot();
             }
         });
 
-    } catch (err) { console.error(err); }
+    } catch (err) { 
+        console.error("Erro crítico:", err);
+        setTimeout(startBot, 5000);
+    }
 }
 
-io.on('connection', (socket) => {
-    if (currentUser) socket.emit('connected', currentUser);
-    else if (lastQr) socket.emit('qr', lastQr);
-});
+// --- PING DE SURVIVAL ---
+setInterval(async () => {
+    try {
+        const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
+        const protocol = host.includes('localhost') ? 'http' : 'https';
+        await axios.get(`${protocol}://${host}/`);
+        console.log('🚀 Keep-alive: Ping enviado.');
+    } catch (e) { console.log('Ping failed, but app is alive.'); }
+}, 5 * 60 * 1000);
 
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/', (req, res) => res.send('Bot Ativo!'));
 app.get('/logout', async (req, res) => {
-    await client.db('bot_whatsapp').collection('auth_session').deleteMany({});
-    io.emit('disconnected');
-    setTimeout(() => process.exit(0), 1000);
+    await authColl.deleteMany({});
+    await ticketsColl.deleteMany({});
+    process.exit(0);
 });
 
 server.listen(port, () => startBot());
