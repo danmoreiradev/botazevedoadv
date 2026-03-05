@@ -96,36 +96,37 @@ async function startBot() {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-            const from = msg.key.remoteJid;
+            // 'from' agora é SEMPRE o ID do chat (o cliente)
+            const from = msg.key.remoteJid; 
             const isMe = msg.key.fromMe;
 
-            // --- 1. TRAVA HUMANA IMEDIATA ---
+            // --- 1. TRAVA HUMANA CORRIGIDA ---
             if (isMe) {
-                // Se o ID da mensagem não é o ID da última mensagem que o BOT enviou
                 if (msg.key.id !== lastBotMessageId) {
                     const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
+                    // Bloqueia o ID da conversa (from), não o ID de quem mandou
                     await ticketsColl.updateOne(
                         { _id: from }, 
                         { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
                         { upsert: true }
                     );
-                    console.log(`⚠️ INTERVENÇÃO HUMANA: Bot pausado para ${from} por 3 dias.`);
+                    console.log(`⚠️ INTERVENÇÃO HUMANA: Bot silenciado no chat ${from} por 3 dias.`);
                 }
                 return; 
             }
 
-            // Busca ticket no DB para verificar pausa
+            // Busca ticket do cliente
             let ticket = await ticketsColl.findOne({ _id: from });
 
             if (ticket && ticket.paused) {
-                if (Date.now() < ticket.until) return; // Ignora se estiver na folga de 3 dias
+                if (Date.now() < ticket.until) return; 
                 else await ticketsColl.updateOne({ _id: from }, { $set: { paused: false } });
             }
 
             const sendBotMsg = async (jid, content) => {
                 try {
                     const sent = await sock.sendMessage(jid, content);
-                    lastBotMessageId = sent.key.id; // Atualiza o ID global para não travar a si mesmo
+                    lastBotMessageId = sent.key.id; 
                     return sent;
                 } catch (err) {
                     console.error("❌ Erro de Timeout contornado:", err.message);
