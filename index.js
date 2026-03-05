@@ -96,31 +96,36 @@ async function startBot() {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-            // 'from' agora é SEMPRE o ID do chat (o cliente)
-            const from = msg.key.remoteJid; 
+            // Ignora mensagens de controle/protocolo do WhatsApp
+            const messageType = Object.keys(msg.message)[0];
+            if (['protocolMessage', 'senderKeyDistributionMessage'].includes(messageType)) return;
+
+            // NORMALIZAÇÃO: Extrai apenas o número (ex: 55199...)
+            const rawJid = msg.key.remoteJid;
+            const cleanNumber = rawJid.split('@')[0]; 
             const isMe = msg.key.fromMe;
 
-            // --- 1. TRAVA HUMANA CORRIGIDA ---
+            // --- 1. TRAVA HUMANA (BASEADA NO NÚMERO LIMPO) ---
             if (isMe) {
-                if (msg.key.id !== lastBotMessageId) {
+                const isManual = msg.message.conversation || msg.message.extendedTextMessage || msg.message.imageMessage;
+                if (isManual && msg.key.id !== lastBotMessageId) {
                     const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
-                    // Bloqueia o ID da conversa (from), não o ID de quem mandou
                     await ticketsColl.updateOne(
-                        { _id: from }, 
+                        { _id: cleanNumber }, 
                         { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
                         { upsert: true }
                     );
-                    console.log(`⚠️ INTERVENÇÃO HUMANA: Bot silenciado no chat ${from} por 3 dias.`);
+                    console.log(`⚠️ INTERVENÇÃO MANUAL: Chat ${cleanNumber} pausado.`);
                 }
                 return; 
             }
 
-            // Busca ticket do cliente
-            let ticket = await ticketsColl.findOne({ _id: from });
+            // Busca ticket pelo número limpo
+            let ticket = await ticketsColl.findOne({ _id: cleanNumber });
 
             if (ticket && ticket.paused) {
                 if (Date.now() < ticket.until) return; 
-                else await ticketsColl.updateOne({ _id: from }, { $set: { paused: false } });
+                else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
             }
 
             const sendBotMsg = async (jid, content) => {
@@ -129,7 +134,7 @@ async function startBot() {
                     lastBotMessageId = sent.key.id; 
                     return sent;
                 } catch (err) {
-                    console.error("❌ Erro de Timeout contornado:", err.message);
+                    console.error("❌ Erro de envio contornado:", err.message);
                     return null; 
                 }
             };
@@ -141,8 +146,8 @@ async function startBot() {
             const timeoutMenu = 2 * 60 * 60 * 1000; 
             if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
                 const ticketId = Math.floor(1000 + Math.random() * 9000);
-                await ticketsColl.replaceOne({ _id: from }, {
-                    _id: from,
+                await ticketsColl.replaceOne({ _id: cleanNumber }, {
+                    _id: cleanNumber,
                     id: ticketId,
                     aguardandoOpcao: true,
                     obrigadoEnviado: false,
@@ -151,11 +156,11 @@ async function startBot() {
                 }, { upsert: true });
 
                 const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio*\n🎫 Atendimento: *${ticketId}*\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Já sou cliente`;
-                await sendBotMsg(from, { text: menuTexto });
+                await sendBotMsg(rawJid, { text: menuTexto });
                 return;
             }
 
-            await ticketsColl.updateOne({ _id: from }, { $set: { lastActivity: Date.now() } });
+            await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } });
 
             const respostas = {
                 '1': `📱 *Direito Digital*\n📌 Qual a plataforma?\n📌 O que aconteceu?`,
@@ -170,8 +175,8 @@ async function startBot() {
 
             if (ticket.aguardandoOpcao) {
                 if (respostas[texto]) {
-                    const ok = await sendBotMsg(from, { text: respostas[texto] });
-                    if (ok) await ticketsColl.updateOne({ _id: from }, { $set: { aguardandoOpcao: false } });
+                    const ok = await sendBotMsg(rawJid, { text: respostas[texto] });
+                    if (ok) await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false } });
                 }
                 return;
             }
@@ -179,11 +184,11 @@ async function startBot() {
             if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
                 const isMedia = msg.message.imageMessage || msg.message.documentMessage;
                 if (texto.length < 30 && !isMedia) {
-                    await sendBotMsg(from, { text: `⚠️ Por favor, descreva melhor a situação (mínimo 30 caracteres).` });
+                    await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva melhor a situação (mínimo 30 caracteres).` });
                     return;
                 }
-                const ok = await sendBotMsg(from, { text: `✅ Recebido! Retornaremos em breve.` });
-                if (ok) await ticketsColl.updateOne({ _id: from }, { $set: { obrigadoEnviado: true } });
+                const ok = await sendBotMsg(rawJid, { text: `✅ Recebido! Retornaremos em breve.` });
+                if (ok) await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true } });
             }
         });
 
@@ -213,17 +218,16 @@ async function startBot() {
     }
 }
 
-// --- PING KEEP-ALIVE ---
+// --- KEEP-ALIVE PING ---
 setInterval(async () => {
     try {
         const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
         const protocol = host.includes('localhost') ? 'http' : 'https';
         await axios.get(`${protocol}://${host}/`);
-        console.log('🚀 Keep-alive: Ping OK');
-    } catch (e) { console.log('Ping ativo'); }
+    } catch (e) {}
 }, 5 * 60 * 1000);
 
-// --- ROTAS ---
+// --- ROTAS EXPRESS / SOCKET ---
 io.on('connection', (socket) => {
     if (currentUser) socket.emit('connected', currentUser);
     else if (lastQr) socket.emit('qr', lastQr);
@@ -235,9 +239,9 @@ app.get('/logout', async (req, res) => {
     try {
         await authColl.deleteMany({});
         await ticketsColl.deleteMany({});
+        if (sock) await sock.logout();
         currentUser = null;
         lastQr = null;
-        if (sock) await sock.logout();
         io.emit('disconnected');
         res.send('Sessão encerrada.');
         setTimeout(() => process.exit(0), 1500);
