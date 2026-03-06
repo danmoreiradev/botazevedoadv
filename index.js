@@ -164,7 +164,16 @@ async function startBot() {
                     lastRawJid: rawJid
                 }, { upsert: true });
 
-                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Já sou cliente`;
+                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* 
+                ⚖️\n🎫 Atendimento: *${ticketId}*\n\n
+                1️⃣ Direito Digital (desbloqueio de contas)\n
+                2️⃣ Direito Cível e Contratual\n
+                3️⃣ Direito do Consumidor\n
+                4️⃣ Direito Imobiliário\n
+                5️⃣ Direito Trabalhista\n
+                6️⃣ Direito Empresarial\n
+                7️⃣ Outros Assuntos\n
+                8️⃣ Desejo falar de um atendimento/processo em andamento`;
                 await sendBotMsg(rawJid, { text: menuTexto });
                 return;
             }
@@ -172,103 +181,103 @@ async function startBot() {
             await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } });
 
             const respostas = {
-                    '1': `📱 *Direito Digital (Desbloqueio de Contas)*
+      '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
-                Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
-                Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
+Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
+Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
 
-                📌 Qual a plataforma? (Instagram, Facebook, WhatsApp, Mercado Livre, Uber, etc.)
+📌 Qual a plataforma? (Instagram, Facebook, WhatsApp, Mercado Livre, Uber, etc.)
 
-                📌 O que aconteceu? A conta foi hackeada, banida por "violação de termos" ou você perdeu o acesso de outra forma? Detalhe os fatos de maneira fundamentada.
+📌 O que aconteceu? A conta foi hackeada, banida por "violação de termos" ou você perdeu o acesso de outra forma? Detalhe os fatos de maneira fundamentada.
 
-                📸 Prints são fundamentais: Envie documentos, como capturas de tela da mensagem de erro ou do aviso de suspensão que aparece para você.
+📸 Prints são fundamentais: Envie documentos, como capturas de tela da mensagem de erro ou do aviso de suspensão que aparece para você.
 
-                👨‍⚖️ Um especialista em Direito Digital analisará seu caso e entrará em contato em breve.`,
+👨‍⚖️ Um especialista em Direito Digital analisará seu caso e entrará em contato em breve.`,
 
-                    '2': `📄 *Direito Cível e Contratual*
+      '2': `📄 *Direito Cível e Contratual*
 
-                Perfeito. Para direcionarmos você ao especialista em contratos e questões cíveis, precisamos entender o cenário:
+Perfeito. Para direcionarmos você ao especialista em contratos e questões cíveis, precisamos entender o cenário:
 
-                📌 Tipo de demanda: Trata-se de uma análise/elaboração de contrato, uma cobrança, um problema imobiliário ou outra questão de responsabilidade civil?
+📌 Tipo de demanda: Trata-se de uma análise/elaboração de contrato, uma cobrança, um problema imobiliário ou outra questão de responsabilidade civil?
 
-                📝 Resumo do caso: Explique brevemente a situação (pode ser por texto ou áudio).
+📝 Resumo do caso: Explique brevemente a situação (pode ser por texto ou áudio).
 
-                📎 Documentação: Se houver um contrato, notificação ou documento assinado envolvido, por favor, anexe o arquivo ou foto aqui.
+📎 Documentação: Se houver um contrato, notificação ou documento assinado envolvido, por favor, anexe o arquivo ou foto aqui.
 
-                ⏳ Aguarde um momento, nossa equipe jurídica especializada em Direito Cível/Contratual já foi notificada e falará com você em instantes.`,
+⏳ Aguarde um momento, nossa equipe jurídica especializada em Direito Cível/Contratual já foi notificada e falará com você em instantes.`,
 
-                    '3': `🛒 *Direito do Consumidor*
+      '3': `🛒 *Direito do Consumidor*
 
-                Compreendido! Vamos ajudar você a garantir seus direitos. Por favor, forneça os detalhes abaixo:
+Compreendido! Vamos ajudar você a garantir seus direitos. Por favor, forneça os detalhes abaixo:
 
-                📌 Qual o problema? É uma cobrança/negativação indevida, produto com defeito, serviço não entregue ou problema com bancos/telefonia/planos de saúde?
+📌 Qual o problema? É uma cobrança/negativação indevida, produto com defeito, serviço não entregue ou problema com bancos/telefonia/planos de saúde?
 
-                💰 Houve prejuízo financeiro? Se sim, informe o valor aproximado.
+💰 Houve prejuízo financeiro? Se sim, informe o valor aproximado.
 
-                📸 Provas: Envie fotos de notas fiscais, números de protocolo de atendimento, emails de reclamação ou prints de conversas.
+📸 Provas: Envie fotos de notas fiscais, números de protocolo de atendimento, emails de reclamação ou prints de conversas.
 
-                👨‍⚖️ Um de nossos advogados especialistas em Defesa do Consumidor entrará em contato para dar os próximos passos.`,
+👨‍⚖️ Um de nossos advogados especialistas em Defesa do Consumidor entrará em contato para dar os próximos passos.`,
 
-                    '4': `🏠 *Direito Imobiliário*
+      '4': `🏠 *Direito Imobiliário*
 
-                Entendido! Questões imobiliárias exigem atenção aos detalhes. Para que possamos te orientar, por favor, nos envie:
+Entendido! Questões imobiliárias exigem atenção aos detalhes. Para que possamos te orientar, por favor, nos envie:
 
-                📌 Qual o objeto da consulta? É sobre compra e venda, aluguel, despejo, usucapião, regularização de escritura ou problemas com condomínio?
+📌 Qual o objeto da consulta? É sobre compra e venda, aluguel, despejo, usucapião, regularização de escritura ou problemas com condomínio?
 
-                📝 Resumo da situação: Conte-nos o que está acontecendo (pode ser por texto ou áudio).
+📝 Resumo da situação: Conte-nos o que está acontecendo (pode ser por texto ou áudio).
 
-                📎 Documentos: Se possível, envie fotos do contrato, matrícula do imóvel ou notificações recebidas.
+📎 Documentos: Se possível, envie fotos do contrato, matrícula do imóvel ou notificações recebidas.
 
-                👨‍⚖️ Um especialista em Direito Imobiliário analisará seu caso e entrará em contato em breve.`,
+👨‍⚖️ Um especialista em Direito Imobiliário analisará seu caso e entrará em contato em breve.`,
 
-                    '5': `👷 *Direito Trabalhista*
+      '5': `👷 *Direito Trabalhista*
 
-                Compreendido. Vamos analisar seus direitos trabalhistas. Por favor, nos forneça as seguintes informações:
+Compreendido. Vamos analisar seus direitos trabalhistas. Por favor, nos forneça as seguintes informações:
 
-                📌 Situação atual: Você ainda trabalha na empresa ou já foi desligado? Se saiu, qual foi a data de saída?
+📌 Situação atual: Você ainda trabalha na empresa ou já foi desligado? Se saiu, qual foi a data de saída?
 
-                📌 Principais reclamações: O problema é sobre horas extras, falta de registro, verbas rescisórias, assédio ou acidente de trabalho?
+📌 Principais reclamações: O problema é sobre horas extras, falta de registro, verbas rescisórias, assédio ou acidente de trabalho?
 
-                📝 Detalhes: Explique brevemente os fatos (texto ou áudio).
+📝 Detalhes: Explique brevemente os fatos (texto ou áudio).
 
-                👨‍⚖️ Nossa equipe especializada em Direito do Trabalho entrará em contato em instantes para te orientar.`,
+👨‍⚖️ Nossa equipe especializada em Direito do Trabalho entrará em contato em instantes para te orientar.`,
 
-                    '6': `🏢 *Direito Empresarial*
+      '6': `🏢 *Direito Empresarial*
 
-                Perfeito. Para atendermos sua empresa com a agilidade necessária, por favor, informe:
+Perfeito. Para atendermos sua empresa com a agilidade necessária, por favor, informe:
 
-                📌 Natureza da demanda: Trata-se de consultoria preventiva, defesa em processos, questões societárias, tributárias ou recuperação de crédito?
+📌 Natureza da demanda: Trata-se de consultoria preventiva, defesa em processos, questões societárias, tributárias ou recuperação de crédito?
 
-                🏷️ Dados da empresa: Se preferir, informe o nome da empresa ou o segmento de atuação.
+🏷️ Dados da empresa: Se preferir, informe o nome da empresa ou o segmento de atuação.
 
-                📝 Descrição: Descreva o cenário atual ou a dúvida específica que você possui.
+📝 Descrição: Descreva o cenário atual ou a dúvida específica que você possui.
 
-                👨‍⚖️ Um de nossos advogados corporativos entrará em contato para agendar uma conversa ou dar continuidade ao atendimento.`,
+👨‍⚖️ Um de nossos advogados corporativos entrará em contato para agendar uma conversa ou dar continuidade ao atendimento.`,
 
-                    '7': `📝 *Outros Assuntos*
+      '7': `📝 *Outros Assuntos*
 
-                Sem problemas! Se o seu caso não se encaixa nas opções anteriores, queremos te ouvir da mesma forma.
+Sem problemas! Se o seu caso não se encaixa nas opções anteriores, queremos te ouvir da mesma forma.
 
-                📌 Por favor, descreva brevemente o seu assunto ou dúvida.
+📌 Por favor, descreva brevemente o seu assunto ou dúvida.
 
-                🎤 Sinta-se à vontade para enviar um áudio, se preferir explicar com mais detalhes.
+🎤 Sinta-se à vontade para enviar um áudio, se preferir explicar com mais detalhes.
 
-                🔎 Sua mensagem será encaminhada para nossa triagem e o profissional mais adequado para o seu tema entrará em contato o mais rápido possível.`,
+🔎 Sua mensagem será encaminhada para nossa triagem e o profissional mais adequado para o seu tema entrará em contato o mais rápido possível.`,
 
-                    '8': `📂 *Atendimento/Processo em Andamento*
+      '8': `📂 *Atendimento/Processo em Andamento*
 
-                Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos informe:
+Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos informe:
 
-                📌 Nome completo do titular da ação/contrato.
+📌 Nome completo do titular da ação/contrato.
 
-                📌 Número do processo ou CPF (caso você tenha em mãos).
+📌 Número do processo ou CPF (caso você tenha em mãos).
 
-                📌 Qual a sua solicitação? Você deseja saber o andamento, enviar um documento novo ou falar com o advogado responsável?
+📌 Qual a sua solicitação? Você deseja saber o andamento, enviar um documento novo ou falar com o advogado responsável?
 
-                📎 Se precisar enviar algum documento novo, pode anexar aqui agora.
+📎 Se precisar enviar algum documento novo, pode anexar aqui agora.
 
-                ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
-            };
+⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
+    };
 
             // ETAPA: PROCESSAR OPÇÃO DO MENU
             if (ticket.aguardandoOpcao) {
