@@ -42,6 +42,7 @@ let lastBotMessageId = null;
 let ticketsColl;
 let authColl;
 let knowledgeColl; // Coleção para a Base de Conhecimento
+let userLoginColl; // user
 
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
@@ -90,6 +91,7 @@ async function startBot() {
         authColl = db.collection('auth_session');
         ticketsColl = db.collection('active_tickets');
         knowledgeColl = db.collection('knowledge_base'); // Inicializada coleção
+        userLoginColl = db.collection('user_login');
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
         const { version } = await fetchLatestBaileysVersion();
@@ -346,14 +348,22 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
     const { user, pass } = req.body;
-    // Defina seu usuário e senha aqui
-    if (user === 'admin' && pass === 'ajadv2025@') {
-        req.session.loggedIn = true;
-        res.redirect('/');
-    } else {
-        res.send("<script>alert('Usuário ou senha incorretos'); window.location='/login';</script>");
+
+    try {
+        // Busca o usuário no banco de dados
+        const adminAccount = await userLoginColl.findOne({ user: user });
+
+        if (adminAccount && adminAccount.pass === pass) {
+            req.session.loggedIn = true;
+            res.redirect('/');
+        } else {
+            res.send("<script>alert('Usuário ou senha incorretos'); window.location='/login';</script>");
+        }
+    } catch (err) {
+        console.error("Erro ao validar login:", err);
+        res.status(500).send("Erro interno no servidor");
     }
 });
 
