@@ -165,15 +165,17 @@ async function startBot() {
                 }, { upsert: true });
 
                 const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* 
-                ⚖️\n🎫 Atendimento: *${ticketId}*\n\n
-                1️⃣ Direito Digital (desbloqueio de contas)\n
-                2️⃣ Direito Cível e Contratual\n
-                3️⃣ Direito do Consumidor\n
-                4️⃣ Direito Imobiliário\n
-                5️⃣ Direito Trabalhista\n
-                6️⃣ Direito Empresarial\n
-                7️⃣ Outros Assuntos\n
-                8️⃣ Desejo falar de um atendimento/processo em andamento`;
+⚖️\n🎫 Atendimento: *${ticketId}*\n
+Digite o número da opção desejada:
+
+1️⃣ Direito Digital (desbloqueio de contas)
+2️⃣ Direito Cível e Contratual
+3️⃣ Direito do Consumidor
+4️⃣ Direito Imobiliário
+5️⃣ Direito Trabalhista
+6️⃣ Direito Empresarial
+7️⃣ Outros Assuntos
+8️⃣ Desejo falar de um atendimento/processo em andamento`
                 await sendBotMsg(rawJid, { text: menuTexto });
                 return;
             }
