@@ -13,11 +13,23 @@ const path = require('path');
 const P = require('pino');
 const { Boom } = require('@hapi/boom');
 const axios = require('axios');
+const session = require('express-session'); // Acrescentado para o Login
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const port = process.env.PORT || 10000;
+
+// Middlewares para processar os dados do formulário e JSON
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Configuração de Sessão (Acrescentado)
+app.use(session({
+    secret: 'azevedo-secret-key',
+    resave: false,
+    saveUninitialized: true
+}));
 
 const mongoUri = process.env.MONGODB_URI;
 const client = new MongoClient(mongoUri);
@@ -29,6 +41,7 @@ let lastBotMessageId = null;
 
 let ticketsColl;
 let authColl;
+let knowledgeColl; // Coleção para a Base de Conhecimento
 
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
@@ -76,6 +89,7 @@ async function startBot() {
         const db = client.db('bot_whatsapp');
         authColl = db.collection('auth_session');
         ticketsColl = db.collection('active_tickets');
+        knowledgeColl = db.collection('knowledge_base'); // Inicializada coleção
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
         const { version } = await fetchLatestBaileysVersion();
@@ -111,7 +125,6 @@ async function startBot() {
                 );
             }
 
-            // --- 1. Trava humana caso mandar mensagem ---
             if (isMe) {
                 const isManual = msg.message.conversation || msg.message.extendedTextMessage || msg.message.imageMessage;
                 if (isManual && msg.key.id !== lastBotMessageId) {
@@ -150,7 +163,6 @@ async function startBot() {
             const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
             const texto = textoRaw.trim();
 
-            // --- 2. LÓGICA DO MENU ---
             const timeoutMenu = 2 * 60 * 60 * 1000; 
             if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
                 const ticketId = Math.floor(1000 + Math.random() * 9000);
@@ -164,8 +176,7 @@ async function startBot() {
                     lastRawJid: rawJid
                 }, { upsert: true });
 
-                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* 
-⚖️\n🎫 Atendimento: *${ticketId}*\n
+                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n
 Digite o número da opção desejada:
 
 1️⃣ Direito Digital (desbloqueio de contas)
@@ -182,7 +193,7 @@ Digite o número da opção desejada:
 
             await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } });
 
-            const respostas = {
+             const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
 Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
@@ -281,21 +292,17 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-            // ETAPA: PROCESSAR OPÇÃO DO MENU
             if (ticket.aguardandoOpcao) {
                 if (respostas[texto]) {
                     console.log(`✅ Enviando resposta da opção ${texto} para ${cleanNumber}`);
                     await sendBotMsg(rawJid, { text: respostas[texto] });
-                    // Garante que o estado mudou ANTES de qualquer outra coisa
                     await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false } });
                 }
                 return;
             }
 
-            // ETAPA: FINALIZAR APÓS DESCRIÇÃO
             if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
                 const isMedia = msg.message.imageMessage || msg.message.documentMessage;
-                // Verificamos se ele mandou um texto longo ou um arquivo
                 if (texto.length >= 20 || isMedia) {
                     console.log(`🏁 Enviando encerramento para ${cleanNumber}`);
                     const ok = await sendBotMsg(rawJid, { text: `✅ Recebido! Nossa equipe analisará as informações e retornaremos em breve.` });
@@ -303,8 +310,7 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
                         await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true } });
                     }
                 } else {
-                    // Texto curto demais
-                    await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes (ou envie um documento) para que possamos ajudar.` });
+                    await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes.` });
                 }
                 return;
             }
@@ -336,6 +342,67 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
     }
 }
 
+// --- ROTAS DE LOGIN E PAINEL ---
+
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
+
+app.post('/login', (req, res) => {
+    const { user, pass } = req.body;
+    // Defina seu usuário e senha aqui
+    if (user === 'admin' && pass === 'ajadv2025@') {
+        req.session.loggedIn = true;
+        res.redirect('/');
+    } else {
+        res.send("<script>alert('Usuário ou senha incorretos'); window.location='/login';</script>");
+    }
+});
+
+app.get('/', (req, res) => {
+    if (!req.session.loggedIn) return res.redirect('/login');
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Logout do Painel (Sair do Sistema)
+app.get('/logout-panel', (req, res) => {
+    req.session.destroy();
+    res.redirect('/login');
+});
+
+// Desconectar o WhatsApp (Botão "Desconectar Aparelho")
+app.get('/logout-whatsapp', async (req, res) => {
+    try {
+        await authColl.deleteMany({});
+        if (sock) await sock.logout();
+        currentUser = null;
+        lastQr = null;
+        io.emit('disconnected');
+        res.sendStatus(200);
+    } catch (err) { res.status(500).send("Erro"); }
+});
+
+// --- API DA BASE DE CONHECIMENTO ---
+
+app.post('/api/knowledge', async (req, res) => {
+    if (!req.session.loggedIn) return res.sendStatus(401);
+    const { pergunta, resposta } = req.body;
+    if (knowledgeColl) {
+        await knowledgeColl.insertOne({ pergunta, resposta, date: new Date() });
+        res.sendStatus(201);
+    }
+});
+
+app.get('/api/knowledge', async (req, res) => {
+    if (!req.session.loggedIn) return res.sendStatus(401);
+    if (knowledgeColl) {
+        const data = await knowledgeColl.find({}).sort({ date: -1 }).toArray();
+        res.json(data);
+    } else {
+        res.json([]);
+    }
+});
+
+// --- MANUTENÇÃO E INICIALIZAÇÃO ---
+
 setInterval(async () => {
     try {
         const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
@@ -347,21 +414,6 @@ setInterval(async () => {
 io.on('connection', (socket) => {
     if (currentUser) socket.emit('connected', currentUser);
     else if (lastQr) socket.emit('qr', lastQr);
-});
-
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-
-app.get('/logout', async (req, res) => {
-    try {
-        await authColl.deleteMany({});
-        await ticketsColl.deleteMany({});
-        if (sock) await sock.logout();
-        currentUser = null;
-        lastQr = null;
-        io.emit('disconnected');
-        res.send('Sessão encerrada.');
-        setTimeout(() => process.exit(0), 1500);
-    } catch (err) { res.status(500).send("Erro"); }
 });
 
 server.listen(port, () => startBot());

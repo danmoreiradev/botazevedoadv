@@ -11,6 +11,7 @@
     "@whiskeysockets/baileys": "^6.7.21",
     "axios": "^1.13.6",
     "express": "^5.2.1",
+    "express-session": "^1.19.0",
     "mongodb": "^6.21.0",
     "pino": "^8.21.0",
     "qrcode-terminal": "^0.12.0",
