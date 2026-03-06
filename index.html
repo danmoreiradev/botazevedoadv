@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Painel Azevedo & Juvencio</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
     
     <style>
         :root { 
@@ -26,44 +24,58 @@
             overflow: hidden; 
         }
         
-        /* SIDEBAR DESKTOP */
+        /* SIDEBAR DESKTOP - LARGURA AUMENTADA PARA LOGO GRANDE */
         .sidebar { 
-            width: 280px; 
+            width: 320px; 
             background: var(--adv-blue); 
             color: white; 
             display: flex; 
             flex-direction: column; 
             box-shadow: 4px 0 15px rgba(0,0,0,0.1); 
-            transition: all 0.3s;
+            z-index: 1001;
         }
         
         .sidebar-brand { 
-            padding: 30px 20px; 
-            font-size: 1.1rem; 
-            font-weight: bold; 
+            padding: 45px 15px; /* Espaçamento interno generoso */
             border-bottom: 1px solid rgba(255,255,255,0.1); 
             text-align: center; 
-            letter-spacing: 1px; 
+            background: rgba(0,0,0,0.1);
+        }
+
+        /* AJUSTE DO LOGO - VISIBILIDADE MÁXIMA */
+        .logo-img {
+            width: 95%; /* Ocupa quase toda a largura da sidebar */
+            height: auto;
+            max-height: 140px; /* Aumentado drasticamente para visibilidade total */
+            object-fit: contain;
+            /* Sombra para destacar letras brancas no fundo azul */
+            filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.4)); 
+            transition: transform 0.3s ease;
+        }
+        
+        .logo-img:hover {
+            transform: scale(1.02); /* Leve efeito ao passar o mouse */
         }
         
         .nav-link { 
             color: rgba(255,255,255,0.7); 
-            padding: 18px 25px; 
+            padding: 22px 25px; 
             cursor: pointer; 
-            border-left: 4px solid transparent; 
+            border-left: 6px solid transparent; 
             transition: 0.3s; 
             text-decoration: none; 
             display: flex;
             align-items: center;
+            font-weight: 600;
+            font-size: 0.95rem;
         }
         
         .nav-link:hover, .nav-link.active { 
             color: white; 
-            background: rgba(255,255,255,0.05); 
+            background: rgba(255,255,255,0.07); 
             border-left-color: var(--adv-gold); 
         }
 
-        /* CONTEÚDO PRINCIPAL */
         .main-content { 
             flex: 1; 
             overflow-y: auto; 
@@ -74,42 +86,41 @@
         
         .card-custom { 
             background: white; 
-            padding: 30px; 
-            border-radius: 20px; 
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05); 
+            padding: 35px; 
+            border-radius: 25px; 
+            box-shadow: 0 12px 35px rgba(0,0,0,0.06); 
             text-align: center;
             border: none;
         }
         
-        /* ELEMENTOS WHATSAPP (ESTILO ORIGINAL) */
+        /* WHATSAPP ELEMENTS */
         #qrcode { 
             display: flex; 
             justify-content: center; 
-            margin: 20px 0; 
-            padding: 10px; 
+            margin: 25px 0; 
+            padding: 15px; 
             background: white; 
-            border-radius: 10px; 
+            border-radius: 12px; 
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.05);
         }
         
         #profilePic { 
-            width: 130px; 
-            height: 130px; 
+            width: 140px; 
+            height: 140px; 
             border-radius: 50%; 
-            border: 5px solid var(--whatsapp-green); 
+            border: 6px solid var(--whatsapp-green); 
             object-fit: cover; 
-            margin-bottom: 15px; 
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1); 
+            margin-bottom: 20px; 
         }
         
         .status-badge { 
             display: inline-block; 
-            padding: 6px 15px; 
+            padding: 10px 25px; 
             border-radius: 50px; 
-            font-size: 0.75rem; 
-            font-weight: 700; 
+            font-size: 0.8rem; 
+            font-weight: 800; 
             text-transform: uppercase; 
-            letter-spacing: 1px; 
-            margin-bottom: 15px; 
+            margin-bottom: 20px; 
         }
         
         .bg-waiting { background: #fff3e0; color: #ef6c00; }
@@ -119,186 +130,143 @@
             background-color: var(--danger-red); 
             color: white; 
             border: none; 
-            padding: 12px; 
-            border-radius: 10px; 
-            cursor: pointer; 
-            font-weight: 600; 
-            font-size: 1rem; 
-            transition: all 0.3s ease; 
+            padding: 14px; 
+            border-radius: 12px; 
+            font-weight: 700; 
             width: 100%; 
-            max-width: 280px;
-            margin-top: 10px; 
+            max-width: 300px;
         }
         
-        .btn-logout-wa:hover { 
-            background-color: #d33426; 
-            transform: scale(1.02); 
-        }
-
         .hidden { display: none !important; }
 
-        /* --- RESPONSIVIDADE MOBILE --- */
+        /* RESPONSIVIDADE MOBILE APRIMORADA */
         @media (max-width: 768px) {
             body { flex-direction: column; overflow-y: auto; }
-            
-            .sidebar { 
-                width: 100%; 
-                height: auto; 
-                position: sticky; 
-                top: 0; 
-                z-index: 1000;
-            }
-            
-            .sidebar-brand { display: none; }
-            
+            .sidebar { width: 100%; height: auto; position: sticky; top: 0; }
+            .sidebar-brand { padding: 25px 15px; }
+            .logo-img { max-height: 90px; width: 90%; }
             .nav { flex-direction: row !important; }
-            
             .nav-link { 
                 flex: 1; 
                 justify-content: center; 
-                padding: 15px 5px; 
-                font-size: 0.8rem; 
+                padding: 18px 5px; 
+                font-size: 0.75rem; 
                 border-left: none; 
-                border-bottom: 3px solid transparent; 
+                border-bottom: 5px solid transparent; 
             }
-            
-            .nav-link.active { 
-                border-left: none; 
-                border-bottom: 3px solid var(--adv-gold); 
-            }
-            
-            .main-content { padding: 20px 15px; }
-            
-            .card-custom { padding: 20px; }
-
-            .mt-auto { margin-top: 0 !important; }
+            .nav-link.active { border-bottom: 5px solid var(--adv-gold); }
+            .main-content { padding: 25px 15px; }
+            .mt-auto { margin-top: 0 !important; background: rgba(0,0,0,0.2) !important; }
         }
     </style>
 </head>
 <body>
 
     <div class="sidebar">
-        <div class="sidebar-brand">⚖️ AZEVEDO & JUVENCIO</div>
-        <div class="nav flex-column mt-md-3">
+        <div class="sidebar-brand">
+            <img src="https://azevedoejuvencioadvogados.com.br/wp-content/uploads/2026/01/Copia-de-Logo-Alta-Resolucao-horizontal-transparencia-1024x335.png" alt="Azevedo e Juvencio" class="logo-img">
+        </div>
+        
+        <div class="nav flex-column mt-md-2">
             <div class="nav-link active" onclick="switchTab('tab-chatbot', this)">🤖 CHATBOT</div>
             <div class="nav-link" onclick="switchTab('tab-ia', this)">🧠 GESTÃO IA</div>
         </div>
-        <div class="mt-auto nav-link border-0 text-white-50" onclick="window.location.href='/logout-panel'" style="font-size: 0.85rem; background: rgba(0,0,0,0.1)">
+
+        <div class="mt-auto nav-link border-0 text-white-50" onclick="window.location.href='/logout-panel'" style="font-size: 0.85rem; background: rgba(0,0,0,0.2)">
             🚪 SAIR DO PAINEL
         </div>
     </div>
 
     <div class="main-content">
-        
         <div id="tab-chatbot" class="content-section">
             <h4 class="mb-4" style="color: var(--adv-blue); font-weight: 700;">Conectividade WhatsApp</h4>
             
-            <div class="card-custom mx-auto" style="max-width: 450px; min-height: 400px; display: flex; flex-direction: column; justify-content: center;">
-                
+            <div class="card-custom mx-auto" style="max-width: 480px; min-height: 450px; display: flex; flex-direction: column; justify-content: center;">
                 <div id="qr-container">
                     <div class="status-badge bg-waiting">Aguardando Conexão</div>
-                    <p id="qr-status" class="text-muted small">Iniciando sistema...</p>
+                    <p id="qr-status" class="text-muted mb-4">Escaneie o QR Code com seu WhatsApp:</p>
                     <div id="qrcode"></div>
                 </div>
 
                 <div id="status-container" class="hidden">
-                    <div class="status-badge bg-online">Bot Online</div><br>
-                    <img id="profilePic" src="" alt="Foto">
+                    <div class="status-badge bg-online">Sessão Ativa</div><br>
+                    <img id="profilePic" src="" alt="Perfil">
                     <div class="user-info">
-                        <h3 id="userName" style="color: #222; font-size: 1.4rem; margin-top: 10px;"></h3>
-                        <p id="userNumber" style="color: #666; margin-bottom: 20px;"></p>
+                        <h3 id="userName" style="color: #222; font-size: 1.5rem; margin-top: 10px;"></h3>
+                        <p id="userNumber" style="color: #666; margin-bottom: 25px;"></p>
                     </div>
                     <button class="btn-logout-wa" onclick="handleWhatsAppLogout()">Desconectar Aparelho</button>
                 </div>
-
             </div>
         </div>
 
         <div id="tab-ia" class="content-section hidden">
-            <h4 class="mb-4" style="color: var(--adv-blue); font-weight: 700;">Base de Conhecimento</h4>
-            
+            <h4 class="mb-4" style="color: var(--adv-blue); font-weight: 700;">Base de Conhecimento IA</h4>
             <div class="row g-4">
                 <div class="col-lg-5">
                     <div class="card-custom text-start p-4">
-                        <h5 class="mb-3" style="color: var(--adv-blue)">Treinar Inteligência</h5>
+                        <h5 class="mb-4" style="color: var(--adv-blue)">Treinar Robô</h5>
                         <div class="mb-3">
-                            <label class="form-label small fw-bold">Pergunta ou Palavra-Chave</label>
-                            <input type="text" id="pergunta_ia" class="form-control" placeholder="Ex: Honorários ou Divórcio">
+                            <label class="form-label small fw-bold">Palavra ou Frase Gatilho</label>
+                            <input type="text" id="pergunta_ia" class="form-control" placeholder="Ex: Valor da consulta">
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label small fw-bold">Resposta do Robô</label>
-                            <textarea id="resposta_ia" class="form-control" rows="6" placeholder="O que o bot deve responder para este assunto?"></textarea>
+                        <div class="mb-4">
+                            <label class="form-label small fw-bold">Resposta Automática</label>
+                            <textarea id="resposta_ia" class="form-control" rows="6" placeholder="Escreva a resposta completa aqui..."></textarea>
                         </div>
-                        <button class="btn w-100 text-white fw-bold py-2" style="background: var(--adv-blue)" onclick="salvarConhecimento()">SALVAR NA BASE</button>
+                        <button class="btn w-100 text-white fw-bold py-3" style="background: var(--adv-blue)" onclick="salvarConhecimento()">ATUALIZAR CÉREBRO IA</button>
                     </div>
                 </div>
 
                 <div class="col-lg-7">
-                    <div class="card-custom text-start p-4" style="min-height: 440px;">
-                        <h5 class="mb-3" style="color: var(--adv-blue)">Assuntos Mapeados</h5>
-                        <div id="lista_conhecimento" class="list-group list-group-flush overflow-auto" style="max-height: 380px;">
+                    <div class="card-custom text-start p-4" style="min-height: 480px;">
+                        <h5 class="mb-4" style="color: var(--adv-blue)">Conhecimentos Ativos</h5>
+                        <div id="lista_conhecimento" class="list-group list-group-flush overflow-auto" style="max-height: 400px;">
                             </div>
                     </div>
                 </div>
             </div>
         </div>
-
     </div>
 
+    <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    
     <script>
         const socket = io();
 
-        // Troca de Abas
         function switchTab(tabId, el) {
             document.querySelectorAll('.content-section').forEach(s => s.classList.add('hidden'));
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
             document.getElementById(tabId).classList.remove('hidden');
             el.classList.add('active');
-            
             if(tabId === 'tab-ia') carregarConhecimento();
         }
 
-        // LÓGICA DE CONEXÃO (WHATSAPP)
         socket.on('qr', (qr) => {
             document.getElementById('status-container').classList.add('hidden');
             document.getElementById('qr-container').classList.remove('hidden');
-            document.getElementById('qr-status').innerText = "Escaneie o código abaixo:";
             const qrcodeDiv = document.getElementById('qrcode');
             qrcodeDiv.innerHTML = "";
-            new QRCode(qrcodeDiv, { text: qr, width: 200, height: 200, colorDark: "#094360" });
+            new QRCode(qrcodeDiv, { text: qr, width: 240, height: 240, colorDark: "#094360" });
         });
 
         socket.on('connected', (user) => {
             document.getElementById('qr-container').classList.add('hidden');
             document.getElementById('status-container').classList.remove('hidden');
-            document.getElementById('profilePic').src = user.pic;
-            document.getElementById('userName').innerText = user.name;
-            document.getElementById('userNumber').innerText = user.number;
+            document.getElementById('profilePic').src = user.pic || '';
+            document.getElementById('userName').innerText = user.name || 'Advogado';
+            document.getElementById('userNumber').innerText = user.number || '';
         });
 
         socket.on('disconnected', () => {
-            document.getElementById('status-container').classList.add('hidden');
-            document.getElementById('qr-container').classList.remove('hidden');
-            document.getElementById('qrcode').innerHTML = "";
-            document.getElementById('qr-status').innerText = "Sessão encerrada. Reiniciando...";
-            setTimeout(() => window.location.reload(), 2000);
+            window.location.reload();
         });
 
-        // Desconectar o Aparelho (WhatsApp)
-        function handleWhatsAppLogout() {
-            if(confirm("Deseja realmente desconectar o WhatsApp? O bot parará de responder.")) {
-                fetch('/logout-whatsapp').then(res => {
-                    if(res.ok) console.log("Logout do WhatsApp solicitado...");
-                });
-            }
-        }
-
-        // LÓGICA DA BASE DE CONHECIMENTO
         async function salvarConhecimento() {
             const pergunta = document.getElementById('pergunta_ia').value;
             const resposta = document.getElementById('resposta_ia').value;
-            
-            if(!pergunta || !resposta) return alert("Por favor, preencha a pergunta e a resposta.");
+            if(!pergunta || !resposta) return alert("Preencha todos os campos.");
 
             const res = await fetch('/api/knowledge', {
                 method: 'POST',
@@ -318,17 +286,23 @@
             const data = await res.json();
             const container = document.getElementById('lista_conhecimento');
             
-            if(data.length === 0) {
-                container.innerHTML = `<p class="text-muted small p-3">Nenhum conhecimento cadastrado ainda.</p>`;
+            if(!data.length) {
+                container.innerHTML = `<p class="text-muted p-3">Nenhuma instrução cadastrada.</p>`;
                 return;
             }
 
             container.innerHTML = data.map(item => `
-                <div class="list-group-item py-3 px-0 border-bottom">
-                    <div class="fw-bold mb-1" style="color: var(--adv-blue); font-size: 0.95rem;">${item.pergunta}</div>
-                    <div class="text-muted small" style="line-height: 1.4;">${item.resposta}</div>
+                <div class="list-group-item py-3 border-bottom">
+                    <div class="fw-bold mb-1" style="color: var(--adv-blue);">${item.pergunta}</div>
+                    <div class="text-muted small">${item.resposta}</div>
                 </div>
             `).join('');
+        }
+
+        function handleWhatsAppLogout() {
+            if(confirm("Deseja realmente desconectar?")) {
+                fetch('/logout-whatsapp');
+            }
         }
     </script>
 </body>
