@@ -45,12 +45,26 @@ let knowledgeColl; // Coleção para a Base de Conhecimento
 let userLoginColl; // user
 
 async function useMongoDBAuthState(collection) {
-    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
+    const writeData = (data, id) => {
+        // O BufferJSON.replacer é essencial aqui
+        return collection.replaceOne(
+            { _id: id }, 
+            JSON.parse(JSON.stringify(data, BufferJSON.replacer)), 
+            { upsert: true }
+        );
+    };
+
     const readData = async (id) => {
         const data = await collection.findOne({ _id: id });
-        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
+        if (data) {
+            // O BufferJSON.reviver reconstrói os Buffers/Uint8Arrays
+            return JSON.parse(JSON.stringify(data), BufferJSON.reviver);
+        }
+        return null;
     };
+
     const removeData = (id) => collection.deleteOne({ _id: id });
+
     const creds = await readData('creds') || initAuthCreds();
 
     return {
@@ -59,24 +73,25 @@ async function useMongoDBAuthState(collection) {
             keys: {
                 get: async (type, ids) => {
                     const data = {};
-                    await Promise.all(ids.map(async id => {
+                    await Promise.all(ids.map(async (id) => {
                         let value = await readData(`${type}-${id}`);
                         if (type === 'app-state-sync-key' && value) {
-                            value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                            value = proto.Message.AppStateSyncKeyData.fromObject(value);
                         }
                         data[id] = value;
                     }));
                     return data;
                 },
                 set: async (data) => {
+                    const tasks = [];
                     for (const type in data) {
                         for (const id in data[type]) {
                             const value = data[type][id];
                             const storeId = `${type}-${id}`;
-                            if (value) await writeData(value, storeId);
-                            else await removeData(storeId);
+                            tasks.push(value ? writeData(value, storeId) : removeData(storeId));
                         }
                     }
+                    await Promise.all(tasks);
                 }
             }
         },
@@ -99,11 +114,13 @@ async function startBot() {
         sock = makeWASocket({
             version,
             auth: state,
-            logger: P({ level: 'silent' }),
-            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-            connectTimeoutMs: 80000,
-            defaultQueryTimeoutMs: 0, 
-            retryRequestDelayMs: 3000
+            logger: P({ level: 'info' }), // Mude para 'info' temporariamente para ver erros de chave
+            browser: ['Azevedo Advogados', 'Chrome', '111.0.0'], // Versão de Chrome mais atualizada
+            printQRInTerminal: false,
+            markOnlineOnConnect: true,
+            connectTimeoutMs: 60000,
+            generateHighQualityLinkPreview: true,
+            syncFullHistory: false // Isso evita que o bot tente baixar 500mb de histórico e trave as chaves
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -113,8 +130,8 @@ async function startBot() {
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
             const messageType = Object.keys(msg.message)[0];
-            if (['protocolMessage', 'senderKeyDistributionMessage'].includes(messageType)) return;
-
+            if (messageType === 'protocolMessage' || messageType === 'senderKeyDistributionMessage') return;
+            
             const rawJid = msg.key.remoteJid;
             const cleanNumber = rawJid.split('@')[0]; 
             const isMe = msg.key.fromMe;
