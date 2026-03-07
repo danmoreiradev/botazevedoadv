@@ -117,68 +117,56 @@ async function startBot() {
             const cleanNumber = rawJid.split('@')[0]; 
             const isMe = msg.key.fromMe;
 
-            // Função interna de envio atualizada para evitar o loop de pausa
             const sendBotMsg = async (jid, content) => {
                 try {
                     const sent = await sock.sendMessage(jid, content);
                     lastBotMessageId = sent.key.id; 
                     return sent;
-                } catch (err) {
-                    console.error("❌ Erro de envio:", err.message);
-                    return null; 
-                }
+                } catch (err) { return null; }
             };
 
-            // Atualiza o JID e evita concorrência
-            if (!isMe) {
-                await ticketsColl.updateOne(
-                    { _id: cleanNumber },
-                    { $set: { lastRawJid: rawJid } }, 
-                    { upsert: true }
-                );
-            }
+            const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
-            // Tratamento de Intervenção Manual
-            if (isMe) {
-                if (msg.key.id !== lastBotMessageId) {
-                    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
-                    await ticketsColl.updateOne(
-                        { _id: cleanNumber }, 
-                        { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }
-                    );
-                    console.log(`⚠️ INTERVENÇÃO MANUAL: Chat ${cleanNumber} pausado.`);
-                }
-                return; 
-            }
-
-            let ticket = await ticketsColl.findOne({ _id: cleanNumber });
-
-            // Verifica se o bot está pausado
-            if (ticket && ticket.paused) {
-                if (Date.now() < ticket.until) return; 
-                else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
-            }
-
-            const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-            const texto = textoRaw.trim();
-
-            const timeoutMenu = 2 * 60 * 60 * 1000; 
-            
-            // Lógica do Menu Inicial
-            if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-                const ticketId = Math.floor(1000 + Math.random() * 9000);
-                await ticketsColl.updateOne({ _id: cleanNumber }, {
-                    $set: {
-                        id: ticketId,
-                        aguardandoOpcao: true,
-                        obrigadoEnviado: false,
-                        lastActivity: Date.now(),
-                        paused: false,
-                        lastRawJid: rawJid
+            try {
+                if (isMe) {
+                    if (msg.key.id !== lastBotMessageId) {
+                        await ticketsColl.updateOne(
+                            { _id: cleanNumber }, 
+                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } },
+                            { upsert: true }
+                        );
                     }
-                }, { upsert: true });
+                    return; 
+                }
 
-                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n
+                let ticket = await ticketsColl.findOne({ _id: cleanNumber });
+
+                if (ticket && ticket.paused) {
+                    if (Date.now() < ticket.until) return; 
+                    else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
+                }
+
+                const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+                const texto = textoRaw.trim();
+                const timeoutMenu = 2 * 60 * 60 * 1000; 
+
+                // Fluxo de Menu
+                if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+                    const ticketId = Math.floor(1000 + Math.random() * 9000);
+                    await ticketsColl.updateOne({ _id: cleanNumber }, {
+                        $set: {
+                            id: ticketId,
+                            aguardandoOpcao: true,
+                            obrigadoEnviado: false,
+                            tentouInsistir: false,
+                            errosMenu: 0, // Contador de erros no menu
+                            lastActivity: Date.now(),
+                            paused: false,
+                            lastRawJid: rawJid
+                        }
+                    }, { upsert: true });
+
+                   const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n
 Digite o número da opção desejada:
 
 1️⃣ Direito Digital (desbloqueio de contas)
@@ -294,44 +282,58 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-            // Resposta à Opção Selecionada
-            if (ticket.aguardandoOpcao) {
-                if (respostas[texto]) {
-                    console.log(`✅ Opção ${texto} para ${cleanNumber}`);
-                    await sendBotMsg(rawJid, { text: respostas[texto] });
-                    await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false } });
-                }
-                return;
-            }
-
-            // Envio do "Obrigado" Final (Gargalo corrigido aqui)
-            if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
-                const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage || msg.message.videoMessage);
-                
-                // Se o texto for razoável (>= 10 chars) ou for mídia, aceita.
-                if (texto.length >= 10 || isMedia) {
-                    console.log(`🏁 Finalizando atendimento para ${cleanNumber}`);
-                    const ok = await sendBotMsg(rawJid, { text: `✅ Recebido! Nossa equipe analisará as informações e retornaremos em breve.` });
-                    if (ok) {
-                        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true } });
+                // Lógica de Opções com tolerância a erros
+                if (ticket.aguardandoOpcao) {
+                    if (respostas[texto]) {
+                        await sendBotMsg(rawJid, { text: respostas[texto] });
+                        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
+                    } else {
+                        const novosErros = (ticket.errosMenu || 0) + 1;
+                        if (novosErros >= 2) {
+                            await sendBotMsg(rawJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde só mais um pouquinho que já te responderemos.` });
+                            await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                        } else {
+                            await sendBotMsg(rawJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8) da opção desejada.` });
+                            await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { errosMenu: novosErros } });
+                        }
                     }
-                } else {
-                    await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para podermos te ajudar.` });
+                    return;
                 }
-                return;
+
+                // Lógica de Encerramento (Obrigado) com insistência única
+                if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
+                    const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
+                    
+                    if (texto.length >= 20 || isMedia) {
+                        await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
+                        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+                    } 
+                    else if (!ticket.tentouInsistir) {
+                        await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
+                        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { tentouInsistir: true } });
+                    } 
+                    else {
+                        await sendBotMsg(rawJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
+                        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+                    }
+                    return;
+                }
+
+            } catch (err) {
+                console.error("Erro no processamento:", err);
+                await sendBotMsg(rawJid, { text: `✅ Já recebemos sua mensagem. Um especialista já vai atendê-lo, aguarde um momento.` });
+                await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: true, until: blockUntil, obrigadoEnviado: true } }).catch(()=>{});
             }
         });
 
+        // --- RESTO DA LÓGICA DE CONEXÃO E ROTAS (MANTIDAS) ---
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             if (qr) { lastQr = qr; io.emit('qr', qr); }
             if (connection === 'open') {
                 lastQr = null;
                 const userNumber = sock.user.id.split(':')[0];
-                let ppUrl;
-                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } 
-                catch { ppUrl = 'https://www.w3schools.com/howto/img_avatar.png'; }
-                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
+                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: 'https://www.w3schools.com/howto/img_avatar.png' };
                 io.emit('connected', currentUser);
                 console.log('✅ Bot Online!');
             }
@@ -341,26 +343,22 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
                 else io.emit('disconnected');
             }
         });
-
     } catch (err) { 
         console.error("Erro crítico:", err);
         setTimeout(startBot, 5000);
     }
 }
 
-// --- ROTAS DE LOGIN E PAINEL (Mantidas conforme original) ---
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 app.post('/login', async (req, res) => {
     const { user, pass } = req.body;
     try {
-        const adminAccount = await userLoginColl.findOne({ user: user });
+        const adminAccount = await userLoginColl.findOne({ user });
         if (adminAccount && adminAccount.pass === pass) {
             req.session.loggedIn = true;
             res.redirect('/');
-        } else {
-            res.send("<script>alert('Usuário ou senha incorretos'); window.location='/login';</script>");
-        }
-    } catch (err) { res.status(500).send("Erro interno"); }
+        } else res.send("<script>alert('Erro'); window.location='/login';</script>");
+    } catch (e) { res.status(500).send("Erro"); }
 });
 
 app.get('/', (req, res) => {
@@ -381,23 +379,6 @@ app.get('/logout-whatsapp', async (req, res) => {
         io.emit('disconnected');
         res.sendStatus(200);
     } catch (err) { res.status(500).send("Erro"); }
-});
-
-app.post('/api/knowledge', async (req, res) => {
-    if (!req.session.loggedIn) return res.sendStatus(401);
-    const { pergunta, resposta } = req.body;
-    if (knowledgeColl) {
-        await knowledgeColl.insertOne({ pergunta, resposta, date: new Date() });
-        res.sendStatus(201);
-    }
-});
-
-app.get('/api/knowledge', async (req, res) => {
-    if (!req.session.loggedIn) return res.sendStatus(401);
-    if (knowledgeColl) {
-        const data = await knowledgeColl.find({}).sort({ date: -1 }).toArray();
-        res.json(data);
-    } else res.json([]);
 });
 
 setInterval(async () => {
