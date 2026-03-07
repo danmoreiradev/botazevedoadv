@@ -4,7 +4,8 @@ const {
     fetchLatestBaileysVersion, 
     BufferJSON, 
     initAuthCreds,
-    Browsers 
+    Browsers,
+    makeCacheableSignalKeyStore 
 } = require('@whiskeysockets/baileys');
 const { MongoClient } = require('mongodb');
 const express = require('express');
@@ -21,7 +22,6 @@ const server = http.createServer(app);
 const io = new Server(server);
 const port = process.env.PORT || 10000;
 
-// Middlewares
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -39,10 +39,7 @@ let currentUser = null;
 let sock;
 let lastBotMessageId = null; 
 
-let ticketsColl;
-let authColl;
-let knowledgeColl; 
-let userLoginColl; 
+let ticketsColl, authColl, knowledgeColl, userLoginColl;
 
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
@@ -56,7 +53,7 @@ async function useMongoDBAuthState(collection) {
     return {
         state: {
             creds,
-            keys: {
+            keys: makeCacheableSignalKeyStore({
                 get: async (type, ids) => {
                     const data = {};
                     await Promise.all(ids.map(async id => {
@@ -78,24 +75,18 @@ async function useMongoDBAuthState(collection) {
                         }
                     }
                 }
-            }
+            }, P({ level: 'silent' }))
         },
         saveCreds: () => writeData(creds, 'creds')
     };
 }
 
-// --- FUNÇÃO DE LIMPEZA DE TICKETS ANTIGOS (7 DIAS) ---
 async function cleanOldTickets() {
     if (!ticketsColl) return;
     try {
         const seteDiasAtras = Date.now() - (7 * 24 * 60 * 60 * 1000);
-        const result = await ticketsColl.deleteMany({ lastActivity: { $lt: seteDiasAtras } });
-        if (result.deletedCount > 0) {
-            console.log(`🧹 Manutenção: ${result.deletedCount} tickets antigos removidos.`);
-        }
-    } catch (err) {
-        console.error("❌ Erro na limpeza de tickets:", err);
-    }
+        await ticketsColl.deleteMany({ lastActivity: { $lt: seteDiasAtras } });
+    } catch (e) { console.error("Erro limpeza:", e); }
 }
 
 async function startBot() {
@@ -114,13 +105,11 @@ async function startBot() {
             version,
             auth: state,
             logger: P({ level: 'silent' }),
-            browser: Browsers.appropriate('Chrome'), 
-            connectTimeoutMs: 120000, 
-            defaultQueryTimeoutMs: 0, 
-            retryRequestDelayMs: 5000,
-            keepAliveIntervalMs: 30000,
-            markOnlineOnConnect: false, // Ajuda a evitar o erro "Aguardando mensagem"
-            shouldSyncHistoryMessage: () => false,
+            browser: Browsers.macOS('Desktop'),
+            connectTimeoutMs: 60000,
+            syncFullHistory: false, 
+            markOnlineOnConnect: false, 
+            shouldSyncHistoryMessage: () => false
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -141,56 +130,33 @@ async function startBot() {
                     const sent = await sock.sendMessage(jid, content);
                     lastBotMessageId = sent.key.id; 
                     return sent;
-                } catch (err) {
-                    console.error("❌ Erro de envio:", err.message);
-                    return null; 
-                }
+                } catch (err) { return null; }
             };
 
             if (!isMe) {
-                await ticketsColl.updateOne(
-                    { _id: cleanNumber },
-                    { $set: { lastRawJid: rawJid } }, 
-                    { upsert: true }
-                );
+                await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastRawJid: rawJid } }, { upsert: true });
             }
 
             if (isMe) {
                 const isManual = msg.message.conversation || msg.message.extendedTextMessage || msg.message.imageMessage;
                 if (isManual && msg.key.id !== lastBotMessageId) {
                     const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
-                    const linkedTicket = await ticketsColl.findOne({ lastRawJid: rawJid });
-                    const targetId = linkedTicket ? linkedTicket._id : cleanNumber;
-
-                    await ticketsColl.updateOne(
-                        { _id: targetId }, 
-                        { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
-                        { upsert: true }
-                    );
-                    console.log(`⚠️ INTERVENÇÃO MANUAL: Chat ${targetId} pausado.`);
+                    await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } });
                 }
                 return; 
             }
 
             let ticket = await ticketsColl.findOne({ _id: cleanNumber });
 
-            // --- RECUPERAÇÃO E INATIVIDADE (20 MIN) ---
+            // --- LÓGICA DE INATIVIDADE (20 MIN) ---
             const vinteMinutos = 20 * 60 * 1000;
-            if (ticket && !ticket.paused && !ticket.obrigadoEnviado && (Date.now() - (ticket.lastActivity || 0) > vinteMinutos)) {
-                
-                const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
-                
-                await sendBotMsg(rawJid, { 
-                    text: "Percebemos que se inativou do chat, mas tudo bem, um dos nossos especialistas vai entrar em contato." 
-                });
-
-                await ticketsColl.updateOne(
-                    { _id: cleanNumber },
-                    { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), obrigadoEnviado: true } }
-                );
-                
-                console.log(`🕒 Chat ${cleanNumber} pausado por inatividade.`);
-                return; 
+            if (ticket && ticket.lastActivity && !ticket.paused && !ticket.obrigadoEnviado) {
+                if (Date.now() - ticket.lastActivity > vinteMinutos) {
+                    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
+                    await sendBotMsg(rawJid, { text: "Percebemos que se inativou do chat, mas tudo bem, um dos nossos especialistas vai entrar em contato." });
+                    await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), obrigadoEnviado: true } });
+                    return; 
+                }
             }
 
             if (ticket && ticket.paused) {
@@ -214,23 +180,14 @@ async function startBot() {
                     lastRawJid: rawJid
                 }, { upsert: true });
 
-                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n
-Digite o número da opção desejada:
-
-1️⃣ Direito Digital (desbloqueio de contas)
-2️⃣ Direito Cível e Contratual
-3️⃣ Direito do Consumidor
-4️⃣ Direito Imobiliário
-5️⃣ Direito Trabalhista
-6️⃣ Direito Empresarial
-7️⃣ Outros Assuntos
-8️⃣ Desejo falar de um atendimento/processo em andamento`
+                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital (desbloqueio de contas)\n2️⃣ Direito Cível e Contratual\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Desejo falar de um atendimento/processo em andamento`;
                 await sendBotMsg(rawJid, { text: menuTexto });
                 return;
             }
 
             await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } });
 
+            // --- RESPOSTAS COMPLETAS ---
             const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
@@ -342,89 +299,50 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
                 const isMedia = msg.message.imageMessage || msg.message.documentMessage;
                 if (texto.length >= 20 || isMedia) {
                     const ok = await sendBotMsg(rawJid, { text: `✅ Recebido! Nossa equipe analisará as informações e retornaremos em breve.` });
-                    if (ok) {
-                        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true } });
-                    }
+                    if (ok) await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true } });
                 } else {
                     await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes.` });
                 }
-                return;
             }
         });
 
-        sock.ev.on('connection.update', async (update) => {
+        sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect, qr } = update;
             if (qr) { lastQr = qr; io.emit('qr', qr); }
             if (connection === 'open') {
                 lastQr = null;
-                const userNumber = sock.user.id.split(':')[0];
-                let ppUrl;
-                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } 
-                catch { ppUrl = 'https://www.w3schools.com/howto/img_avatar.png'; }
-                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
-                io.emit('connected', currentUser);
-                console.log('✅ Bot Online!');
-                // Roda a limpeza ao conectar
+                io.emit('connected', { name: 'Azevedo e Juvencio' });
                 cleanOldTickets();
             }
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
                 if (shouldReconnect) startBot();
-                else io.emit('disconnected');
             }
         });
 
-    } catch (err) { 
-        console.error("Erro crítico:", err);
-        setTimeout(startBot, 5000);
-    }
+    } catch (err) { setTimeout(startBot, 5000); }
 }
 
-// Rotas de Login e Painel
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 app.post('/login', async (req, res) => {
     const { user, pass } = req.body;
-    try {
-        const adminAccount = await userLoginColl.findOne({ user: user });
-        if (adminAccount && adminAccount.pass === pass) {
-            req.session.loggedIn = true;
-            res.redirect('/');
-        } else {
-            res.send("<script>alert('Dados incorretos'); window.location='/login';</script>");
-        }
-    } catch (err) { res.status(500).send("Erro"); }
+    const admin = await userLoginColl.findOne({ user });
+    if (admin && admin.pass === pass) { req.session.loggedIn = true; res.redirect('/'); }
+    else res.send("<script>alert('Erro'); window.location='/login';</script>");
 });
-
-app.get('/', (req, res) => {
-    if (!req.session.loggedIn) return res.redirect('/login');
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
+app.get('/', (req, res) => req.session.loggedIn ? res.sendFile(path.join(__dirname, 'index.html')) : res.redirect('/login'));
 app.get('/logout-whatsapp', async (req, res) => {
-    try {
-        await authColl.deleteMany({});
-        if (sock) await sock.logout();
-        currentUser = null;
-        io.emit('disconnected');
-        res.sendStatus(200);
-    } catch (err) { res.status(500).send("Erro"); }
+    await authColl.deleteMany({});
+    if (sock) await sock.logout();
+    res.sendStatus(200);
 });
 
-// Limpeza automática a cada 12 horas
-setInterval(cleanOldTickets, 12 * 60 * 60 * 1000);
-
-// Keep-alive Render
+setInterval(cleanOldTickets, 24 * 60 * 60 * 1000);
 setInterval(async () => {
     try {
         const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
-        const protocol = host.includes('localhost') ? 'http' : 'https';
-        await axios.get(`${protocol}://${host}/`);
+        await axios.get(`https://${host}/`);
     } catch (e) {}
 }, 5 * 60 * 1000);
-
-io.on('connection', (socket) => {
-    if (currentUser) socket.emit('connected', currentUser);
-    else if (lastQr) socket.emit('qr', lastQr);
-});
 
 server.listen(port, () => startBot());
