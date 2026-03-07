@@ -13,18 +13,16 @@ const path = require('path');
 const P = require('pino');
 const { Boom } = require('@hapi/boom');
 const axios = require('axios');
-const session = require('express-session'); // Acrescentado para o Login
+const session = require('express-session');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const port = process.env.PORT || 10000;
 
-// Middlewares para processar os dados do formulário e JSON
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Configuração de Sessão (Acrescentado)
 app.use(session({
     secret: 'azevedo-secret-key',
     resave: false,
@@ -41,8 +39,8 @@ let lastBotMessageId = null;
 
 let ticketsColl;
 let authColl;
-let knowledgeColl; // Coleção para a Base de Conhecimento
-let userLoginColl; // user
+let knowledgeColl;
+let userLoginColl;
 
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
@@ -90,7 +88,7 @@ async function startBot() {
         const db = client.db('bot_whatsapp');
         authColl = db.collection('auth_session');
         ticketsColl = db.collection('active_tickets');
-        knowledgeColl = db.collection('knowledge_base'); // Inicializada coleção
+        knowledgeColl = db.collection('knowledge_base');
         userLoginColl = db.collection('user_login');
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
@@ -119,38 +117,7 @@ async function startBot() {
             const cleanNumber = rawJid.split('@')[0]; 
             const isMe = msg.key.fromMe;
 
-            if (!isMe) {
-                await ticketsColl.updateOne(
-                    { _id: cleanNumber },
-                    { $set: { lastRawJid: rawJid } }, 
-                    { upsert: true }
-                );
-            }
-
-            if (isMe) {
-                const isManual = msg.message.conversation || msg.message.extendedTextMessage || msg.message.imageMessage;
-                if (isManual && msg.key.id !== lastBotMessageId) {
-                    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
-                    const linkedTicket = await ticketsColl.findOne({ lastRawJid: rawJid });
-                    const targetId = linkedTicket ? linkedTicket._id : cleanNumber;
-
-                    await ticketsColl.updateOne(
-                        { _id: targetId }, 
-                        { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
-                        { upsert: true }
-                    );
-                    console.log(`⚠️ INTERVENÇÃO MANUAL: Chat ${targetId} pausado.`);
-                }
-                return; 
-            }
-
-            let ticket = await ticketsColl.findOne({ _id: cleanNumber });
-
-            if (ticket && ticket.paused) {
-                if (Date.now() < ticket.until) return; 
-                else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
-            }
-
+            // Função interna de envio atualizada para evitar o loop de pausa
             const sendBotMsg = async (jid, content) => {
                 try {
                     const sent = await sock.sendMessage(jid, content);
@@ -162,20 +129,53 @@ async function startBot() {
                 }
             };
 
+            // Atualiza o JID e evita concorrência
+            if (!isMe) {
+                await ticketsColl.updateOne(
+                    { _id: cleanNumber },
+                    { $set: { lastRawJid: rawJid } }, 
+                    { upsert: true }
+                );
+            }
+
+            // Tratamento de Intervenção Manual
+            if (isMe) {
+                if (msg.key.id !== lastBotMessageId) {
+                    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
+                    await ticketsColl.updateOne(
+                        { _id: cleanNumber }, 
+                        { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }
+                    );
+                    console.log(`⚠️ INTERVENÇÃO MANUAL: Chat ${cleanNumber} pausado.`);
+                }
+                return; 
+            }
+
+            let ticket = await ticketsColl.findOne({ _id: cleanNumber });
+
+            // Verifica se o bot está pausado
+            if (ticket && ticket.paused) {
+                if (Date.now() < ticket.until) return; 
+                else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
+            }
+
             const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
             const texto = textoRaw.trim();
 
             const timeoutMenu = 2 * 60 * 60 * 1000; 
+            
+            // Lógica do Menu Inicial
             if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
                 const ticketId = Math.floor(1000 + Math.random() * 9000);
-                await ticketsColl.replaceOne({ _id: cleanNumber }, {
-                    _id: cleanNumber,
-                    id: ticketId,
-                    aguardandoOpcao: true,
-                    obrigadoEnviado: false,
-                    lastActivity: Date.now(),
-                    paused: false,
-                    lastRawJid: rawJid
+                await ticketsColl.updateOne({ _id: cleanNumber }, {
+                    $set: {
+                        id: ticketId,
+                        aguardandoOpcao: true,
+                        obrigadoEnviado: false,
+                        lastActivity: Date.now(),
+                        paused: false,
+                        lastRawJid: rawJid
+                    }
                 }, { upsert: true });
 
                 const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n
@@ -294,25 +294,29 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
+            // Resposta à Opção Selecionada
             if (ticket.aguardandoOpcao) {
                 if (respostas[texto]) {
-                    console.log(`✅ Enviando resposta da opção ${texto} para ${cleanNumber}`);
+                    console.log(`✅ Opção ${texto} para ${cleanNumber}`);
                     await sendBotMsg(rawJid, { text: respostas[texto] });
                     await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false } });
                 }
                 return;
             }
 
+            // Envio do "Obrigado" Final (Gargalo corrigido aqui)
             if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
-                const isMedia = msg.message.imageMessage || msg.message.documentMessage;
-                if (texto.length >= 20 || isMedia) {
-                    console.log(`🏁 Enviando encerramento para ${cleanNumber}`);
+                const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage || msg.message.videoMessage);
+                
+                // Se o texto for razoável (>= 10 chars) ou for mídia, aceita.
+                if (texto.length >= 10 || isMedia) {
+                    console.log(`🏁 Finalizando atendimento para ${cleanNumber}`);
                     const ok = await sendBotMsg(rawJid, { text: `✅ Recebido! Nossa equipe analisará as informações e retornaremos em breve.` });
                     if (ok) {
                         await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true } });
                     }
                 } else {
-                    await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes.` });
+                    await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para podermos te ajudar.` });
                 }
                 return;
             }
@@ -344,27 +348,19 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
     }
 }
 
-// --- ROTAS DE LOGIN E PAINEL ---
-
+// --- ROTAS DE LOGIN E PAINEL (Mantidas conforme original) ---
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
-
 app.post('/login', async (req, res) => {
     const { user, pass } = req.body;
-
     try {
-        // Busca o usuário no banco de dados
         const adminAccount = await userLoginColl.findOne({ user: user });
-
         if (adminAccount && adminAccount.pass === pass) {
             req.session.loggedIn = true;
             res.redirect('/');
         } else {
             res.send("<script>alert('Usuário ou senha incorretos'); window.location='/login';</script>");
         }
-    } catch (err) {
-        console.error("Erro ao validar login:", err);
-        res.status(500).send("Erro interno no servidor");
-    }
+    } catch (err) { res.status(500).send("Erro interno"); }
 });
 
 app.get('/', (req, res) => {
@@ -372,25 +368,20 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Logout do Painel (Sair do Sistema)
 app.get('/logout-panel', (req, res) => {
     req.session.destroy();
     res.redirect('/login');
 });
 
-// Desconectar o WhatsApp (Botão "Desconectar Aparelho")
 app.get('/logout-whatsapp', async (req, res) => {
     try {
         await authColl.deleteMany({});
         if (sock) await sock.logout();
-        currentUser = null;
-        lastQr = null;
+        currentUser = null; lastQr = null;
         io.emit('disconnected');
         res.sendStatus(200);
     } catch (err) { res.status(500).send("Erro"); }
 });
-
-// --- API DA BASE DE CONHECIMENTO ---
 
 app.post('/api/knowledge', async (req, res) => {
     if (!req.session.loggedIn) return res.sendStatus(401);
@@ -406,12 +397,8 @@ app.get('/api/knowledge', async (req, res) => {
     if (knowledgeColl) {
         const data = await knowledgeColl.find({}).sort({ date: -1 }).toArray();
         res.json(data);
-    } else {
-        res.json([]);
-    }
+    } else res.json([]);
 });
-
-// --- MANUTENÇÃO E INICIALIZAÇÃO ---
 
 setInterval(async () => {
     try {
