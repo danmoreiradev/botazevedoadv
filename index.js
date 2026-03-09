@@ -40,14 +40,15 @@ let processing = new Set();
 
 let ticketsColl, authColl, knowledgeColl, userLoginColl;
 
-// --- FUNÇÃO DE ENVIO GLOBAL (Resolve o ReferenceError) ---
 async function sendBotMsg(jid, content) {
     try {
-        const sent = await sock.sendMessage(jid, content);
+        // Garante que o envio vá para o endereço de usuário padrão
+        const targetJid = jid.includes('@') ? (jid.split('@')[0].split(':')[0] + '@s.whatsapp.net') : jid;
+        const sent = await sock.sendMessage(targetJid, content);
         lastBotMessageId = sent.key.id; 
         return sent;
     } catch (err) {
-        console.error("Erro ao enviar mensagem do bot:", err);
+        console.error("Erro ao enviar:", err);
         return null;
     }
 }
@@ -79,11 +80,12 @@ async function startBot() {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-            // --- UNIFICAÇÃO DE ID (CELULAR E WEB IGUAIS) ---
             const rawJid = msg.key.remoteJid;
-            const cleanJid = jidNormalizedUser(rawJid);
-            const cleanNumber = cleanJid.split('@')[0]; 
             
+            const cleanNumber = (rawJid.split('@')[0]).split(':')[0]; 
+            
+            const cleanJid = cleanNumber + '@s.whatsapp.net';
+
             const isMe = msg.key.fromMe;
             const msgId = msg.key.id;
 
