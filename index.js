@@ -4,7 +4,7 @@ const {
     fetchLatestBaileysVersion, 
     BufferJSON, 
     initAuthCreds,
-    jidNormalizedUser // Importado para unificação de IDs
+    jidNormalizedUser 
 } = require('@whiskeysockets/baileys');
 const { MongoClient } = require('mongodb');
 const express = require('express');
@@ -42,7 +42,6 @@ let ticketsColl, authColl, knowledgeColl, userLoginColl;
 
 async function sendBotMsg(jid, content) {
     try {
-        // Envia exatamente para o JID que originou a mensagem (seja LID ou número)
         const sent = await sock.sendMessage(jid, content);
         lastBotMessageId = sent.key.id; 
         return sent;
@@ -75,110 +74,91 @@ async function startBot() {
 
         sock.ev.on('creds.update', saveCreds);
 
-sock.ev.on('messages.upsert', async m => {
-    const msg = m.messages[0];
-    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+        sock.ev.on('messages.upsert', async m => {
+            const msg = m.messages[0];
+            if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-    const rawJid = msg.key.remoteJid;
-    const cleanJid = jidNormalizedUser(rawJid); 
-    const isMe = msg.key.fromMe;
-    const msgId = msg.key.id;
+            const rawJid = msg.key.remoteJid;
+            const cleanJid = jidNormalizedUser(rawJid);
+            const isMe = msg.key.fromMe;
+            const msgId = msg.key.id;
 
-    // --- IDENTIFICAÇÃO ULTRA-ROBUSTA ---
-    // 1. Tenta extrair o número real do participant (comum em mensagens vindas de LID)
-    let numeroRealExtraido = (msg.key.participant || msg.participant || cleanJid).split('@')[0].split(':')[0];
-    
-    // 2. Se o numeroRealExtraido ainda for um LID (começa com 1109), 
-    // tentamos buscar no cache de contatos do próprio Baileys se ele já mapeou esse LID para um número
-    if (numeroRealExtraido.startsWith('1109')) {
-        const contact = sock.contacts[cleanJid];
-        if (contact && contact.id && !contact.id.includes('lid')) {
-            numeroRealExtraido = contact.id.split('@')[0];
-        }
-    }
+            let numeroRealExtraido = (msg.key.participant || msg.participant || cleanJid).split('@')[0].split(':')[0];
 
-    if (processing.has(msgId)) return;
-    processing.add(msgId);
-    setTimeout(() => processing.delete(msgId), 10000);
-
-    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
-
-    try {
-        // BUSCA CRUZADA: O segredo é procurar o numeroRealExtraido em qualquer campo
-        let ticket = await ticketsColl.findOne({
-            $or: [
-                { _id: numeroRealExtraido },
-                { numeroReal: numeroRealExtraido },
-                { _id: cleanJid.split('@')[0] } 
-            ]
-        });
-
-        // Se você respondeu (Intervenção Humana)
-        if (isMe) {
-            if (msgId !== lastBotMessageId) {
-                const targetId = ticket ? ticket._id : numeroRealExtraido;
-                await ticketsColl.updateOne(
-                    { _id: targetId }, 
-                    { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), numeroReal: numeroRealExtraido } }, 
-                    { upsert: true }
-                );
+            if (numeroRealExtraido.startsWith('1109')) {
+                const contact = sock.contacts ? sock.contacts[cleanJid] : null;
+                if (contact && contact.id && !contact.id.includes('lid')) {
+                    numeroRealExtraido = contact.id.split('@')[0];
+                }
             }
-            return; 
-        }
 
-        // Se o ticket estiver pausado, interrompe imediatamente
-        if (ticket && ticket.paused) {
-            if (Date.now() < ticket.until) return;
-            else await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
-        }
+            if (processing.has(msgId)) return;
+            processing.add(msgId);
+            setTimeout(() => processing.delete(msgId), 10000);
 
-        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        const texto = textoRaw.trim();
-        const timeoutMenu = 2 * 60 * 60 * 1000; 
+            const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
-        // --- CRIAÇÃO/ATUALIZAÇÃO COM ID FIXO ---
-        // Se não tem ticket ou expirou, cria um novo, mas SEMPRE usando o número real como _id se possível
-        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-            const ticketId = Math.floor(1000 + Math.random() * 9000);
-            
-            await sendBotMsg(rawJid, { 
-                text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada...` 
-            });
+            try {
+                let ticket = await ticketsColl.findOne({
+                    $or: [
+                        { _id: numeroRealExtraido },
+                        { numeroReal: numeroRealExtraido },
+                        { _id: cleanJid.split('@')[0] }
+                    ]
+                });
 
-            // Forçamos o _id a ser o numeroRealExtraido para evitar duplicidade
-            await ticketsColl.updateOne(
-                { _id: numeroRealExtraido }, 
-                {
-                    $set: { 
-                        id: ticketId, 
-                        numeroReal: numeroRealExtraido,
-                        aguardandoOpcao: true, 
-                        obrigadoEnviado: false, 
-                        tentouInsistir: false,
-                        lastActivity: Date.now(), 
-                        paused: false,
-                        lastRawJid: rawJid 
+                if (isMe) {
+                    if (msgId !== lastBotMessageId) {
+                        const targetId = ticket ? ticket._id : numeroRealExtraido;
+                        await ticketsColl.updateOne(
+                            { _id: targetId },
+                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), numeroReal: numeroRealExtraido } },
+                            { upsert: true }
+                        );
                     }
-                }, 
-                { upsert: true }
-            );
-            return;
-        }
+                    return;
+                }
 
-        // Atualiza o ticket existente (independente de ser LID ou Número)
-        await ticketsColl.updateOne(
-            { _id: ticket._id }, 
-            { $set: { lastActivity: Date.now(), lastRawJid: rawJid } }
-        );
+                if (ticket && ticket.paused) {
+                    if (Date.now() < ticket.until) return;
+                    else await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
+                }
 
-        // ... Restante da sua lógica de respostas (respostas[texto]) ...
+                const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+                const texto = textoRaw.trim();
+                const timeoutMenu = 2 * 60 * 60 * 1000;
 
-    } catch (err) {
-        console.error("Erro interno:", err);
-    }
-});
+                if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+                    const ticketId = Math.floor(1000 + Math.random() * 9000);
+                    await sendBotMsg(rawJid, {
+                        text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
+                    });
 
-        const respostas = {
+                    await ticketsColl.updateOne(
+                        { _id: numeroRealExtraido },
+                        {
+                            $set: {
+                                id: ticketId,
+                                numeroReal: numeroRealExtraido,
+                                aguardandoOpcao: true,
+                                obrigadoEnviado: false,
+                                tentouInsistir: false,
+                                lastActivity: Date.now(),
+                                paused: false,
+                                lastRawJid: rawJid
+                            }
+                        },
+                        { upsert: true }
+                    );
+                    return;
+                }
+
+                await ticketsColl.updateOne(
+                    { _id: ticket._id },
+                    { $set: { lastActivity: Date.now(), lastRawJid: rawJid } }
+                );
+
+                const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
 Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
@@ -277,57 +257,49 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-        // 6. Resposta às Opções (Usando ticket._id para garantir que caia no registro unificado)
-        if (ticket.aguardandoOpcao) {
-            if (respostas[texto]) {
-                await sendBotMsg(rawJid, { text: respostas[texto] });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
-            } else {
-                const novosErros = (ticket.errosMenu || 0) + 1;
-                if (novosErros >= 2) {
-                    await sendBotMsg(rawJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
-                } else {
-                    await sendBotMsg(rawJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros } });
+                if (ticket.aguardandoOpcao) {
+                    if (respostas[texto]) {
+                        await sendBotMsg(rawJid, { text: respostas[texto] });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
+                    } else {
+                        const novosErros = (ticket.errosMenu || 0) + 1;
+                        if (novosErros >= 2) {
+                            await sendBotMsg(rawJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista.` });
+                            await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                        } else {
+                            await sendBotMsg(rawJid, { text: `⚠️ Opção inválida. Digite de 1 a 8.` });
+                            await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros } });
+                        }
+                    }
+                    return;
                 }
-            }
-            return;
-        }
 
-        // 7. Lógica de Insistência
-        if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
-            const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
-            if (texto.length >= 20 || isMedia) {
-                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
-            } else if (!ticket.tentouInsistir) {
-                await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { tentouInsistir: true } });
-            } else {
-                await sendBotMsg(rawJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+                if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
+                    const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
+                    if (texto.length >= 20 || isMedia) {
+                        await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista já vai atendê-lo.` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+                    } else if (!ticket.tentouInsistir) {
+                        await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva com mais detalhes.` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { tentouInsistir: true } });
+                    } else {
+                        await sendBotMsg(rawJid, { text: `✅ Recebido! Aguarde o especialista.` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+                    }
+                }
+            } catch (err) {
+                console.error("Erro interno no upsert:", err);
             }
-        }
-    } catch (err) {
-        console.error("Erro interno:", err);
-    }
-});
+        });
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             if (qr) { lastQr = qr; io.emit('qr', qr); }
-            
             if (connection === 'open') {
                 lastQr = null;
-                const userNumber = sock.user.id.split(':')[0];
-                let ppUrl = null;
-                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch (e) { ppUrl = null; }
-
-                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
+                currentUser = { number: sock.user.id.split(':')[0], name: 'Azevedo e Juvencio' };
                 io.emit('connected', currentUser);
             }
-                        
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
                 if (shouldReconnect) startBot();
@@ -336,12 +308,11 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
         });
 
     } catch (err) { 
-        console.error("Erro crítico:", err);
+        console.error("Erro crítico no startBot:", err);
         setTimeout(startBot, 5000);
     }
 }
 
-// --- RESTO DO CÓDIGO (useMongoDBAuthState, Rotas, etc) MANTIDO IGUAL ---
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
     const readData = async (id) => {
@@ -378,61 +349,20 @@ async function useMongoDBAuthState(collection) {
     };
 }
 
+// Rotas e Servidor
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 app.post('/login', async (req, res) => {
     const { user, pass } = req.body;
-    try {
-        const adminAccount = await userLoginColl.findOne({ user });
-        if (adminAccount && adminAccount.pass === pass) {
-            req.session.loggedIn = true;
-            res.redirect('/');
-        } else res.send("<script>alert('Erro'); window.location='/login';</script>");
-    } catch (e) { res.status(500).send("Erro"); }
+    const adminAccount = await userLoginColl.findOne({ user });
+    if (adminAccount && adminAccount.pass === pass) {
+        req.session.loggedIn = true;
+        res.redirect('/');
+    } else res.send("<script>alert('Erro'); window.location='/login';</script>");
 });
 
 app.get('/', (req, res) => {
     if (!req.session.loggedIn) return res.redirect('/login');
     res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-app.get('/logout-panel', (req, res) => {
-    req.session.destroy(() => { res.redirect('/login'); });
-});
-
-app.get('/logout-whatsapp', async (req, res) => {
-    try {
-        await authColl.deleteMany({});
-        if (sock) await sock.logout();
-        currentUser = null; lastQr = null;
-        io.emit('disconnected');
-        res.sendStatus(200);
-    } catch (err) { res.status(500).send("Erro"); }
-});
-
-app.get('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    const data = await knowledgeColl.find({}).toArray();
-    res.json(data);
-});
-
-app.post('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    const { pergunta, resposta } = req.body;
-    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
-    res.sendStatus(200);
-});
-
-setInterval(async () => {
-    try {
-        const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
-        const protocol = host.includes('localhost') ? 'http' : 'https';
-        await axios.get(`${protocol}://${host}/`);
-    } catch (e) {}
-}, 5 * 60 * 1000);
-
-io.on('connection', (socket) => {
-    if (currentUser) socket.emit('connected', currentUser);
-    else if (lastQr) socket.emit('qr', lastQr);
 });
 
 server.listen(port, () => startBot());
