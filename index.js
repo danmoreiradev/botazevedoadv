@@ -75,75 +75,89 @@ async function startBot() {
 
         sock.ev.on('creds.update', saveCreds);
 
-        sock.ev.on('messages.upsert', async m => {
-            const msg = m.messages[0];
-            if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+sock.ev.on('messages.upsert', async m => {
+    const msg = m.messages[0];
+    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-            const rawJid = msg.key.remoteJid;
+    // --- DEFINIÇÃO DOS IDENTIFICADORES ---
+    const rawJid = msg.key.remoteJid; // <--- Faltava essa linha!
+    const cleanNumber = (rawJid.split('@')[0]).split(':')[0]; 
+    const cleanJid = rawJid; // Mantemos o JID original para o envio de mensagens
+    const isMe = msg.key.fromMe;
+    const msgId = msg.key.id;
+
+    if (processing.has(msgId)) return;
+    processing.add(msgId);
+    setTimeout(() => processing.delete(msgId), 10000);
+
+    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
+
+    try {
+        // --- LÓGICA DE INTERVENÇÃO (HUMANO RESPONDEU) ---
+        if (isMe) {
+            if (msgId !== lastBotMessageId) {
+                // Busca o ticket pelo ID (LID) ou pela ponte (numeroReal)
+                const targetTicket = await ticketsColl.findOne({
+                    $or: [
+                        { _id: cleanNumber },
+                        { numeroReal: cleanNumber }
+                    ]
+                });
+
+                // Se achou um ticket vinculado ao número que você usou, pausa ele
+                const finalId = targetTicket ? targetTicket._id : cleanNumber;
+
+                console.log(`[Intervenção] Travando bot para: ${finalId}`);
+                await ticketsColl.updateOne(
+                    { _id: finalId }, 
+                    { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
+                    { upsert: true }
+                );
+            }
+            return; 
+        }
+
+        // --- BUSCA DE TICKET (CLIENTE ESCREVEU) ---
+        const ticket = await ticketsColl.findOne({ _id: cleanNumber });
+
+        // Verifica pausa
+        if (ticket && ticket.paused) {
+            if (Date.now() < ticket.until) return;
+            else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
+        }
+
+        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        const texto = textoRaw.trim();
+        const timeoutMenu = 2 * 60 * 60 * 1000; 
+
+        // --- 1. MENU INICIAL (Criação do Ticket com Ponte) ---
+        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+            const ticketId = Math.floor(1000 + Math.random() * 9000);
             
-            const cleanNumber = (rawJid.split('@')[0]).split(':')[0];
-            
-            const cleanJid = rawJid.split(':')[0];
+            // Tenta pegar o número real se for um perfil que usa LID
+            const numeroRealParaPonte = msg.key.participant ? (msg.key.participant.split('@')[0]).split(':')[0] : cleanNumber;
 
-            const isMe = msg.key.fromMe;
-            const msgId = msg.key.id;
+            await sendBotMsg(cleanJid, { 
+                text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` 
+            });
 
-            if (processing.has(msgId)) return;
-            processing.add(msgId);
-            setTimeout(() => processing.delete(msgId), 10000);
-
-            const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
-
-            try {
-                // --- 1. LÓGICA DE INTERVENÇÃO MANUAL ---
-                if (isMe) {
-                    if (msgId !== lastBotMessageId) {
-                        console.log(`[Intervenção] Detectada em ${cleanNumber}. Travando bot por 3 dias.`);
-                        await ticketsColl.updateOne(
-                            { _id: cleanNumber }, 
-                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
-                            { upsert: true }
-                        );
-                    }
-                    return; 
+            await ticketsColl.updateOne({ _id: cleanNumber }, {
+                $set: { 
+                    id: ticketId, 
+                    numeroReal: numeroRealParaPonte, 
+                    aguardandoOpcao: true, 
+                    obrigadoEnviado: false, 
+                    tentouInsistir: false,
+                    lastActivity: Date.now(), 
+                    paused: false,
+                    lastRawJid: rawJid 
                 }
+            }, { upsert: true });
+            return;
+        }
 
-                const ticket = await ticketsColl.findOne({ _id: cleanNumber });
-
-                // --- 2. VERIFICAÇÃO DE PAUSA ---
-                if (ticket && ticket.paused) {
-                    if (Date.now() < ticket.until) return;
-                    else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
-                }
-
-                const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-                const texto = textoRaw.trim();
-                const timeoutMenu = 2 * 60 * 60 * 1000; 
-
-                // --- 3. MENU INICIAL ---
-                if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-                    const ticketId = Math.floor(1000 + Math.random() * 9000);
-                    
-                    await sendBotMsg(cleanJid, { 
-                        text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` 
-                    });
-
-                    await ticketsColl.updateOne({ _id: cleanNumber }, {
-                        $set: { 
-                            id: ticketId, 
-                            aguardandoOpcao: true, 
-                            obrigadoEnviado: false, 
-                            tentouInsistir: false, // Reset da insistência
-                            lastActivity: Date.now(), 
-                            paused: false,
-                            lastRawJid: cleanJid 
-                        }
-                    }, { upsert: true });
-                    return;
-                }
-
-                // Atualiza atividade
-                ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } });
+        // Atualiza atividade para tickets existentes
+        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } });
 
                 const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
