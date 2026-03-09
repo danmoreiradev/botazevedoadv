@@ -66,8 +66,11 @@ async function startBot() {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
+            // --- CORREÇÃO AQUI: Extração limpa do número do destinatário/conversa ---
             const rawJid = msg.key.remoteJid;
-            const cleanNumber = rawJid.split('@')[0]; 
+            // jidNormalizedUser garante que tire o :1, :2 (ID de dispositivos) e mantenha apenas o ID da conversa
+            const cleanNumber = (rawJid.split('@')[0]).split(':')[0]; 
+            
             const isMe = msg.key.fromMe;
             const msgId = msg.key.id;
 
