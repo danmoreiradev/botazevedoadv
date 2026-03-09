@@ -101,22 +101,32 @@ sock.ev.on('messages.upsert', async m => {
     const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
     try {
-        // 1. Busca Unificada (Procura por qualquer um dos IDs)
+        // 1. BUSCA UNIFICADA (Tenta encontrar por qualquer rastro deixado antes)
         let ticket = await ticketsColl.findOne({
             $or: [
-                { _id: cleanNumber },
-                { _id: numeroRealExtraido },
-                { numeroReal: cleanNumber },
-                { numeroReal: numeroRealExtraido }
+                { _id: cleanNumber },          // Procura pelo ID principal (pode ser o LID ou Número)
+                { _id: numeroRealExtraido },    // Procura pelo Número extraído
+                { numeroReal: cleanNumber },    // Procura se o cleanNumber já foi salvo como numeroReal
+                { numeroReal: numeroRealExtraido } // Procura se o numeroRealExtraido já existe
             ]
         });
 
-        // 2. Intervenção Humana (VOCÊ respondeu)
+        // 2. VÍNCULO DE IDENTIDADE (Se achou por LID mas agora temos o Número, ou vice-versa)
+        // Se o ticket existe mas o numeroReal dele ainda é igual ao LID, e agora descobrimos o número de verdade:
+        if (ticket && ticket.numeroReal !== numeroRealExtraido && !numeroRealExtraido.includes('1109')) {
+             await ticketsColl.updateOne(
+                { _id: ticket._id },
+                { $set: { numeroReal: numeroRealExtraido } }
+             );
+             ticket.numeroReal = numeroRealExtraido; // Atualiza a variável local
+        }
+
+        // 3. Intervenção Humana (Você respondeu)
         if (isMe) {
             if (msgId !== lastBotMessageId) {
-                // Se você respondeu, pausamos o ticket encontrado ou criamos um no numeroReal
+                // Se não achou ticket nenhum, cria um usando o número real disponível
                 const targetId = ticket ? ticket._id : numeroRealExtraido;
-                console.log(`[Humano] Intervenção detectada para ${targetId}. Bot pausado.`);
+                console.log(`[Humano] Pausando bot para: ${targetId}`);
                 await ticketsColl.updateOne(
                     { _id: targetId }, 
                     { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), numeroReal: numeroRealExtraido } }, 
@@ -126,9 +136,9 @@ sock.ev.on('messages.upsert', async m => {
             return; 
         }
 
-        // 3. Verificação de Pausa (IMPEDIR QUALQUER RESPOSTA SE PAUSADO)
+        // 4. Verificação de Pausa
         if (ticket && ticket.paused) {
-            if (Date.now() < ticket.until) return; // Ignora se ainda estiver no prazo de 3 dias
+            if (Date.now() < ticket.until) return;
             else await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
         }
 
@@ -136,16 +146,17 @@ sock.ev.on('messages.upsert', async m => {
         const texto = textoRaw.trim();
         const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-        // 4. Criação do Ticket ou Novo Menu (UNIFICAÇÃO AQUI)
+        // 5. CRIAÇÃO OU RENOVAÇÃO DO MENU
         if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
             const ticketId = Math.floor(1000 + Math.random() * 9000);
             
             await sendBotMsg(rawJid, { 
-                text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` 
+                text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada...` 
             });
 
-            // SEMPRE SALVAR NO _ID SENDO O NÚMERO REAL PARA UNIFICAR
-            await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+            const finalId = (numeroRealExtraido.startsWith('55')) ? numeroRealExtraido : cleanNumber;
+
+            await ticketsColl.updateOne({ _id: finalId }, {
                 $set: { 
                     id: ticketId, 
                     numeroReal: numeroRealExtraido,
@@ -154,7 +165,7 @@ sock.ev.on('messages.upsert', async m => {
                     tentouInsistir: false,
                     lastActivity: Date.now(), 
                     paused: false,
-                    lastRawJid: rawJid // Guarda o JID original para saber por onde responder
+                    lastRawJid: rawJid 
                 }
             }, { upsert: true });
             return;
