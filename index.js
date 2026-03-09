@@ -37,9 +37,8 @@ let sock;
 let lastBotMessageId = null; 
 let processing = new Set(); 
 
-let ticketsColl, authColl, userLoginColl;
+let ticketsColl, authColl, userLoginColl, knowledgeColl;
 
-// Função auxiliar para enviar mensagens e registrar o ID para evitar loop
 async function sendBotMsg(jid, content) {
     try {
         const sent = await sock.sendMessage(jid, content);
@@ -58,6 +57,7 @@ async function startBot() {
         authColl = db.collection('auth_session');
         ticketsColl = db.collection('active_tickets');
         userLoginColl = db.collection('user_login');
+        knowledgeColl = db.collection('knowledge_base'); // Reintegrado
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
         const { version } = await fetchLatestBaileysVersion();
@@ -67,8 +67,7 @@ async function startBot() {
             auth: state,
             logger: P({ level: 'silent' }),
             browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-            connectTimeoutMs: 60000,
-            printQRInTerminal: true
+            connectTimeoutMs: 60000
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -77,37 +76,35 @@ async function startBot() {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-            // --- NORMALIZAÇÃO CRÍTICA PARA EVITAR DUPLICADOS ---
             const rawJid = msg.key.remoteJid;
-            const cleanJid = jidNormalizedUser(rawJid); // Remove :1, :2 (Web/Multi-device)
-            const numeroReal = cleanJid.split('@')[0];  // ID limpo para o Banco de Dados
+            const cleanJid = jidNormalizedUser(rawJid); 
+            const numeroReal = cleanJid.split('@')[0];
             const isMe = msg.key.fromMe;
             const msgId = msg.key.id;
 
-            // Anti-processamento duplo (Memory Lock)
             if (processing.has(msgId)) return;
             processing.add(msgId);
             setTimeout(() => processing.delete(msgId), 10000);
 
-            const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); // 3 dias de pausa
+            // Notifica o Frontend via Socket.io sobre nova mensagem
+            io.emit('new_message', { jid: cleanJid, msg });
+
+            const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
             try {
-                // Busca o ticket pelo ID único (Número do WhatsApp)
                 let ticket = await ticketsColl.findOne({ _id: numeroReal });
 
-                // Se eu (o bot/advogado) responder, pausa o bot para este usuário
                 if (isMe) {
                     if (msgId !== lastBotMessageId) {
                         await ticketsColl.updateOne(
                             { _id: numeroReal },
-                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } },
+                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), numeroReal } },
                             { upsert: true }
                         );
                     }
                     return;
                 }
 
-                // Verifica se o bot está pausado (atendimento humano em curso)
                 if (ticket && ticket.paused) {
                     if (Date.now() < ticket.until) return;
                     else await ticketsColl.updateOne({ _id: numeroReal }, { $set: { paused: false } });
@@ -115,40 +112,23 @@ async function startBot() {
 
                 const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
                 const texto = textoRaw.trim();
-                const timeoutMenu = 2 * 60 * 60 * 1000; // 2 horas para expirar sessão
+                const timeoutMenu = 2 * 60 * 60 * 1000;
 
-                // Lógica de Novo Ticket ou Sessão Expirada
                 if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
                     const ticketId = Math.floor(1000 + Math.random() * 9000);
-                    
                     await sendBotMsg(cleanJid, {
                         text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
                     });
 
                     await ticketsColl.updateOne(
                         { _id: numeroReal },
-                        {
-                            $set: {
-                                id: ticketId,
-                                numeroReal: numeroReal,
-                                aguardandoOpcao: true,
-                                obrigadoEnviado: false,
-                                tentouInsistir: false,
-                                lastActivity: Date.now(),
-                                paused: false,
-                                lastRawJid: rawJid
-                            }
-                        },
+                        { $set: { id: ticketId, numeroReal, aguardandoOpcao: true, obrigadoEnviado: false, lastActivity: Date.now(), paused: false, lastRawJid: rawJid } },
                         { upsert: true }
                     );
                     return;
                 }
 
-                // Atualiza atividade para tickets existentes
-                await ticketsColl.updateOne(
-                    { _id: numeroReal },
-                    { $set: { lastActivity: Date.now(), lastRawJid: rawJid } }
-                );
+                await ticketsColl.updateOne({ _id: numeroReal }, { $set: { lastActivity: Date.now(), lastRawJid: rawJid } });
 
                 const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
@@ -249,41 +229,23 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-                // Lógica de Menu
                 if (ticket.aguardandoOpcao) {
                     if (respostas[texto]) {
                         await sendBotMsg(cleanJid, { text: respostas[texto] });
-                        await ticketsColl.updateOne({ _id: numeroReal }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
+                        await ticketsColl.updateOne({ _id: numeroReal }, { $set: { aguardandoOpcao: false } });
                     } else {
-                        const novosErros = (ticket.errosMenu || 0) + 1;
-                        if (novosErros >= 2) {
-                            await sendBotMsg(cleanJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista.` });
-                            await ticketsColl.updateOne({ _id: numeroReal }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
-                        } else {
-                            await sendBotMsg(cleanJid, { text: `⚠️ Opção inválida. Digite de 1 a 8.` });
-                            await ticketsColl.updateOne({ _id: numeroReal }, { $set: { errosMenu: novosErros } });
-                        }
+                        await sendBotMsg(cleanJid, { text: `⚠️ Opção inválida. Digite de 1 a 8.` });
                     }
                     return;
                 }
 
-                // Lógica de Encerramento Automático após escolha
+                // Lógica de encerramento (Obrigado enviado)
                 if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
-                    const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
-                    if (texto.length >= 20 || isMedia) {
-                        await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista já vai atendê-lo.` });
-                        await ticketsColl.updateOne({ _id: numeroReal }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
-                    } else if (!ticket.tentouInsistir) {
-                        await sendBotMsg(cleanJid, { text: `⚠️ Por favor, descreva com mais detalhes para agilizar seu atendimento.` });
-                        await ticketsColl.updateOne({ _id: numeroReal }, { $set: { tentouInsistir: true } });
-                    } else {
-                        await sendBotMsg(cleanJid, { text: `✅ Recebido! Aguarde o especialista.` });
-                        await ticketsColl.updateOne({ _id: numeroReal }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
-                    }
+                    await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista já vai atendê-lo.` });
+                    await ticketsColl.updateOne({ _id: numeroReal }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
                 }
-            } catch (err) {
-                console.error("Erro interno no processamento:", err);
-            }
+
+            } catch (err) { console.error(err); }
         });
 
         sock.ev.on('connection.update', async (update) => {
@@ -297,17 +259,46 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
                 if (shouldReconnect) startBot();
-                else { currentUser = null; io.emit('disconnected'); }
             }
         });
-
-    } catch (err) { 
-        console.error("Erro crítico no startBot:", err);
-        setTimeout(startBot, 5000);
-    }
+    } catch (err) { setTimeout(startBot, 5000); }
 }
 
-// Persistência de Autenticação no MongoDB
+// --- ROTAS DO PAINEL ADMIN (RESTAURADAS) ---
+
+app.get('/api/tickets', async (req, res) => {
+    const tickets = await ticketsColl.find().sort({ lastActivity: -1 }).toArray();
+    res.json(tickets);
+});
+
+app.post('/api/send-message', async (req, res) => {
+    const { jid, message } = req.body;
+    await sendBotMsg(jid, { text: message });
+    res.json({ success: true });
+});
+
+app.post('/api/pause-ticket', async (req, res) => {
+    const { id, paused } = req.body;
+    await ticketsColl.updateOne({ _id: id }, { $set: { paused: paused, until: Date.now() + (3 * 86400000) } });
+    res.json({ success: true });
+});
+
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
+app.post('/login', async (req, res) => {
+    const { user, pass } = req.body;
+    const adminAccount = await userLoginColl.findOne({ user });
+    if (adminAccount && adminAccount.pass === pass) {
+        req.session.loggedIn = true;
+        res.redirect('/');
+    } else res.send("<script>alert('Erro'); window.location='/login';</script>");
+});
+
+app.get('/', (req, res) => {
+    if (!req.session.loggedIn) return res.redirect('/login');
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Auth Baileys MongoDB
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
     const readData = async (id) => {
@@ -343,21 +334,5 @@ async function useMongoDBAuthState(collection) {
         saveCreds: () => writeData(creds, 'creds')
     };
 }
-
-// Rotas e Servidor
-app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
-app.post('/login', async (req, res) => {
-    const { user, pass } = req.body;
-    const adminAccount = await userLoginColl.findOne({ user });
-    if (adminAccount && adminAccount.pass === pass) {
-        req.session.loggedIn = true;
-        res.redirect('/');
-    } else res.send("<script>alert('Erro'); window.location='/login';</script>");
-});
-
-app.get('/', (req, res) => {
-    if (!req.session.loggedIn) return res.redirect('/login');
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
 
 server.listen(port, () => startBot());
