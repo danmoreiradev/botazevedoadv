@@ -67,64 +67,79 @@ async function startBot() {
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
             const rawJid = msg.key.remoteJid;
-            // jidNormalizedUser garante que tire o :1, :2 (ID de dispositivos) e mantenha apenas o ID da conversa
             const cleanNumber = (rawJid.split('@')[0]).split(':')[0]; 
-            
             const isMe = msg.key.fromMe;
             const msgId = msg.key.id;
 
-            // Evita processar a mesma mensagem duas vezes
+            // Evita duplicidade
             if (processing.has(msgId)) return;
             processing.add(msgId);
             setTimeout(() => processing.delete(msgId), 10000);
 
-            const sendBotMsg = async (jid, content) => {
-                try {
-                    const sent = await sock.sendMessage(jid, content);
-                    lastBotMessageId = sent.key.id; 
-                    return sent;
-                } catch (err) { return null; }
-            };
-
             const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
             try {
-                // Intervenção Manual (Envio pelo próprio celular do advogado ou WhatsApp Web)
+                // --- LÓGICA DE INTERVENÇÃO MANUAL (CELULAR OU WEB) ---
                 if (isMe) {
-                    // Se a mensagem que EU enviei NÃO foi disparada pelo bot (ID diferente do lastBotMessageId)
+                    // Se a mensagem enviada NÃO foi o bot (ID diferente do último gravado)
                     if (msgId !== lastBotMessageId) {
-                        console.log(`[Intervenção] Pausando bot para: ${cleanNumber} por 3 dias.`);
+                        console.log(`[Intervenção Manual] Detectada em ${cleanNumber}. Travando bot por 3 dias.`);
                         
-                        // Atualiza o banco para pausar o bot para ESTE cliente específico
                         await ticketsColl.updateOne(
                             { _id: cleanNumber }, 
-                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
+                            { 
+                                $set: { 
+                                    paused: true, 
+                                    until: blockUntil, 
+                                    lastActivity: Date.now() 
+                                } 
+                            }, 
                             { upsert: true }
                         );
                     }
-                    return; // Interrompe a execução para não processar a própria mensagem como comando
+                    return; 
                 }
 
+                // --- LÓGICA PARA MENSAGENS RECEBIDAS (CLIENTE) ---
                 const ticket = await ticketsColl.findOne({ _id: cleanNumber });
 
-                // Verifica Pausa
+                // Verifica se o bot está pausado para este cliente
                 if (ticket && ticket.paused) {
-                    if (Date.now() < ticket.until) return;
-                    else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
+                    if (Date.now() < ticket.until) {
+                        console.log(`[Bot Pausado] Ignorando mensagem de ${cleanNumber}`);
+                        return;
+                    } else {
+                        // Se o tempo de 3 dias expirou, libera o bot
+                        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
+                    }
                 }
 
                 const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
                 const texto = textoRaw.trim();
                 const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-                // 1. FLUXO DE MENU INICIAL (Rápido)
+                // 1. GERAÇÃO DE TICKET / MENU INICIAL
+                // Se não existe ticket ou se a última atividade foi há mais de 2 horas
                 if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
                     const ticketId = Math.floor(1000 + Math.random() * 9000);
                     
-                    sendBotMsg(rawJid, { text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` });
+                    // Dispara a mensagem e grava o ID dela imediatamente
+                    const sent = await sock.sendMessage(rawJid, { 
+                        text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` 
+                    });
                     
+                    // GRAVAÇÃO ESSENCIAL: Impede que o bot trave a si mesmo na próxima iteração
+                    lastBotMessageId = sent.key.id;
+
                     await ticketsColl.updateOne({ _id: cleanNumber }, {
-                        $set: { id: ticketId, aguardandoOpcao: true, obrigadoEnviado: false, tentouInsistir: false, errosMenu: 0, lastActivity: Date.now(), paused: false, lastRawJid: rawJid }
+                        $set: { 
+                            id: ticketId, 
+                            aguardandoOpcao: true, 
+                            obrigadoEnviado: false, 
+                            lastActivity: Date.now(), 
+                            paused: false,
+                            lastRawJid: rawJid 
+                        }
                     }, { upsert: true });
                     return;
                 }
