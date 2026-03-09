@@ -3,7 +3,9 @@ const {
     DisconnectReason, 
     fetchLatestBaileysVersion, 
     BufferJSON, 
-    initAuthCreds 
+    initAuthCreds,
+    makeCacheableSignalKeyStore, // Adicionado para performance
+    proto // Adicionado para parsing de chaves
 } = require('@whiskeysockets/baileys');
 const { MongoClient } = require('mongodb');
 const express = require('express');
@@ -13,18 +15,16 @@ const path = require('path');
 const P = require('pino');
 const { Boom } = require('@hapi/boom');
 const axios = require('axios');
-const session = require('express-session'); // Acrescentado para o Login
+const session = require('express-session');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const port = process.env.PORT || 10000;
 
-// Middlewares para processar os dados do formulário e JSON
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Configuração de Sessão (Acrescentado)
 app.use(session({
     secret: 'azevedo-secret-key',
     resave: false,
@@ -41,44 +41,57 @@ let lastBotMessageId = null;
 
 let ticketsColl;
 let authColl;
-let knowledgeColl; // Coleção para a Base de Conhecimento
-let userLoginColl; // user
+let knowledgeColl;
+let userLoginColl;
 
+// Lógica de Autenticação Otimizada para evitar Bad MAC
 async function useMongoDBAuthState(collection) {
-    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
+    const writeData = (data, id) => collection.replaceOne(
+        { _id: id }, 
+        JSON.parse(JSON.stringify(data, BufferJSON.replacer)), 
+        { upsert: true }
+    );
+
     const readData = async (id) => {
-        const data = await collection.findOne({ _id: id });
-        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
+        try {
+            const data = await collection.findOne({ _id: id });
+            return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
+        } catch {
+            return null;
+        }
     };
+
     const removeData = (id) => collection.deleteOne({ _id: id });
+
     const creds = await readData('creds') || initAuthCreds();
 
     return {
         state: {
             creds,
-            keys: {
+            keys: makeCacheableSignalKeyStore({
                 get: async (type, ids) => {
                     const data = {};
                     await Promise.all(ids.map(async id => {
                         let value = await readData(`${type}-${id}`);
                         if (type === 'app-state-sync-key' && value) {
-                            value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                            value = proto.Message.AppStateSyncKeyData.fromObject(value);
                         }
                         data[id] = value;
                     }));
                     return data;
                 },
                 set: async (data) => {
+                    const tasks = [];
                     for (const type in data) {
                         for (const id in data[type]) {
                             const value = data[type][id];
                             const storeId = `${type}-${id}`;
-                            if (value) await writeData(value, storeId);
-                            else await removeData(storeId);
+                            tasks.push(value ? writeData(value, storeId) : removeData(storeId));
                         }
                     }
+                    await Promise.all(tasks);
                 }
-            }
+            }, P({ level: 'silent' }))
         },
         saveCreds: () => writeData(creds, 'creds')
     };
@@ -90,7 +103,7 @@ async function startBot() {
         const db = client.db('bot_whatsapp');
         authColl = db.collection('auth_session');
         ticketsColl = db.collection('active_tickets');
-        knowledgeColl = db.collection('knowledge_base'); // Inicializada coleção
+        knowledgeColl = db.collection('knowledge_base');
         userLoginColl = db.collection('user_login');
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
@@ -102,8 +115,12 @@ async function startBot() {
             logger: P({ level: 'silent' }),
             browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
             connectTimeoutMs: 80000,
-            defaultQueryTimeoutMs: 0, 
-            retryRequestDelayMs: 3000
+            defaultQueryTimeoutMs: 60000, // Aumentado para estabilidade
+            retryRequestDelayMs: 5000,
+            // Handler crucial para erros de descriptografia
+            getMessage: async (key) => {
+                return { conversation: 'Retrying message...' };
+            }
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -188,14 +205,15 @@ Digite o número da opção desejada:
 5️⃣ Direito Trabalhista
 6️⃣ Direito Empresarial
 7️⃣ Outros Assuntos
-8️⃣ Desejo falar de um atendimento/processo em andamento`
+8️⃣ Desejo falar de um atendimento/processo em andamento`;
                 await sendBotMsg(rawJid, { text: menuTexto });
                 return;
             }
 
             await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } });
 
-             const respostas = {
+            // INSERIR AQUI SEU OBJETO DE RESPOSTAS (1 A 8)
+            const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
 Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
@@ -344,17 +362,12 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
     }
 }
 
-// --- ROTAS DE LOGIN E PAINEL ---
-
+// --- ROTAS (Login, Painel, API) Permanecem as mesmas ---
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
-
 app.post('/login', async (req, res) => {
     const { user, pass } = req.body;
-
     try {
-        // Busca o usuário no banco de dados
         const adminAccount = await userLoginColl.findOne({ user: user });
-
         if (adminAccount && adminAccount.pass === pass) {
             req.session.loggedIn = true;
             res.redirect('/');
@@ -362,8 +375,7 @@ app.post('/login', async (req, res) => {
             res.send("<script>alert('Usuário ou senha incorretos'); window.location='/login';</script>");
         }
     } catch (err) {
-        console.error("Erro ao validar login:", err);
-        res.status(500).send("Erro interno no servidor");
+        res.status(500).send("Erro interno");
     }
 });
 
@@ -372,13 +384,11 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Logout do Painel (Sair do Sistema)
 app.get('/logout-panel', (req, res) => {
     req.session.destroy();
     res.redirect('/login');
 });
 
-// Desconectar o WhatsApp (Botão "Desconectar Aparelho")
 app.get('/logout-whatsapp', async (req, res) => {
     try {
         await authColl.deleteMany({});
@@ -389,8 +399,6 @@ app.get('/logout-whatsapp', async (req, res) => {
         res.sendStatus(200);
     } catch (err) { res.status(500).send("Erro"); }
 });
-
-// --- API DA BASE DE CONHECIMENTO ---
 
 app.post('/api/knowledge', async (req, res) => {
     if (!req.session.loggedIn) return res.sendStatus(401);
@@ -410,8 +418,6 @@ app.get('/api/knowledge', async (req, res) => {
         res.json([]);
     }
 });
-
-// --- MANUTENÇÃO E INICIALIZAÇÃO ---
 
 setInterval(async () => {
     try {
