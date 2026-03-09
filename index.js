@@ -42,9 +42,8 @@ let ticketsColl, authColl, knowledgeColl, userLoginColl;
 
 async function sendBotMsg(jid, content) {
     try {
-        // Garante que o envio vá para o endereço de usuário padrão
-        const targetJid = jid.includes('@') ? (jid.split('@')[0].split(':')[0] + '@s.whatsapp.net') : jid;
-        const sent = await sock.sendMessage(targetJid, content);
+        // Envia exatamente para o JID que originou a mensagem (seja LID ou número)
+        const sent = await sock.sendMessage(jid, content);
         lastBotMessageId = sent.key.id; 
         return sent;
     } catch (err) {
@@ -82,9 +81,9 @@ async function startBot() {
 
             const rawJid = msg.key.remoteJid;
             
-            const cleanNumber = (rawJid.split('@')[0]).split(':')[0]; 
+            const cleanNumber = (rawJid.split('@')[0]).split(':')[0];
             
-            const cleanJid = cleanNumber + '@s.whatsapp.net';
+            const cleanJid = rawJid.split(':')[0];
 
             const isMe = msg.key.fromMe;
             const msgId = msg.key.id;
