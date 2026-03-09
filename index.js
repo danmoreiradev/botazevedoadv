@@ -81,16 +81,19 @@ sock.ev.on('messages.upsert', async m => {
 
     const rawJid = msg.key.remoteJid;
     const cleanJid = jidNormalizedUser(rawJid); 
-    const cleanNumber = cleanJid.split('@')[0];
     const isMe = msg.key.fromMe;
     const msgId = msg.key.id;
 
-    // Extração robusta do número real (mesmo em LID)
-    let numeroRealExtraido = cleanNumber;
-    if (rawJid.includes('@lid')) {
-        const vnumber = msg.key.participant || msg.participant || "";
-        if (vnumber) {
-            numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
+    // --- IDENTIFICAÇÃO ULTRA-ROBUSTA ---
+    // 1. Tenta extrair o número real do participant (comum em mensagens vindas de LID)
+    let numeroRealExtraido = (msg.key.participant || msg.participant || cleanJid).split('@')[0].split(':')[0];
+    
+    // 2. Se o numeroRealExtraido ainda for um LID (começa com 1109), 
+    // tentamos buscar no cache de contatos do próprio Baileys se ele já mapeou esse LID para um número
+    if (numeroRealExtraido.startsWith('1109')) {
+        const contact = sock.contacts[cleanJid];
+        if (contact && contact.id && !contact.id.includes('lid')) {
+            numeroRealExtraido = contact.id.split('@')[0];
         }
     }
 
@@ -101,32 +104,19 @@ sock.ev.on('messages.upsert', async m => {
     const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
     try {
-        // 1. BUSCA UNIFICADA (Tenta encontrar por qualquer rastro deixado antes)
+        // BUSCA CRUZADA: O segredo é procurar o numeroRealExtraido em qualquer campo
         let ticket = await ticketsColl.findOne({
             $or: [
-                { _id: cleanNumber },          // Procura pelo ID principal (pode ser o LID ou Número)
-                { _id: numeroRealExtraido },    // Procura pelo Número extraído
-                { numeroReal: cleanNumber },    // Procura se o cleanNumber já foi salvo como numeroReal
-                { numeroReal: numeroRealExtraido } // Procura se o numeroRealExtraido já existe
+                { _id: numeroRealExtraido },
+                { numeroReal: numeroRealExtraido },
+                { _id: cleanJid.split('@')[0] } 
             ]
         });
 
-        // 2. VÍNCULO DE IDENTIDADE (Se achou por LID mas agora temos o Número, ou vice-versa)
-        // Se o ticket existe mas o numeroReal dele ainda é igual ao LID, e agora descobrimos o número de verdade:
-        if (ticket && ticket.numeroReal !== numeroRealExtraido && !numeroRealExtraido.includes('1109')) {
-             await ticketsColl.updateOne(
-                { _id: ticket._id },
-                { $set: { numeroReal: numeroRealExtraido } }
-             );
-             ticket.numeroReal = numeroRealExtraido; // Atualiza a variável local
-        }
-
-        // 3. Intervenção Humana (Você respondeu)
+        // Se você respondeu (Intervenção Humana)
         if (isMe) {
             if (msgId !== lastBotMessageId) {
-                // Se não achou ticket nenhum, cria um usando o número real disponível
                 const targetId = ticket ? ticket._id : numeroRealExtraido;
-                console.log(`[Humano] Pausando bot para: ${targetId}`);
                 await ticketsColl.updateOne(
                     { _id: targetId }, 
                     { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), numeroReal: numeroRealExtraido } }, 
@@ -136,7 +126,7 @@ sock.ev.on('messages.upsert', async m => {
             return; 
         }
 
-        // 4. Verificação de Pausa
+        // Se o ticket estiver pausado, interrompe imediatamente
         if (ticket && ticket.paused) {
             if (Date.now() < ticket.until) return;
             else await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
@@ -146,7 +136,8 @@ sock.ev.on('messages.upsert', async m => {
         const texto = textoRaw.trim();
         const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-        // 5. CRIAÇÃO OU RENOVAÇÃO DO MENU
+        // --- CRIAÇÃO/ATUALIZAÇÃO COM ID FIXO ---
+        // Se não tem ticket ou expirou, cria um novo, mas SEMPRE usando o número real como _id se possível
         if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
             const ticketId = Math.floor(1000 + Math.random() * 9000);
             
@@ -154,25 +145,38 @@ sock.ev.on('messages.upsert', async m => {
                 text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada...` 
             });
 
-            const finalId = (numeroRealExtraido.startsWith('55')) ? numeroRealExtraido : cleanNumber;
-
-            await ticketsColl.updateOne({ _id: finalId }, {
-                $set: { 
-                    id: ticketId, 
-                    numeroReal: numeroRealExtraido,
-                    aguardandoOpcao: true, 
-                    obrigadoEnviado: false, 
-                    tentouInsistir: false,
-                    lastActivity: Date.now(), 
-                    paused: false,
-                    lastRawJid: rawJid 
-                }
-            }, { upsert: true });
+            // Forçamos o _id a ser o numeroRealExtraido para evitar duplicidade
+            await ticketsColl.updateOne(
+                { _id: numeroRealExtraido }, 
+                {
+                    $set: { 
+                        id: ticketId, 
+                        numeroReal: numeroRealExtraido,
+                        aguardandoOpcao: true, 
+                        obrigadoEnviado: false, 
+                        tentouInsistir: false,
+                        lastActivity: Date.now(), 
+                        paused: false,
+                        lastRawJid: rawJid 
+                    }
+                }, 
+                { upsert: true }
+            );
             return;
         }
 
-        // 5. Atualiza atividade no ticket existente
-        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now(), lastRawJid: rawJid } });
+        // Atualiza o ticket existente (independente de ser LID ou Número)
+        await ticketsColl.updateOne(
+            { _id: ticket._id }, 
+            { $set: { lastActivity: Date.now(), lastRawJid: rawJid } }
+        );
+
+        // ... Restante da sua lógica de respostas (respostas[texto]) ...
+
+    } catch (err) {
+        console.error("Erro interno:", err);
+    }
+});
 
         const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
