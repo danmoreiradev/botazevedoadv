@@ -368,7 +368,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.get('/logout', (req, res) => {
+app.get('/logout-painel', (req, res) => {
     req.session.destroy(() => {
         res.redirect('/login');
     });

@@ -268,7 +268,7 @@
             const resposta = document.getElementById('resposta_ia').value;
             if(!pergunta || !resposta) return alert("Preencha todos os campos.");
 
-            const res = await fetch('/api/knowledge_base', {
+            const res = await fetch('/api/knowledgeColl', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ pergunta, resposta })
@@ -282,7 +282,7 @@
         }
 
         async function carregarConhecimento() {
-            const res = await fetch('/api/knowledge_base');
+            const res = await fetch('/api/knowledgeColl');
             const data = await res.json();
             const container = document.getElementById('lista_conhecimento');
             
