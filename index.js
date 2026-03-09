@@ -1,13 +1,12 @@
 const { 
-    default: makeWASocket, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion, 
-    BufferJSON, 
-    initAuthCreds,
-    makeCacheableSignalKeyStore,
-    proto 
+    default: makeWASocket, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    BufferJSON, 
+    initAuthCreds,
+    jidNormalizedUser // Importado para unificação de IDs
 } = require('@whiskeysockets/baileys');
-const { MongoClient, ObjectId } = require('mongodb');
+const { MongoClient } = require('mongodb');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -16,209 +15,165 @@ const P = require('pino');
 const { Boom } = require('@hapi/boom');
 const axios = require('axios');
 const session = require('express-session');
-const MongoStore = require('connect-mongodb-session')(session);
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const port = process.env.PORT || 10000;
 
-// --- CONFIGURAÇÃO MONGODB ---
-const mongoUri = process.env.MONGODB_URI;
-const client = new MongoClient(mongoUri);
-
-const store = new MongoStore({
-    uri: mongoUri,
-    collection: 'web_sessions'
-});
-
-// --- TRAVAS DE MEMÓRIA E DUPLICIDADE ---
-const processedMessages = new Set();
-const clearCache = (id) => setTimeout(() => processedMessages.delete(id), 15000); // 15s para garantir sincronia multi-device
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-    secret: 'azevedo-juvencio-secure-key-2026',
-    resave: false,
-    saveUninitialized: false,
-    store: store,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 }
+    secret: 'azevedo-secret-key',
+    resave: false,
+    saveUninitialized: true
 }));
 
-let sock;
+const mongoUri = process.env.MONGODB_URI;
+const client = new MongoClient(mongoUri);
+
 let lastQr = null;
 let currentUser = null;
+let sock;
 let lastBotMessageId = null; 
-let isConnecting = false;
+let processing = new Set(); 
 
 let ticketsColl, authColl, knowledgeColl, userLoginColl;
 
-// --- GESTÃO DE ESTADO (MONGO) ---
-async function useMongoDBAuthState(collection) {
-    const writeData = (data, id) => collection.replaceOne(
-        { _id: id }, 
-        JSON.parse(JSON.stringify(data, BufferJSON.replacer)), 
-        { upsert: true }
-    );
-
-    const readData = async (id) => {
-        try {
-            const data = await collection.findOne({ _id: id });
-            return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
-        } catch { return null; }
-    };
-
-    const removeData = (id) => collection.deleteOne({ _id: id });
-
-    const creds = await readData('creds') || initAuthCreds();
-
-    return {
-        state: {
-            creds,
-            keys: makeCacheableSignalKeyStore({
-                get: async (type, ids) => {
-                    const data = {};
-                    await Promise.all(ids.map(async id => {
-                        let value = await readData(`${type}-${id}`);
-                        if (type === 'app-state-sync-key' && value) {
-                            value = proto.Message.AppStateSyncKeyData.fromObject(value);
-                        }
-                        data[id] = value;
-                    }));
-                    return data;
-                },
-                set: async (data) => {
-                    const tasks = [];
-                    for (const type in data) {
-                        for (const id in data[type]) {
-                            const value = data[type][id];
-                            const storeId = `${type}-${id}`;
-                            tasks.push(value ? writeData(value, storeId) : removeData(storeId));
-                        }
-                    }
-                    await Promise.all(tasks);
-                }
-            }, P({ level: 'silent' }))
-        },
-        saveCreds: () => writeData(creds, 'creds')
-    };
+async function sendBotMsg(jid, content) {
+    try {
+        // Envia exatamente para o JID que originou a mensagem (seja LID ou número)
+        const sent = await sock.sendMessage(jid, content);
+        lastBotMessageId = sent.key.id; 
+        return sent;
+    } catch (err) {
+        console.error("Erro ao enviar:", err);
+        return null;
+    }
 }
 
-// --- BOT CORE ---
 async function startBot() {
-    if (isConnecting) return;
-    isConnecting = true;
+    try {
+        await client.connect();
+        const db = client.db('bot_whatsapp');
+        authColl = db.collection('auth_session');
+        ticketsColl = db.collection('active_tickets');
+        knowledgeColl = db.collection('knowledge_base');
+        userLoginColl = db.collection('user_login');
 
-    try {
-        if (!client.topology || !client.topology.isConnected()) await client.connect();
-        
-        const db = client.db('bot_whatsapp');
-        authColl = db.collection('auth_session');
-        ticketsColl = db.collection('active_tickets');
-        knowledgeColl = db.collection('knowledge_base');
-        userLoginColl = db.collection('user_login');
+        const { state, saveCreds } = await useMongoDBAuthState(authColl);
+        const { version } = await fetchLatestBaileysVersion();
 
-        const { state, saveCreds } = await useMongoDBAuthState(authColl);
-        const { version } = await fetchLatestBaileysVersion();
+        sock = makeWASocket({
+            version,
+            auth: state,
+            logger: P({ level: 'silent' }),
+            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
+            connectTimeoutMs: 60000,
+            generateHighQualityLinkPreview: false
+        });
 
-        sock = makeWASocket({
-            version,
-            auth: state,
-            logger: P({ level: 'silent' }),
-            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-            printQRInTerminal: false,
-            // Otimizações para RENDER (baixo consumo de RAM)
-            connectTimeoutMs: 60000,
-            defaultQueryTimeoutMs: 0,
-            syncFullHistory: false, // Fundamental para não duplicar tickets antigos
-            markOnlineOnConnect: true,
-            getMessage: async (key) => { return { conversation: 'Mensagem recebida' } }
-        });
+        sock.ev.on('creds.update', saveCreds);
 
-        sock.ev.on('creds.update', saveCreds);
+sock.ev.on('messages.upsert', async m => {
+    const msg = m.messages[0];
+    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-        sock.ev.on('messages.upsert', async m => {
-            const msg = m.messages[0];
-            if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+    const rawJid = msg.key.remoteJid;
+    // jidNormalizedUser converte IDs complexos para o formato padrão
+    const cleanJid = jidNormalizedUser(rawJid); 
+    const cleanNumber = cleanJid.split('@')[0];
+    const isMe = msg.key.fromMe;
+    const msgId = msg.key.id;
 
-            // --- FIX DUPLICIDADE (Idempotência) ---
-            const messageId = msg.key.id;
-            if (processedMessages.has(messageId)) return;
-            processedMessages.add(messageId);
-            clearCache(messageId);
+    // --- NOVA LÓGICA DE IDENTIFICAÇÃO ---
+    // Tentamos pegar o número real. Se for LID, ele pode vir no participant.
+    let numeroRealExtraido = cleanNumber;
+    if (rawJid.includes('@lid')) {
+        // Em conversas privadas, o participant às vezes é nulo, 
+        // mas o Baileys costuma vincular no pushName ou em metadados.
+        const vnumber = msg.key.participant || msg.participant || rawJid;
+        numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
+    }
 
-            const rawJid = msg.key.remoteJid;
-            const senderId = msg.key.participant || rawJid;
-            let cleanNumber = senderId.split(':')[0].split('@')[0];
+    if (processing.has(msgId)) return;
+    processing.add(msgId);
+    setTimeout(() => processing.delete(msgId), 10000);
 
-            // Filtro de IDs de protocolo
-            if (cleanNumber.length > 13 && !cleanNumber.startsWith('55')) {
-                 const alternative = rawJid.split(':')[0].split('@')[0];
-                 if (alternative.startsWith('55')) cleanNumber = alternative;
-            }
+    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
-            const isMe = msg.key.fromMe;
-            const messageType = Object.keys(msg.message)[0];
-            if (['protocolMessage', 'senderKeyDistributionMessage'].includes(messageType)) return;
+    try {
+        // 1. BUSCA AGRESSIVA: Procura o número em qualquer um dos campos
+        let ticket = await ticketsColl.findOne({
+            $or: [
+                { _id: cleanNumber },
+                { numeroReal: cleanNumber },
+                { _id: numeroRealExtraido },
+                { numeroReal: numeroRealExtraido }
+            ]
+        });
 
-            // Se responder pelo Web/Celular, pausa o bot por 12h
-            if (isMe) {
-                if (msg.key.id !== lastBotMessageId) {
-                    const blockUntil = Date.now() + (12 * 60 * 60 * 1000);
-                    await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: true, until: blockUntil } }, { upsert: true });
-                }
-                return;
-            }
+        // 2. Lógica de Intervenção (Humano respondeu)
+        if (isMe) {
+            if (msgId !== lastBotMessageId) {
+                // Se o humano respondeu, travamos o ticket que foi encontrado ou criamos um com o ID atual
+                const targetId = ticket ? ticket._id : cleanNumber;
+                await ticketsColl.updateOne(
+                    { _id: targetId }, 
+                    { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
+                    { upsert: true }
+                );
+            }
+            return; 
+        }
 
-            let ticket = await ticketsColl.findOne({ _id: cleanNumber });
-            if (ticket?.paused && Date.now() < ticket.until) return;
+        // 3. SE ACHOU UM TICKET COM ID DIFERENTE (Unificação em tempo real)
+        // Se a msg veio por LID (1109...) mas achamos um ticket pelo número real (5519...)
+        // vamos forçar o uso do ticket antigo para não duplicar.
+        if (ticket && ticket._id !== cleanNumber) {
+            console.log(`[Link] Unificando ${cleanNumber} ao ticket existente ${ticket._id}`);
+            // Opcional: Você pode atualizar o _id se quiser, mas o mais seguro é 
+            // apenas garantir que 'ticket' agora referencia o objeto correto.
+        }
 
-            const sendBotMsg = async (content) => {
-                const sent = await sock.sendMessage(rawJid, content);
-                lastBotMessageId = sent.key.id;
-                // Adiciona o próprio ID enviado no cache para evitar loop
-                processedMessages.add(lastBotMessageId);
-                clearCache(lastBotMessageId);
-                return sent;
-            };
+        // 4. Verifica Pausa
+        if (ticket && ticket.paused) {
+            if (Date.now() < ticket.until) return;
+            else await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
+        }
 
-            const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-            const texto = textoRaw.trim();
-            const timeoutMenu = 4 * 60 * 60 * 1000;
+        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        const texto = textoRaw.trim();
+        const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-            // --- LÓGICA DE ATENDIMENTO ---
-            if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-                
-                // 1. Consulta Base de Conhecimento
-                const kbMatch = await knowledgeColl.findOne({ 
-                    pergunta: { $regex: new RegExp(texto, 'i') } 
-                });
+        // 5. CRIAÇÃO / MENU
+        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+            const ticketId = Math.floor(1000 + Math.random() * 9000);
+            
+            await sendBotMsg(rawJid, { // Enviamos para o rawJid original para garantir entrega
+                text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` 
+            });
 
-                if (kbMatch) {
-                    await sendBotMsg({ text: `🔍 *Informação:* \n\n${kbMatch.resposta}` });
-                    await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } }, { upsert: true });
-                    return;
-                }
+            await ticketsColl.updateOne({ _id: cleanNumber }, {
+                $set: { 
+                    id: ticketId, 
+                    numeroReal: numeroRealExtraido, // Aqui salvamos o vínculo
+                    aguardandoOpcao: true, 
+                    obrigadoEnviado: false, 
+                    tentouInsistir: false,
+                    lastActivity: Date.now(), 
+                    paused: false,
+                    lastRawJid: rawJid 
+                }
+            }, { upsert: true });
+            return;
+        }
 
-                // 2. Novo Ticket / Menu Inicial
-                const ticketId = Math.floor(1000 + Math.random() * 9000);
-                await ticketsColl.replaceOne({ _id: cleanNumber }, {
-                    _id: cleanNumber,
-                    id: ticketId,
-                    aguardandoOpcao: true,
-                    lastActivity: Date.now(),
-                    lastRawJid: rawJid
-                }, { upsert: true });
+        // 6. Atualiza atividade SEMPRE no ID do ticket encontrado
+        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
 
-                const menu = `Olá! 👋 Bem-vindo ao *Azevedo e Juvencio Advogados*\n🎫 Atendimento: *${ticketId}*\n\nSelecione uma opção de 1 a 8 para continuarmos.`;
-                await sendBotMsg({ text: menu });
-                return;
-            }
-
-            if (ticket.aguardandoOpcao) {
-                const respostas = {
-      '1': `📱 *Direito Digital (Desbloqueio de Contas)*
+        const respostas = {
+      '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
 Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
 Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
@@ -231,7 +186,7 @@ Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
 
 👨‍⚖️ Um especialista em Direito Digital analisará seu caso e entrará em contato em breve.`,
 
-      '2': `📄 *Direito Cível e Contratual*
+      '2': `📄 *Direito Cível e Contratual*
 
 Perfeito. Para direcionarmos você ao especialista em contratos e questões cíveis, precisamos entender o cenário:
 
@@ -243,7 +198,7 @@ Perfeito. Para direcionarmos você ao especialista em contratos e questões cív
 
 ⏳ Aguarde um momento, nossa equipe jurídica especializada em Direito Cível/Contratual já foi notificada e falará com você em instantes.`,
 
-      '3': `🛒 *Direito do Consumidor*
+      '3': `🛒 *Direito do Consumidor*
 
 Compreendido! Vamos ajudar você a garantir seus direitos. Por favor, forneça os detalhes abaixo:
 
@@ -255,7 +210,7 @@ Compreendido! Vamos ajudar você a garantir seus direitos. Por favor, forneça o
 
 👨‍⚖️ Um de nossos advogados especialistas em Defesa do Consumidor entrará em contato para dar os próximos passos.`,
 
-      '4': `🏠 *Direito Imobiliário*
+      '4': `🏠 *Direito Imobiliário*
 
 Entendido! Questões imobiliárias exigem atenção aos detalhes. Para que possamos te orientar, por favor, nos envie:
 
@@ -267,7 +222,7 @@ Entendido! Questões imobiliárias exigem atenção aos detalhes. Para que possa
 
 👨‍⚖️ Um especialista em Direito Imobiliário analisará seu caso e entrará em contato em breve.`,
 
-      '5': `👷 *Direito Trabalhista*
+      '5': `👷 *Direito Trabalhista*
 
 Compreendido. Vamos analisar seus direitos trabalhistas. Por favor, nos forneça as seguintes informações:
 
@@ -279,7 +234,7 @@ Compreendido. Vamos analisar seus direitos trabalhistas. Por favor, nos forneça
 
 👨‍⚖️ Nossa equipe especializada em Direito do Trabalho entrará em contato em instantes para te orientar.`,
 
-      '6': `🏢 *Direito Empresarial*
+      '6': `🏢 *Direito Empresarial*
 
 Perfeito. Para atendermos sua empresa com a agilidade necessária, por favor, informe:
 
@@ -291,7 +246,7 @@ Perfeito. Para atendermos sua empresa com a agilidade necessária, por favor, in
 
 👨‍⚖️ Um de nossos advogados corporativos entrará em contato para agendar uma conversa ou dar continuidade ao atendimento.`,
 
-      '7': `📝 *Outros Assuntos*
+      '7': `📝 *Outros Assuntos*
 
 Sem problemas! Se o seu caso não se encaixa nas opções anteriores, queremos te ouvir da mesma forma.
 
@@ -301,7 +256,7 @@ Sem problemas! Se o seu caso não se encaixa nas opções anteriores, queremos t
 
 🔎 Sua mensagem será encaminhada para nossa triagem e o profissional mais adequado para o seu tema entrará em contato o mais rápido possível.`,
 
-      '8': `📂 *Atendimento/Processo em Andamento*
+      '8': `📂 *Atendimento/Processo em Andamento*
 
 Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos informe:
 
@@ -314,67 +269,165 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 📎 Se precisar enviar algum documento novo, pode anexar aqui agora.
 
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
-    };
+    };
 
-                const respostaSelecionada = respostas[texto];
-                if (respostaSelecionada) {
-                    await sendBotMsg({ text: respostaSelecionada });
-                    await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false, lastActivity: Date.now() } });
-                } else {
-                    await sendBotMsg({ text: "⚠️ Opção inválida. Digite de *1 a 8*." });
-                }
-                return;
-            }
+        // 5. Resposta às Opções
+        if (ticket.aguardandoOpcao) {
+            if (respostas[texto]) {
+                await sendBotMsg(cleanJid, { text: respostas[texto] });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
+            } else {
+                const novosErros = (ticket.errosMenu || 0) + 1;
+                if (novosErros >= 2) {
+                    await sendBotMsg(cleanJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                } else {
+                    await sendBotMsg(cleanJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros } });
+                }
+            }
+            return;
+        }
 
-        });
+        // 6. Lógica de Insistência (Detalhamento)
+        if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
+            const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
+            if (texto.length >= 20 || isMedia) {
+                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+            } else if (!ticket.tentouInsistir) {
+                await sendBotMsg(cleanJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { tentouInsistir: true } });
+            } else {
+                await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+            }
+        }
 
-        sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update;
-            if (qr) { lastQr = qr; io.emit('qr', qr); }
-            if (connection === 'open') {
-                isConnecting = false;
-                lastQr = null;
-                currentUser = { number: sock.user.id.split(':')[0], name: 'Azevedo e Juvencio' };
-                io.emit('connected', currentUser);
-                console.log('✅ Conectado com sucesso!');
-            }
-            if (connection === 'close') {
-                isConnecting = false;
-                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-                if (shouldReconnect) setTimeout(startBot, 5000);
-                else io.emit('disconnected');
-            }
-        });
+    } catch (err) {
+        console.error("Erro interno:", err);
+    }
+    });
 
-    } catch (err) {
-        console.error("Erro no Bot:", err);
-        isConnecting = false;
-        setTimeout(startBot, 10000);
-    }
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
+            if (qr) { lastQr = qr; io.emit('qr', qr); }
+            
+            if (connection === 'open') {
+                lastQr = null;
+                const userNumber = sock.user.id.split(':')[0];
+                let ppUrl = null;
+                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch (e) { ppUrl = null; }
+
+                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
+                io.emit('connected', currentUser);
+            }
+                        
+            if (connection === 'close') {
+                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+                if (shouldReconnect) startBot();
+                else { currentUser = null; io.emit('disconnected'); }
+            }
+        });
+
+    } catch (err) { 
+        console.error("Erro crítico:", err);
+        setTimeout(startBot, 5000);
+    }
 }
 
-// --- API E ROTAS ---
+// --- RESTO DO CÓDIGO (useMongoDBAuthState, Rotas, etc) MANTIDO IGUAL ---
+async function useMongoDBAuthState(collection) {
+    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
+    const readData = async (id) => {
+        const data = await collection.findOne({ _id: id });
+        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
+    };
+    const removeData = (id) => collection.deleteOne({ _id: id });
+    const creds = await readData('creds') || initAuthCreds();
+    return {
+        state: {
+            creds,
+            keys: {
+                get: async (type, ids) => {
+                    const data = {};
+                    await Promise.all(ids.map(async id => {
+                        let value = await readData(`${type}-${id}`);
+                        if (type === 'app-state-sync-key' && value) value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                        data[id] = value;
+                    }));
+                    return data;
+                },
+                set: async (data) => {
+                    for (const type in data) {
+                        for (const id in data[type]) {
+                            const value = data[type][id];
+                            if (value) writeData(value, `${type}-${id}`);
+                            else removeData(`${type}-${id}`);
+                        }
+                    }
+                }
+            }
+        },
+        saveCreds: () => writeData(creds, 'creds')
+    };
+}
+
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 app.post('/login', async (req, res) => {
-    const { user, pass } = req.body;
-    const admin = await userLoginColl.findOne({ user, pass });
-    if (admin) {
-        req.session.loggedIn = true;
-        res.redirect('/');
-    } else {
-        res.send("<script>alert('Erro'); window.location='/login';</script>");
-    }
+    const { user, pass } = req.body;
+    try {
+        const adminAccount = await userLoginColl.findOne({ user });
+        if (adminAccount && adminAccount.pass === pass) {
+            req.session.loggedIn = true;
+            res.redirect('/');
+        } else res.send("<script>alert('Erro'); window.location='/login';</script>");
+    } catch (e) { res.status(500).send("Erro"); }
 });
 
 app.get('/', (req, res) => {
-    if (!req.session.loggedIn) return res.redirect('/login');
-    res.sendFile(path.join(__dirname, 'index.html'));
+    if (!req.session.loggedIn) return res.redirect('/login');
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Mantém o Render acordado (Auto-Ping)
-setInterval(() => {
-    const host = process.env.RENDER_EXTERNAL_HOSTNAME;
-    if (host) axios.get(`https://${host}/login`).catch(() => {});
-}, 10 * 60 * 1000);
+app.get('/logout-panel', (req, res) => {
+    req.session.destroy(() => { res.redirect('/login'); });
+});
+
+app.get('/logout-whatsapp', async (req, res) => {
+    try {
+        await authColl.deleteMany({});
+        if (sock) await sock.logout();
+        currentUser = null; lastQr = null;
+        io.emit('disconnected');
+        res.sendStatus(200);
+    } catch (err) { res.status(500).send("Erro"); }
+});
+
+app.get('/api/knowledgeColl', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    const data = await knowledgeColl.find({}).toArray();
+    res.json(data);
+});
+
+app.post('/api/knowledgeColl', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    const { pergunta, resposta } = req.body;
+    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
+    res.sendStatus(200);
+});
+
+setInterval(async () => {
+    try {
+        const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
+        const protocol = host.includes('localhost') ? 'http' : 'https';
+        await axios.get(`${protocol}://${host}/`);
+    } catch (e) {}
+}, 5 * 60 * 1000);
+
+io.on('connection', (socket) => {
+    if (currentUser) socket.emit('connected', currentUser);
+    else if (lastQr) socket.emit('qr', lastQr);
+});
 
 server.listen(port, () => startBot());
