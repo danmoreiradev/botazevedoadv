@@ -66,7 +66,6 @@ async function startBot() {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-            // --- CORREÇÃO AQUI: Extração limpa do número do destinatário/conversa ---
             const rawJid = msg.key.remoteJid;
             // jidNormalizedUser garante que tire o :1, :2 (ID de dispositivos) e mantenha apenas o ID da conversa
             const cleanNumber = (rawJid.split('@')[0]).split(':')[0]; 
@@ -276,17 +275,36 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             if (qr) { lastQr = qr; io.emit('qr', qr); }
+            
             if (connection === 'open') {
                 lastQr = null;
                 const userNumber = sock.user.id.split(':')[0];
-                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: 'https://www.w3schools.com/howto/img_avatar.png' };
+                
+                // Tenta buscar a foto real do perfil
+                let ppUrl;
+                try {
+                    ppUrl = await sock.profilePictureUrl(sock.user.id, 'image');
+                } catch (e) {
+                    ppUrl = 'https://www.w3schools.com/howto/img_avatar.png'; // Fallback
+                }
+
+                currentUser = { 
+                    number: userNumber, 
+                    name: 'Azevedo e Juvencio', 
+                    pic: ppUrl 
+                };
+                
                 io.emit('connected', currentUser);
                 console.log('✅ Bot Online!');
             }
+            
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
                 if (shouldReconnect) startBot();
-                else io.emit('disconnected');
+                else {
+                    currentUser = null;
+                    io.emit('disconnected');
+                }
             }
         });
 
@@ -348,6 +366,12 @@ app.post('/login', async (req, res) => {
 app.get('/', (req, res) => {
     if (!req.session.loggedIn) return res.redirect('/login');
     res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.get('/logout', (req, res) => {
+    req.session.destroy(() => {
+        res.redirect('/login');
+    });
 });
 
 app.get('/logout-whatsapp', async (req, res) => {
