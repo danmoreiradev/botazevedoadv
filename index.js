@@ -3,7 +3,8 @@ const {
     DisconnectReason, 
     fetchLatestBaileysVersion, 
     BufferJSON, 
-    initAuthCreds 
+    initAuthCreds,
+    jidNormalizedUser // Importado para unificação de IDs
 } = require('@whiskeysockets/baileys');
 const { MongoClient } = require('mongodb');
 const express = require('express');
@@ -35,9 +36,21 @@ let lastQr = null;
 let currentUser = null;
 let sock;
 let lastBotMessageId = null; 
-let processing = new Set(); // Evita processamento duplicado ultra-rápido
+let processing = new Set(); 
 
 let ticketsColl, authColl, knowledgeColl, userLoginColl;
+
+// --- FUNÇÃO DE ENVIO GLOBAL (Resolve o ReferenceError) ---
+async function sendBotMsg(jid, content) {
+    try {
+        const sent = await sock.sendMessage(jid, content);
+        lastBotMessageId = sent.key.id; 
+        return sent;
+    } catch (err) {
+        console.error("Erro ao enviar mensagem do bot:", err);
+        return null;
+    }
+}
 
 async function startBot() {
     try {
@@ -66,12 +79,14 @@ async function startBot() {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
+            // --- UNIFICAÇÃO DE ID (CELULAR E WEB IGUAIS) ---
             const rawJid = msg.key.remoteJid;
-            const cleanNumber = (rawJid.split('@')[0]).split(':')[0]; 
+            const cleanJid = jidNormalizedUser(rawJid);
+            const cleanNumber = cleanJid.split('@')[0]; 
+            
             const isMe = msg.key.fromMe;
             const msgId = msg.key.id;
 
-            // Evita duplicidade
             if (processing.has(msgId)) return;
             processing.add(msgId);
             setTimeout(() => processing.delete(msgId), 10000);
@@ -79,72 +94,54 @@ async function startBot() {
             const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
             try {
-                // --- LÓGICA DE INTERVENÇÃO MANUAL (CELULAR OU WEB) ---
+                // --- 1. LÓGICA DE INTERVENÇÃO MANUAL ---
                 if (isMe) {
-                    // Se a mensagem enviada NÃO foi o bot (ID diferente do último gravado)
                     if (msgId !== lastBotMessageId) {
-                        console.log(`[Intervenção Manual] Detectada em ${cleanNumber}. Travando bot por 3 dias.`);
-                        
+                        console.log(`[Intervenção] Detectada em ${cleanNumber}. Travando bot por 3 dias.`);
                         await ticketsColl.updateOne(
                             { _id: cleanNumber }, 
-                            { 
-                                $set: { 
-                                    paused: true, 
-                                    until: blockUntil, 
-                                    lastActivity: Date.now() 
-                                } 
-                            }, 
+                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
                             { upsert: true }
                         );
                     }
                     return; 
                 }
 
-                // --- LÓGICA PARA MENSAGENS RECEBIDAS (CLIENTE) ---
                 const ticket = await ticketsColl.findOne({ _id: cleanNumber });
 
-                // Verifica se o bot está pausado para este cliente
+                // --- 2. VERIFICAÇÃO DE PAUSA ---
                 if (ticket && ticket.paused) {
-                    if (Date.now() < ticket.until) {
-                        console.log(`[Bot Pausado] Ignorando mensagem de ${cleanNumber}`);
-                        return;
-                    } else {
-                        // Se o tempo de 3 dias expirou, libera o bot
-                        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
-                    }
+                    if (Date.now() < ticket.until) return;
+                    else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
                 }
 
                 const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
                 const texto = textoRaw.trim();
                 const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-                // 1. GERAÇÃO DE TICKET / MENU INICIAL
-                // Se não existe ticket ou se a última atividade foi há mais de 2 horas
+                // --- 3. MENU INICIAL ---
                 if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
                     const ticketId = Math.floor(1000 + Math.random() * 9000);
                     
-                    // Dispara a mensagem e grava o ID dela imediatamente
-                    const sent = await sock.sendMessage(rawJid, { 
+                    await sendBotMsg(cleanJid, { 
                         text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` 
                     });
-                    
-                    // GRAVAÇÃO ESSENCIAL: Impede que o bot trave a si mesmo na próxima iteração
-                    lastBotMessageId = sent.key.id;
 
                     await ticketsColl.updateOne({ _id: cleanNumber }, {
                         $set: { 
                             id: ticketId, 
                             aguardandoOpcao: true, 
                             obrigadoEnviado: false, 
+                            tentouInsistir: false, // Reset da insistência
                             lastActivity: Date.now(), 
                             paused: false,
-                            lastRawJid: rawJid 
+                            lastRawJid: cleanJid 
                         }
                     }, { upsert: true });
                     return;
                 }
 
-                // Atualiza atividade em segundo plano
+                // Atualiza atividade
                 ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } });
 
                 const respostas = {
@@ -246,38 +243,39 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-                // 2. RESPOSTA ÀS OPÇÕES
+
+                // --- 4. RESPOSTA ÀS OPÇÕES ---
                 if (ticket.aguardandoOpcao) {
                     if (respostas[texto]) {
-                        sendBotMsg(rawJid, { text: respostas[texto] });
+                        await sendBotMsg(cleanJid, { text: respostas[texto] });
                         await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
                     } else {
                         const novosErros = (ticket.errosMenu || 0) + 1;
                         if (novosErros >= 2) {
-                            sendBotMsg(rawJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
+                            await sendBotMsg(cleanJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
                             await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
                         } else {
-                            sendBotMsg(rawJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
+                            await sendBotMsg(cleanJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
                             await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { errosMenu: novosErros } });
                         }
                     }
                     return;
                 }
 
-                // 3. FINALIZAÇÃO (OBRIGADO / ESPECIALISTA)
+                // --- 5. LÓGICA DE INSISTÊNCIA (PADRÃO RESTAURADO) ---
                 if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
                     const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
                     
                     if (texto.length >= 20 || isMedia) {
-                        sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
+                        await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
                         await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
                     } 
                     else if (!ticket.tentouInsistir) {
-                        sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
+                        await sendBotMsg(cleanJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
                         await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { tentouInsistir: true } });
                     } 
                     else {
-                        sendBotMsg(rawJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
+                        await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
                         await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
                     }
                 }
@@ -291,35 +289,20 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
             const { connection, lastDisconnect, qr } = update;
             if (qr) { lastQr = qr; io.emit('qr', qr); }
             
-           // --- CORREÇÃO DA FOTO E STATUS (Dentro do sock.ev.on('connection.update')) ---
             if (connection === 'open') {
                 lastQr = null;
                 const userNumber = sock.user.id.split(':')[0];
-                
-                // Busca a foto real. Se não tiver, envia vazio para o HTML tratar
                 let ppUrl = null;
-                try {
-                    ppUrl = await sock.profilePictureUrl(sock.user.id, 'image');
-                } catch (e) {
-                    ppUrl = null; 
-                }
+                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch (e) { ppUrl = null; }
 
-                currentUser = { 
-                    number: userNumber, 
-                    name: 'Azevedo e Juvencio', 
-                    pic: ppUrl 
-                };
-                
+                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
                 io.emit('connected', currentUser);
             }
                         
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
                 if (shouldReconnect) startBot();
-                else {
-                    currentUser = null;
-                    io.emit('disconnected');
-                }
+                else { currentUser = null; io.emit('disconnected'); }
             }
         });
 
@@ -329,7 +312,7 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
     }
 }
 
-// Funções de Banco e Rotas (Mantidas conforme lógica original)
+// --- RESTO DO CÓDIGO (useMongoDBAuthState, Rotas, etc) MANTIDO IGUAL ---
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
     const readData = async (id) => {
@@ -384,9 +367,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/logout-panel', (req, res) => {
-    req.session.destroy(() => {
-        res.redirect('/login');
-    });
+    req.session.destroy(() => { res.redirect('/login'); });
 });
 
 app.get('/logout-whatsapp', async (req, res) => {
@@ -399,7 +380,6 @@ app.get('/logout-whatsapp', async (req, res) => {
     } catch (err) { res.status(500).send("Erro"); }
 });
 
-// IA GRAVAR NO BANCO ---
 app.get('/api/knowledgeColl', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
     const data = await knowledgeColl.find({}).toArray();
@@ -409,11 +389,7 @@ app.get('/api/knowledgeColl', async (req, res) => {
 app.post('/api/knowledgeColl', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
     const { pergunta, resposta } = req.body;
-    await knowledgeColl.updateOne(
-        { pergunta }, 
-        { $set: { pergunta, resposta, updatedAt: Date.now() } }, 
-        { upsert: true }
-    );
+    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
     res.sendStatus(200);
 });
 
