@@ -117,28 +117,41 @@ sock.ev.on('messages.upsert', async m => {
             return; 
         }
 
-        // --- BUSCA DE TICKET (CLIENTE ESCREVEU) ---
-        const ticket = await ticketsColl.findOne({ _id: cleanNumber });
+        let ticket = await ticketsColl.findOne({
+    $or: [
+        { _id: cleanNumber },
+        { numeroReal: cleanNumber }
+    ]
+});
 
-        // Verifica pausa
-        if (ticket && ticket.paused) {
-            if (Date.now() < ticket.until) return;
-            else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
-        }
+// Se o ticket foi achado mas o _id atual é diferente (ex: achou pelo numeroReal mas a msg veio via LID)
+// Nós atualizamos o registro para usar o ID que o WhatsApp está usando agora.
+if (ticket && ticket._id !== cleanNumber) {
+    console.log(`[Unificando] Migrando ticket ${ticket.id} de ${ticket._id} para ${cleanNumber}`);
+    // Opcional: deletar o antigo e manter o novo, ou apenas seguir usando o 'ticket' carregado
+}
 
-        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        const texto = textoRaw.trim();
-        const timeoutMenu = 2 * 60 * 60 * 1000; 
+// Verifica pausa
+if (ticket && ticket.paused) {
+    if (Date.now() < ticket.until) return;
+    else await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
+}
 
-        // --- 1. MENU INICIAL (Criação do Ticket com Ponte) ---
+const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+const texto = textoRaw.trim();
+const timeoutMenu = 2 * 60 * 60 * 1000; 
+
+        // --- 2. MENU INICIAL (Com verificação de existência) ---
         if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
             const ticketId = Math.floor(1000 + Math.random() * 9000);
             
-            // Tenta pegar o número real se for um perfil que usa LID
-            const numeroRealParaPonte = msg.key.participant ? (msg.key.participant.split('@')[0]).split(':')[0] : cleanNumber;
+            // Captura o número real de forma mais precisa
+            const numeroRealParaPonte = msg.key.participant 
+                ? (msg.key.participant.split('@')[0]).split(':')[0] 
+                : cleanNumber;
 
             await sendBotMsg(cleanJid, { 
-                text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` 
+                text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*...` 
             });
 
             await ticketsColl.updateOne({ _id: cleanNumber }, {
@@ -155,9 +168,8 @@ sock.ev.on('messages.upsert', async m => {
             }, { upsert: true });
             return;
         }
-
-        // Atualiza atividade para tickets existentes
-        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } });
+        // Atualiza atividade usando o ID correto do registro encontrado
+        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
 
                 const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
