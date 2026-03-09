@@ -40,6 +40,28 @@ let processing = new Set();
 
 let ticketsColl, authColl, knowledgeColl, userLoginColl;
 
+function getRealNumber(msg) {
+
+    const rawJid = msg.key.remoteJid;
+
+    if (rawJid.includes('@s.whatsapp.net')) {
+        return rawJid.split('@')[0];
+    }
+
+    if (rawJid.includes('@lid')) {
+
+        if (msg.key.participant)
+            return msg.key.participant.split('@')[0];
+
+        if (msg.participant)
+            return msg.participant.split('@')[0];
+
+        return rawJid.split('@')[0];
+    }
+
+    return rawJid.split('@')[0];
+}
+
 async function sendBotMsg(jid, content) {
     try {
         // Envia exatamente para o JID que originou a mensagem (seja LID ou número)
@@ -65,36 +87,32 @@ async function startBot() {
         const { version } = await fetchLatestBaileysVersion();
 
         sock = makeWASocket({
-            version,
-            auth: state,
-            logger: P({ level: 'silent' }),
-            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-            connectTimeoutMs: 60000,
-            generateHighQualityLinkPreview: false
-        });
+        version,
+        auth: state,
+        logger: P({ level: 'silent' }),
+        browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
+        connectTimeoutMs: 60000,
+        generateHighQualityLinkPreview: false,
+        syncFullHistory: false,
+        markOnlineOnConnect: false
+    });
 
         sock.ev.on('creds.update', saveCreds);
 
 sock.ev.on('messages.upsert', async m => {
     const msg = m.messages[0];
     if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+    if (!msg.key.id) return;
 
     const rawJid = msg.key.remoteJid;
-    // jidNormalizedUser converte IDs complexos para o formato padrão
-    const cleanJid = jidNormalizedUser(rawJid); 
-    const cleanNumber = cleanJid.split('@')[0];
+    const numeroReal = getRealNumber(msg);
+    const cleanNumber = numeroReal;
+    const cleanJid = numeroReal + '@s.whatsapp.net';
+
     const isMe = msg.key.fromMe;
     const msgId = msg.key.id;
 
-    // --- NOVA LÓGICA DE IDENTIFICAÇÃO ---
-    // Tentamos pegar o número real. Se for LID, ele pode vir no participant.
-    let numeroRealExtraido = cleanNumber;
-    if (rawJid.includes('@lid')) {
-        // Em conversas privadas, o participant às vezes é nulo, 
-        // mas o Baileys costuma vincular no pushName ou em metadados.
-        const vnumber = msg.key.participant || msg.participant || rawJid;
-        numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
-    }
+    let numeroRealExtraido = numeroReal;
 
     if (processing.has(msgId)) return;
     processing.add(msgId);
@@ -103,15 +121,28 @@ sock.ev.on('messages.upsert', async m => {
     const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
     try {
-        // 1. BUSCA AGRESSIVA: Procura o número em qualquer um dos campos
-        let ticket = await ticketsColl.findOne({
-            $or: [
-                { _id: cleanNumber },
-                { numeroReal: cleanNumber },
-                { _id: numeroRealExtraido },
-                { numeroReal: numeroRealExtraido }
-            ]
-        });
+        const now = Date.now();
+
+        const result = await ticketsColl.findOneAndUpdate(
+            { numero: numeroRealExtraido },
+            {
+                $setOnInsert: {
+                    numero: numeroRealExtraido,
+                    createdAt: now,
+                    status: 'menu',
+                    paused: false
+                },
+                $set: {
+                    lastActivity: now
+                }
+            },
+            {
+                upsert: true,
+                returnDocument: 'after'
+            }
+        );
+
+        const ticket = result.value || result;
 
         // 2. Lógica de Intervenção (Humano respondeu)
         if (isMe) {
@@ -150,7 +181,7 @@ sock.ev.on('messages.upsert', async m => {
         if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
             const ticketId = Math.floor(1000 + Math.random() * 9000);
             
-            await sendBotMsg(rawJid, { // Enviamos para o rawJid original para garantir entrega
+            await sendBotMsg(cleanJid, { // Enviamos para o rawJid original para garantir entrega
                 text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` 
             });
 
