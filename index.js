@@ -3,8 +3,7 @@ const {
     DisconnectReason, 
     fetchLatestBaileysVersion, 
     BufferJSON, 
-    initAuthCreds,
-    jidNormalizedUser 
+    initAuthCreds 
 } = require('@whiskeysockets/baileys');
 const { MongoClient } = require('mongodb');
 const express = require('express');
@@ -13,15 +12,19 @@ const { Server } = require('socket.io');
 const path = require('path');
 const P = require('pino');
 const { Boom } = require('@hapi/boom');
-const session = require('express-session');
+const axios = require('axios');
+const session = require('express-session'); // Acrescentado para o Login
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const port = process.env.PORT || 10000;
 
+// Middlewares para processar os dados do formulário e JSON
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Configuração de Sessão (Acrescentado)
 app.use(session({
     secret: 'azevedo-secret-key',
     resave: false,
@@ -35,19 +38,50 @@ let lastQr = null;
 let currentUser = null;
 let sock;
 let lastBotMessageId = null; 
-let processing = new Set(); 
 
-let ticketsColl, authColl, userLoginColl, knowledgeColl;
+let ticketsColl;
+let authColl;
+let knowledgeColl; // Coleção para a Base de Conhecimento
+let userLoginColl; // user
 
-async function sendBotMsg(jid, content) {
-    try {
-        const sent = await sock.sendMessage(jid, content);
-        lastBotMessageId = sent.key.id; 
-        return sent;
-    } catch (err) {
-        console.error("Erro ao enviar:", err);
-        return null;
-    }
+async function useMongoDBAuthState(collection) {
+    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
+    const readData = async (id) => {
+        const data = await collection.findOne({ _id: id });
+        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
+    };
+    const removeData = (id) => collection.deleteOne({ _id: id });
+    const creds = await readData('creds') || initAuthCreds();
+
+    return {
+        state: {
+            creds,
+            keys: {
+                get: async (type, ids) => {
+                    const data = {};
+                    await Promise.all(ids.map(async id => {
+                        let value = await readData(`${type}-${id}`);
+                        if (type === 'app-state-sync-key' && value) {
+                            value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                        }
+                        data[id] = value;
+                    }));
+                    return data;
+                },
+                set: async (data) => {
+                    for (const type in data) {
+                        for (const id in data[type]) {
+                            const value = data[type][id];
+                            const storeId = `${type}-${id}`;
+                            if (value) await writeData(value, storeId);
+                            else await removeData(storeId);
+                        }
+                    }
+                }
+            }
+        },
+        saveCreds: () => writeData(creds, 'creds')
+    };
 }
 
 async function startBot() {
@@ -56,8 +90,8 @@ async function startBot() {
         const db = client.db('bot_whatsapp');
         authColl = db.collection('auth_session');
         ticketsColl = db.collection('active_tickets');
+        knowledgeColl = db.collection('knowledge_base'); // Inicializada coleção
         userLoginColl = db.collection('user_login');
-        knowledgeColl = db.collection('knowledge_base'); // Reintegrado
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
         const { version } = await fetchLatestBaileysVersion();
@@ -67,7 +101,9 @@ async function startBot() {
             auth: state,
             logger: P({ level: 'silent' }),
             browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-            connectTimeoutMs: 60000
+            connectTimeoutMs: 80000,
+            defaultQueryTimeoutMs: 0, 
+            retryRequestDelayMs: 3000
         });
 
         sock.ev.on('creds.update', saveCreds);
@@ -76,61 +112,90 @@ async function startBot() {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
+            const messageType = Object.keys(msg.message)[0];
+            if (['protocolMessage', 'senderKeyDistributionMessage'].includes(messageType)) return;
+
             const rawJid = msg.key.remoteJid;
-            const cleanJid = jidNormalizedUser(rawJid); 
-            const numeroReal = cleanJid.split('@')[0];
+            const cleanNumber = rawJid.split('@')[0]; 
             const isMe = msg.key.fromMe;
-            const msgId = msg.key.id;
 
-            if (processing.has(msgId)) return;
-            processing.add(msgId);
-            setTimeout(() => processing.delete(msgId), 10000);
+            if (!isMe) {
+                await ticketsColl.updateOne(
+                    { _id: cleanNumber },
+                    { $set: { lastRawJid: rawJid } }, 
+                    { upsert: true }
+                );
+            }
 
-            // Notifica o Frontend via Socket.io sobre nova mensagem
-            io.emit('new_message', { jid: cleanJid, msg });
-
-            const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
-
-            try {
-                let ticket = await ticketsColl.findOne({ _id: numeroReal });
-
-                if (isMe) {
-                    if (msgId !== lastBotMessageId) {
-                        await ticketsColl.updateOne(
-                            { _id: numeroReal },
-                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), numeroReal } },
-                            { upsert: true }
-                        );
-                    }
-                    return;
-                }
-
-                if (ticket && ticket.paused) {
-                    if (Date.now() < ticket.until) return;
-                    else await ticketsColl.updateOne({ _id: numeroReal }, { $set: { paused: false } });
-                }
-
-                const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-                const texto = textoRaw.trim();
-                const timeoutMenu = 2 * 60 * 60 * 1000;
-
-                if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-                    const ticketId = Math.floor(1000 + Math.random() * 9000);
-                    await sendBotMsg(cleanJid, {
-                        text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
-                    });
+            if (isMe) {
+                const isManual = msg.message.conversation || msg.message.extendedTextMessage || msg.message.imageMessage;
+                if (isManual && msg.key.id !== lastBotMessageId) {
+                    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000); 
+                    const linkedTicket = await ticketsColl.findOne({ lastRawJid: rawJid });
+                    const targetId = linkedTicket ? linkedTicket._id : cleanNumber;
 
                     await ticketsColl.updateOne(
-                        { _id: numeroReal },
-                        { $set: { id: ticketId, numeroReal, aguardandoOpcao: true, obrigadoEnviado: false, lastActivity: Date.now(), paused: false, lastRawJid: rawJid } },
+                        { _id: targetId }, 
+                        { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
                         { upsert: true }
                     );
-                    return;
+                    console.log(`⚠️ INTERVENÇÃO MANUAL: Chat ${targetId} pausado.`);
                 }
+                return; 
+            }
 
-                await ticketsColl.updateOne({ _id: numeroReal }, { $set: { lastActivity: Date.now(), lastRawJid: rawJid } });
+            let ticket = await ticketsColl.findOne({ _id: cleanNumber });
 
-                const respostas = {
+            if (ticket && ticket.paused) {
+                if (Date.now() < ticket.until) return; 
+                else await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: false } });
+            }
+
+            const sendBotMsg = async (jid, content) => {
+                try {
+                    const sent = await sock.sendMessage(jid, content);
+                    lastBotMessageId = sent.key.id; 
+                    return sent;
+                } catch (err) {
+                    console.error("❌ Erro de envio:", err.message);
+                    return null; 
+                }
+            };
+
+            const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+            const texto = textoRaw.trim();
+
+            const timeoutMenu = 2 * 60 * 60 * 1000; 
+            if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+                const ticketId = Math.floor(1000 + Math.random() * 9000);
+                await ticketsColl.replaceOne({ _id: cleanNumber }, {
+                    _id: cleanNumber,
+                    id: ticketId,
+                    aguardandoOpcao: true,
+                    obrigadoEnviado: false,
+                    lastActivity: Date.now(),
+                    paused: false,
+                    lastRawJid: rawJid
+                }, { upsert: true });
+
+                const menuTexto = `Olá! 👋 Seja bem-vindo(a) ao *Azevedo e Juvencio - Sociedade de Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n
+Digite o número da opção desejada:
+
+1️⃣ Direito Digital (desbloqueio de contas)
+2️⃣ Direito Cível e Contratual
+3️⃣ Direito do Consumidor
+4️⃣ Direito Imobiliário
+5️⃣ Direito Trabalhista
+6️⃣ Direito Empresarial
+7️⃣ Outros Assuntos
+8️⃣ Desejo falar de um atendimento/processo em andamento`
+                await sendBotMsg(rawJid, { text: menuTexto });
+                return;
+            }
+
+            await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { lastActivity: Date.now() } });
+
+             const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
 Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
@@ -229,23 +294,28 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-                if (ticket.aguardandoOpcao) {
-                    if (respostas[texto]) {
-                        await sendBotMsg(cleanJid, { text: respostas[texto] });
-                        await ticketsColl.updateOne({ _id: numeroReal }, { $set: { aguardandoOpcao: false } });
-                    } else {
-                        await sendBotMsg(cleanJid, { text: `⚠️ Opção inválida. Digite de 1 a 8.` });
+            if (ticket.aguardandoOpcao) {
+                if (respostas[texto]) {
+                    console.log(`✅ Enviando resposta da opção ${texto} para ${cleanNumber}`);
+                    await sendBotMsg(rawJid, { text: respostas[texto] });
+                    await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { aguardandoOpcao: false } });
+                }
+                return;
+            }
+
+            if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
+                const isMedia = msg.message.imageMessage || msg.message.documentMessage;
+                if (texto.length >= 20 || isMedia) {
+                    console.log(`🏁 Enviando encerramento para ${cleanNumber}`);
+                    const ok = await sendBotMsg(rawJid, { text: `✅ Recebido! Nossa equipe analisará as informações e retornaremos em breve.` });
+                    if (ok) {
+                        await ticketsColl.updateOne({ _id: cleanNumber }, { $set: { obrigadoEnviado: true } });
                     }
-                    return;
+                } else {
+                    await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes.` });
                 }
-
-                // Lógica de encerramento (Obrigado enviado)
-                if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
-                    await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista já vai atendê-lo.` });
-                    await ticketsColl.updateOne({ _id: numeroReal }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
-                }
-
-            } catch (err) { console.error(err); }
+                return;
+            }
         });
 
         sock.ev.on('connection.update', async (update) => {
@@ -253,44 +323,48 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
             if (qr) { lastQr = qr; io.emit('qr', qr); }
             if (connection === 'open') {
                 lastQr = null;
-                currentUser = { number: sock.user.id.split(':')[0], name: 'Azevedo e Juvencio' };
+                const userNumber = sock.user.id.split(':')[0];
+                let ppUrl;
+                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } 
+                catch { ppUrl = 'https://www.w3schools.com/howto/img_avatar.png'; }
+                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
                 io.emit('connected', currentUser);
+                console.log('✅ Bot Online!');
             }
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
                 if (shouldReconnect) startBot();
+                else io.emit('disconnected');
             }
         });
-    } catch (err) { setTimeout(startBot, 5000); }
+
+    } catch (err) { 
+        console.error("Erro crítico:", err);
+        setTimeout(startBot, 5000);
+    }
 }
 
-// --- ROTAS DO PAINEL ADMIN (RESTAURADAS) ---
-
-app.get('/api/tickets', async (req, res) => {
-    const tickets = await ticketsColl.find().sort({ lastActivity: -1 }).toArray();
-    res.json(tickets);
-});
-
-app.post('/api/send-message', async (req, res) => {
-    const { jid, message } = req.body;
-    await sendBotMsg(jid, { text: message });
-    res.json({ success: true });
-});
-
-app.post('/api/pause-ticket', async (req, res) => {
-    const { id, paused } = req.body;
-    await ticketsColl.updateOne({ _id: id }, { $set: { paused: paused, until: Date.now() + (3 * 86400000) } });
-    res.json({ success: true });
-});
+// --- ROTAS DE LOGIN E PAINEL ---
 
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
+
 app.post('/login', async (req, res) => {
     const { user, pass } = req.body;
-    const adminAccount = await userLoginColl.findOne({ user });
-    if (adminAccount && adminAccount.pass === pass) {
-        req.session.loggedIn = true;
-        res.redirect('/');
-    } else res.send("<script>alert('Erro'); window.location='/login';</script>");
+
+    try {
+        // Busca o usuário no banco de dados
+        const adminAccount = await userLoginColl.findOne({ user: user });
+
+        if (adminAccount && adminAccount.pass === pass) {
+            req.session.loggedIn = true;
+            res.redirect('/');
+        } else {
+            res.send("<script>alert('Usuário ou senha incorretos'); window.location='/login';</script>");
+        }
+    } catch (err) {
+        console.error("Erro ao validar login:", err);
+        res.status(500).send("Erro interno no servidor");
+    }
 });
 
 app.get('/', (req, res) => {
@@ -298,41 +372,58 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Auth Baileys MongoDB
-async function useMongoDBAuthState(collection) {
-    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
-    const readData = async (id) => {
-        const data = await collection.findOne({ _id: id });
-        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
-    };
-    const removeData = (id) => collection.deleteOne({ _id: id });
-    const creds = await readData('creds') || initAuthCreds();
-    return {
-        state: {
-            creds,
-            keys: {
-                get: async (type, ids) => {
-                    const data = {};
-                    await Promise.all(ids.map(async id => {
-                        let value = await readData(`${type}-${id}`);
-                        if (type === 'app-state-sync-key' && value) value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
-                        data[id] = value;
-                    }));
-                    return data;
-                },
-                set: async (data) => {
-                    for (const type in data) {
-                        for (const id in data[type]) {
-                            const value = data[type][id];
-                            if (value) writeData(value, `${type}-${id}`);
-                            else removeData(`${type}-${id}`);
-                        }
-                    }
-                }
-            }
-        },
-        saveCreds: () => writeData(creds, 'creds')
-    };
-}
+// Logout do Painel (Sair do Sistema)
+app.get('/logout-panel', (req, res) => {
+    req.session.destroy();
+    res.redirect('/login');
+});
+
+// Desconectar o WhatsApp (Botão "Desconectar Aparelho")
+app.get('/logout-whatsapp', async (req, res) => {
+    try {
+        await authColl.deleteMany({});
+        if (sock) await sock.logout();
+        currentUser = null;
+        lastQr = null;
+        io.emit('disconnected');
+        res.sendStatus(200);
+    } catch (err) { res.status(500).send("Erro"); }
+});
+
+// --- API DA BASE DE CONHECIMENTO ---
+
+app.post('/api/knowledge', async (req, res) => {
+    if (!req.session.loggedIn) return res.sendStatus(401);
+    const { pergunta, resposta } = req.body;
+    if (knowledgeColl) {
+        await knowledgeColl.insertOne({ pergunta, resposta, date: new Date() });
+        res.sendStatus(201);
+    }
+});
+
+app.get('/api/knowledge', async (req, res) => {
+    if (!req.session.loggedIn) return res.sendStatus(401);
+    if (knowledgeColl) {
+        const data = await knowledgeColl.find({}).sort({ date: -1 }).toArray();
+        res.json(data);
+    } else {
+        res.json([]);
+    }
+});
+
+// --- MANUTENÇÃO E INICIALIZAÇÃO ---
+
+setInterval(async () => {
+    try {
+        const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
+        const protocol = host.includes('localhost') ? 'http' : 'https';
+        await axios.get(`${protocol}://${host}/`);
+    } catch (e) {}
+}, 5 * 60 * 1000);
+
+io.on('connection', (socket) => {
+    if (currentUser) socket.emit('connected', currentUser);
+    else if (lastQr) socket.emit('qr', lastQr);
+});
 
 server.listen(port, () => startBot());
