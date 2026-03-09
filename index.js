@@ -87,12 +87,20 @@ async function startBot() {
             const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
             try {
-                // Intervenção Manual (Envio pelo próprio celular do advogado)
+                // Intervenção Manual (Envio pelo próprio celular do advogado ou WhatsApp Web)
                 if (isMe) {
+                    // Se a mensagem que EU enviei NÃO foi disparada pelo bot (ID diferente do lastBotMessageId)
                     if (msgId !== lastBotMessageId) {
-                        ticketsColl.updateOne({ _id: cleanNumber }, { $set: { paused: true, until: blockUntil } }, { upsert: true });
+                        console.log(`[Intervenção] Pausando bot para: ${cleanNumber} por 3 dias.`);
+                        
+                        // Atualiza o banco para pausar o bot para ESTE cliente específico
+                        await ticketsColl.updateOne(
+                            { _id: cleanNumber }, 
+                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
+                            { upsert: true }
+                        );
                     }
-                    return; 
+                    return; // Interrompe a execução para não processar a própria mensagem como comando
                 }
 
                 const ticket = await ticketsColl.findOne({ _id: cleanNumber });
