@@ -172,8 +172,8 @@
             <div class="nav-link" onclick="switchTab('tab-ia', this)">🧠 GESTÃO IA</div>
         </div>
 
-        <div class="mt-auto nav-link border-0 text-white-50" onclick="window.location.href='/logout-panel'" style="font-size: 0.85rem; background: rgba(0,0,0,0.2)">
-            🚪 SAIR DO PAINEL
+        <div class="mt-auto nav-link border-0 text-white-50" onclick="window.location.href='/logout-panel'" style="font-size: 0.85rem; background: rgba(0,0,0,0.2); cursor: pointer;">
+    🚪      SAIR DO PAINEL
         </div>
     </div>
 
@@ -252,11 +252,20 @@
         });
 
         socket.on('connected', (user) => {
-            document.getElementById('qr-container').classList.add('hidden');
-            document.getElementById('status-container').classList.remove('hidden');
-            document.getElementById('profilePic').src = user.pic || '';
-            document.getElementById('userName').innerText = user.name || 'Advogado';
-            document.getElementById('userNumber').innerText = user.number || '';
+        document.getElementById('qr-container').classList.add('hidden');
+        document.getElementById('status-container').classList.remove('hidden');
+        
+        const imgElement = document.getElementById('profilePic');
+        // Se não vier foto do zap, esconde o elemento de imagem ou usa uma borda vazia
+        if (user.pic) {
+            imgElement.src = user.pic;
+            imgElement.style.display = "inline-block";
+        } else {
+            imgElement.style.display = "none"; // Remove o avatar se não houver foto
+        }
+        
+        document.getElementById('userName').innerText = user.name || 'Conectado';
+        document.getElementById('userNumber').innerText = user.number || '';
         });
 
         socket.on('disconnected', () => {

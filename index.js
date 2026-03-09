@@ -276,16 +276,17 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
             const { connection, lastDisconnect, qr } = update;
             if (qr) { lastQr = qr; io.emit('qr', qr); }
             
+           // --- CORREÇÃO DA FOTO E STATUS (Dentro do sock.ev.on('connection.update')) ---
             if (connection === 'open') {
                 lastQr = null;
                 const userNumber = sock.user.id.split(':')[0];
                 
-                // Tenta buscar a foto real do perfil
-                let ppUrl;
+                // Busca a foto real. Se não tiver, envia vazio para o HTML tratar
+                let ppUrl = null;
                 try {
                     ppUrl = await sock.profilePictureUrl(sock.user.id, 'image');
                 } catch (e) {
-                    ppUrl = 'https://www.w3schools.com/howto/img_avatar.png'; // Fallback
+                    ppUrl = null; 
                 }
 
                 currentUser = { 
@@ -295,9 +296,8 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
                 };
                 
                 io.emit('connected', currentUser);
-                console.log('✅ Bot Online!');
             }
-            
+                        
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
                 if (shouldReconnect) startBot();
@@ -368,7 +368,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.get('/logout-painel', (req, res) => {
+app.get('/logout-panel', (req, res) => {
     req.session.destroy(() => {
         res.redirect('/login');
     });
@@ -382,6 +382,24 @@ app.get('/logout-whatsapp', async (req, res) => {
         io.emit('disconnected');
         res.sendStatus(200);
     } catch (err) { res.status(500).send("Erro"); }
+});
+
+// IA GRAVAR NO BANCO ---
+app.get('/api/knowledgeColl', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    const data = await knowledgeColl.find({}).toArray();
+    res.json(data);
+});
+
+app.post('/api/knowledgeColl', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    const { pergunta, resposta } = req.body;
+    await knowledgeColl.updateOne(
+        { pergunta }, 
+        { $set: { pergunta, resposta, updatedAt: Date.now() } }, 
+        { upsert: true }
+    );
+    res.sendStatus(200);
 });
 
 setInterval(async () => {
