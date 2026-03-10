@@ -78,11 +78,13 @@ async function startBot() {
         const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
         
         if (geminiKeyDoc && geminiKeyDoc.chave) {
-            // IMPORTANTE: Use 'genAI' sem o 'let' ou 'const' na frente aqui
-            genAI = new GoogleGenerativeAI(geminiKeyDoc.chave); 
-            console.log("✅ Conexão com Gemini estabelecida via MongoDB");
-        } else {
-            console.error("⚠️ Chave do Gemini não encontrada!");
+            genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
+            // Definimos o modelo GLOBALMENTE com a API v1 para evitar o erro 404
+            global.geminiModel = genAI.getGenerativeModel(
+                { model: "gemini-1.5-flash" }, 
+                { apiVersion: 'v1' }
+            );
+            console.log("✅ Sistema Gemini pronto e estável.");
         }
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
@@ -246,7 +248,10 @@ Regras:
 
 Sua resposta:`;
 
-                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
+                   const model = genAI.getGenerativeModel(
+                                { model: "gemini-1.5-flash" }, 
+                                { apiVersion: 'v1' } 
+                            );
                     const result = await model.generateContent(prompt);
                     const iaResponse = result.response.text().trim();
 
