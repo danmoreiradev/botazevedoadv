@@ -40,28 +40,6 @@ let processing = new Set();
 
 let ticketsColl, authColl, knowledgeColl, userLoginColl;
 
-function getRealNumber(msg) {
-
-    const rawJid = msg.key.remoteJid;
-
-    if (rawJid.includes('@s.whatsapp.net')) {
-        return rawJid.split('@')[0];
-    }
-
-    if (rawJid.includes('@lid')) {
-
-        if (msg.key.participant)
-            return msg.key.participant.split('@')[0];
-
-        if (msg.participant)
-            return msg.participant.split('@')[0];
-
-        return rawJid.split('@')[0];
-    }
-
-    return rawJid.split('@')[0];
-}
-
 async function sendBotMsg(jid, content) {
     try {
         // Envia exatamente para o JID que originou a mensagem (seja LID ou número)
@@ -87,166 +65,115 @@ async function startBot() {
         const { version } = await fetchLatestBaileysVersion();
 
         sock = makeWASocket({
-        version,
-        auth: state,
-        logger: P({ level: 'silent' }),
-        browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-        connectTimeoutMs: 60000,
-        generateHighQualityLinkPreview: false,
-        syncFullHistory: false,
-        markOnlineOnConnect: false
-    });
+            version,
+            auth: state,
+            logger: P({ level: 'silent' }),
+            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
+            connectTimeoutMs: 60000,
+            generateHighQualityLinkPreview: false
+        });
 
         sock.ev.on('creds.update', saveCreds);
 
 sock.ev.on('messages.upsert', async m => {
+    const msg = m.messages[0];
+    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-    const msg = m.messages[0];
-    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
-    if (!msg.key.id) return;
+    const rawJid = msg.key.remoteJid;
+    // jidNormalizedUser converte IDs complexos para o formato padrão
+    const cleanJid = jidNormalizedUser(rawJid); 
+    const cleanNumber = cleanJid.split('@')[0];
+    const isMe = msg.key.fromMe;
+    const msgId = msg.key.id;
 
-    if (msg.key.remoteJid.endsWith('@lid')) return;
+    // --- NOVA LÓGICA DE IDENTIFICAÇÃO ---
+    // Tentamos pegar o número real. Se for LID, ele pode vir no participant.
+    let numeroRealExtraido = cleanNumber;
+    if (rawJid.includes('@lid')) {
+        // Em conversas privadas, o participant às vezes é nulo, 
+        // mas o Baileys costuma vincular no pushName ou em metadados.
+        const vnumber = msg.key.participant || msg.participant || rawJid;
+        numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
+    }
 
-    const rawJid = msg.key.remoteJid;
+    if (processing.has(msgId)) return;
+    processing.add(msgId);
+    setTimeout(() => processing.delete(msgId), 10000);
 
-    // NORMALIZA QUALQUER TIPO DE JID
-    const normalized = jidNormalizedUser(rawJid);
+    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
-    // extrai número real
-    const numeroReal = normalized.split('@')[0];
+    try {
+        // 1. BUSCA AGRESSIVA: Procura o número em qualquer um dos campos
+        let ticket = await ticketsColl.findOne({
+            $or: [
+                { _id: cleanNumber },
+                { numeroReal: cleanNumber },
+                { _id: numeroRealExtraido },
+                { numeroReal: numeroRealExtraido }
+            ]
+        });
 
-    const cleanNumber = numeroReal;
-    const cleanJid = normalized;
+        // 2. Lógica de Intervenção (Humano respondeu)
+        if (isMe) {
+            if (msgId !== lastBotMessageId) {
+                // Se o humano respondeu, travamos o ticket que foi encontrado ou criamos um com o ID atual
+                const targetId = ticket ? ticket._id : cleanNumber;
+                await ticketsColl.updateOne(
+                    { _id: targetId }, 
+                    { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
+                    { upsert: true }
+                );
+            }
+            return; 
+        }
 
-    const isMe = msg.key.fromMe;
-    const msgId = msg.key.id;
+        // 3. SE ACHOU UM TICKET COM ID DIFERENTE (Unificação em tempo real)
+        // Se a msg veio por LID (1109...) mas achamos um ticket pelo número real (5519...)
+        // vamos forçar o uso do ticket antigo para não duplicar.
+        if (ticket && ticket._id !== cleanNumber) {
+            console.log(`[Link] Unificando ${cleanNumber} ao ticket existente ${ticket._id}`);
+            // Opcional: Você pode atualizar o _id se quiser, mas o mais seguro é 
+            // apenas garantir que 'ticket' agora referencia o objeto correto.
+        }
 
-    let numeroRealExtraido = numeroReal;
+        // 4. Verifica Pausa
+        if (ticket && ticket.paused) {
+            if (Date.now() < ticket.until) return;
+            else await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
+        }
 
-    if (processing.has(msgId)) return;
-    processing.add(msgId);
-    setTimeout(() => processing.delete(msgId), 10000);
+        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        const texto = textoRaw.trim();
+        const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
+        // 5. CRIAÇÃO / MENU
+        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+            const ticketId = Math.floor(1000 + Math.random() * 9000);
+            
+            await sendBotMsg(rawJid, { // Enviamos para o rawJid original para garantir entrega
+                text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` 
+            });
 
-    try {
+            await ticketsColl.updateOne({ _id: cleanNumber }, {
+                $set: { 
+                    id: ticketId, 
+                    numeroReal: numeroRealExtraido, // Aqui salvamos o vínculo
+                    aguardandoOpcao: true, 
+                    obrigadoEnviado: false, 
+                    tentouInsistir: false,
+                    lastActivity: Date.now(), 
+                    paused: false,
+                    lastRawJid: rawJid 
+                }
+            }, { upsert: true });
+            return;
+        }
 
-        // FIX: variável now definida
-        const now = Date.now();
+        // 6. Atualiza atividade SEMPRE no ID do ticket encontrado
+        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
 
-        // Busca ou cria ticket de forma atômica
-        const result = await ticketsColl.findOneAndUpdate(
-            { numero: numeroRealExtraido },
-            {
-                $setOnInsert: {
-                    numero: numeroRealExtraido,
-                    createdAt: now,
-                    status: 'menu',
-                    paused: false
-                },
-                $set: {
-                    lastActivity: now
-                }
-            },
-            {
-                upsert: true,
-                returnDocument: 'after'
-            }
-        );
-
-        const ticket = result.value || result;
-
-        // --- INTERVENÇÃO HUMANA ---
-        if (isMe) {
-
-            if (msgId !== lastBotMessageId) {
-
-                await ticketsColl.updateOne(
-                    { numero: ticket.numero }, // FIX
-                    {
-                        $set: {
-                            paused: true,
-                            until: blockUntil,
-                            lastActivity: Date.now()
-                        }
-                    }
-                );
-
-            }
-
-            return;
-        }
-
-        // --- VERIFICA PAUSA ---
-        if (ticket.paused) {
-
-            if (Date.now() < ticket.until) return;
-
-            await ticketsColl.updateOne(
-                { numero: ticket.numero }, // FIX
-                { $set: { paused: false } }
-            );
-
-        }
-
-        const textoRaw =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            "";
-
-        const texto = textoRaw.trim();
-
-        const timeoutMenu = 2 * 60 * 60 * 1000;
-
-        // --- MENU INICIAL ---
-       if (!ticket.id) {
-
-    const ticketId = Math.floor(1000 + Math.random() * 9000);
-
-    await sendBotMsg(cleanJid, {
-        text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️
-🎫 Atendimento: *${ticketId}*
-
-Digite o número da opção desejada:
-
-1️⃣ Direito Digital
-2️⃣ Direito Cível
-3️⃣ Direito do Consumidor
-4️⃣ Direito Imobiliário
-5️⃣ Direito Trabalhista
-6️⃣ Direito Empresarial
-7️⃣ Outros Assuntos
-8️⃣ Processo em andamento`
-    });
-
-    await ticketsColl.updateOne(
-        { numero: cleanNumber },
-        {
-            $set: {
-                id: ticketId,
-                numeroReal: numeroRealExtraido,
-                aguardandoOpcao: true,
-                obrigadoEnviado: false,
-                tentouInsistir: false,
-                errosMenu: 0,
-                paused: false,
-                lastActivity: Date.now(),
-                lastRawJid: rawJid
-            }
-        }
-    );
-
-    return;
-}
-
-        // Atualiza atividade
-        await ticketsColl.updateOne(
-            { numero: ticket.numero }, // FIX
-            { $set: { lastActivity: Date.now() } }
-        );
-
-        const respostas = {
-      '1': `📱 *Direito Digital (Desbloqueio de Contas)*
+        const respostas = {
+      '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
 Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
 Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
@@ -259,7 +186,7 @@ Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
 
 👨‍⚖️ Um especialista em Direito Digital analisará seu caso e entrará em contato em breve.`,
 
-      '2': `📄 *Direito Cível e Contratual*
+      '2': `📄 *Direito Cível e Contratual*
 
 Perfeito. Para direcionarmos você ao especialista em contratos e questões cíveis, precisamos entender o cenário:
 
@@ -271,7 +198,7 @@ Perfeito. Para direcionarmos você ao especialista em contratos e questões cív
 
 ⏳ Aguarde um momento, nossa equipe jurídica especializada em Direito Cível/Contratual já foi notificada e falará com você em instantes.`,
 
-      '3': `🛒 *Direito do Consumidor*
+      '3': `🛒 *Direito do Consumidor*
 
 Compreendido! Vamos ajudar você a garantir seus direitos. Por favor, forneça os detalhes abaixo:
 
@@ -283,7 +210,7 @@ Compreendido! Vamos ajudar você a garantir seus direitos. Por favor, forneça o
 
 👨‍⚖️ Um de nossos advogados especialistas em Defesa do Consumidor entrará em contato para dar os próximos passos.`,
 
-      '4': `🏠 *Direito Imobiliário*
+      '4': `🏠 *Direito Imobiliário*
 
 Entendido! Questões imobiliárias exigem atenção aos detalhes. Para que possamos te orientar, por favor, nos envie:
 
@@ -295,7 +222,7 @@ Entendido! Questões imobiliárias exigem atenção aos detalhes. Para que possa
 
 👨‍⚖️ Um especialista em Direito Imobiliário analisará seu caso e entrará em contato em breve.`,
 
-      '5': `👷 *Direito Trabalhista*
+      '5': `👷 *Direito Trabalhista*
 
 Compreendido. Vamos analisar seus direitos trabalhistas. Por favor, nos forneça as seguintes informações:
 
@@ -307,7 +234,7 @@ Compreendido. Vamos analisar seus direitos trabalhistas. Por favor, nos forneça
 
 👨‍⚖️ Nossa equipe especializada em Direito do Trabalho entrará em contato em instantes para te orientar.`,
 
-      '6': `🏢 *Direito Empresarial*
+      '6': `🏢 *Direito Empresarial*
 
 Perfeito. Para atendermos sua empresa com a agilidade necessária, por favor, informe:
 
@@ -319,7 +246,7 @@ Perfeito. Para atendermos sua empresa com a agilidade necessária, por favor, in
 
 👨‍⚖️ Um de nossos advogados corporativos entrará em contato para agendar uma conversa ou dar continuidade ao atendimento.`,
 
-      '7': `📝 *Outros Assuntos*
+      '7': `📝 *Outros Assuntos*
 
 Sem problemas! Se o seu caso não se encaixa nas opções anteriores, queremos te ouvir da mesma forma.
 
@@ -329,7 +256,7 @@ Sem problemas! Se o seu caso não se encaixa nas opções anteriores, queremos t
 
 🔎 Sua mensagem será encaminhada para nossa triagem e o profissional mais adequado para o seu tema entrará em contato o mais rápido possível.`,
 
-      '8': `📂 *Atendimento/Processo em Andamento*
+      '8': `📂 *Atendimento/Processo em Andamento*
 
 Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos informe:
 
@@ -342,126 +269,45 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 📎 Se precisar enviar algum documento novo, pode anexar aqui agora.
 
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
-    };
+    };
 
-        // --- RESPOSTAS DO MENU ---
-        if (ticket.aguardandoOpcao) {
+        // 5. Resposta às Opções
+        if (ticket.aguardandoOpcao) {
+            if (respostas[texto]) {
+                await sendBotMsg(cleanJid, { text: respostas[texto] });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
+            } else {
+                const novosErros = (ticket.errosMenu || 0) + 1;
+                if (novosErros >= 2) {
+                    await sendBotMsg(cleanJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                } else {
+                    await sendBotMsg(cleanJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros } });
+                }
+            }
+            return;
+        }
 
-            if (respostas[texto]) {
+        // 6. Lógica de Insistência (Detalhamento)
+        if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
+            const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
+            if (texto.length >= 20 || isMedia) {
+                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+            } else if (!ticket.tentouInsistir) {
+                await sendBotMsg(cleanJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { tentouInsistir: true } });
+            } else {
+                await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+            }
+        }
 
-                await sendBotMsg(cleanJid, { text: respostas[texto] });
-
-                await ticketsColl.updateOne(
-                    { numero: ticket.numero }, // FIX
-                    { $set: { aguardandoOpcao: false, errosMenu: 0 } }
-                );
-
-            } else {
-
-                const novosErros = (ticket.errosMenu || 0) + 1;
-
-                if (novosErros >= 2) {
-
-                    await sendBotMsg(cleanJid, {
-                        text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.`
-                    });
-
-                    await ticketsColl.updateOne(
-                        { numero: ticket.numero }, // FIX
-                        {
-                            $set: {
-                                aguardandoOpcao: false,
-                                obrigadoEnviado: true,
-                                paused: true,
-                                until: blockUntil
-                            }
-                        }
-                    );
-
-                } else {
-
-                    await sendBotMsg(cleanJid, {
-                        text: `⚠️ Opção inválida. Digite apenas o número (1 a 8).`
-                    });
-
-                    await ticketsColl.updateOne(
-                        { numero: ticket.numero }, // FIX
-                        { $set: { errosMenu: novosErros } }
-                    );
-
-                }
-
-            }
-
-            return;
-        }
-
-        // --- DETALHAMENTO ---
-        if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
-
-            const isMedia =
-                !!(
-                    msg.message.imageMessage ||
-                    msg.message.documentMessage ||
-                    msg.message.audioMessage
-                );
-
-            if (texto.length >= 20 || isMedia) {
-
-                await sendBotMsg(cleanJid, {
-                    text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.`
-                });
-
-                await ticketsColl.updateOne(
-                    { numero: ticket.numero }, // FIX
-                    {
-                        $set: {
-                            obrigadoEnviado: true,
-                            paused: true,
-                            until: blockUntil
-                        }
-                    }
-                );
-
-            } else if (!ticket.tentouInsistir) {
-
-                await sendBotMsg(cleanJid, {
-                    text: `⚠️ Por favor, descreva a situação com mais detalhes.`
-                });
-
-                await ticketsColl.updateOne(
-                    { numero: ticket.numero }, // FIX
-                    { $set: { tentouInsistir: true } }
-                );
-
-            } else {
-
-                await sendBotMsg(cleanJid, {
-                    text: `✅ Recebido! Já encaminhei seu caso para um especialista.`
-                });
-
-                await ticketsColl.updateOne(
-                    { numero: ticket.numero }, // FIX
-                    {
-                        $set: {
-                            obrigadoEnviado: true,
-                            paused: true,
-                            until: blockUntil
-                        }
-                    }
-                );
-
-            }
-
-        }
-
-    } catch (err) {
-
-        console.error("Erro interno:", err);
-
-    }
-
-});
+    } catch (err) {
+        console.error("Erro interno:", err);
+    }
+    });
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
