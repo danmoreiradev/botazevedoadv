@@ -39,11 +39,10 @@ let sock;
 let lastBotMessageId = null; 
 let processing = new Set(); 
 
-// Variáveis da IA
 let genAI, model;
 let ticketsColl, authColl, knowledgeColl, userLoginColl, apiKeysColl;
 
-// --- FUNÇÃO PARA CARREGAR GEMINI DO MONGO ---
+// --- CARREGAR IA ---
 async function carregarGemini() {
     try {
         const registro = await apiKeysColl.findOne({ nome: "gemini" });
@@ -57,7 +56,7 @@ async function carregarGemini() {
     }
 }
 
-// --- FUNÇÃO DE BUSCA NA BASE DE CONHECIMENTO ---
+// --- BUSCA RAG ---
 async function buscarNoConhecimentoIA(pergunta) {
     try {
         if (!model) return "SEM_RESPOSTA";
@@ -142,6 +141,7 @@ async function startBot() {
                     ]
                 });
 
+                // --- SUA LÓGICA DE PAUSA (3 DIAS) ---
                 if (isMe) {
                     if (msgId !== lastBotMessageId) {
                         const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
@@ -163,7 +163,7 @@ async function startBot() {
                 const texto = textoRaw.trim();
                 const textoLower = texto.toLowerCase();
 
-                // Lógica de Novo Ticket ou Timeout
+                // NOVO TICKET OU TIMEOUT 2H
                 if (!ticket || (Date.now() - (ticket.lastActivity || 0) > 2 * 60 * 60 * 1000)) {
                     
                     const isLeadAnuncio = textoLower.includes("vi o anuncio") || textoLower.includes("advogado especialista");
@@ -203,7 +203,6 @@ async function startBot() {
 
                 await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
 
-                // --- LOGICA DE OPÇÕES DO MENU (1 a 8) ---
                 if (ticket.aguardandoOpcao) {
                     const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
@@ -302,17 +301,13 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 📎 Se precisar enviar algum documento novo, pode anexar aqui agora.
 
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
-   };
+    };
 
                     if (respostas[texto]) {
-        await sendBotMsg(rawJid, { text: respostas[texto] });
-        // Aqui tiramos o status de 'aguardandoOpcao' para ele não repetir o menu
-        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false } });
-    } else {
-        // Opcional: Avisar se ele digitar algo que não seja 1-8
-        // await sendBotMsg(rawJid, { text: "Opção inválida. Escolha de 1 a 8." });
-    }
-}
+                        await sendBotMsg(rawJid, { text: respostas[texto] });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false } });
+                    }
+                }
 
             } catch (err) { console.error(err); }
         });
@@ -337,7 +332,7 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
     }
 }
 
-// Funções de Persistência MongoDB Auth e Rotas Express continuam as mesmas do seu original
+// --- PERSISTÊNCIA MONGODB ---
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
     const readData = async (id) => {
@@ -374,7 +369,7 @@ async function useMongoDBAuthState(collection) {
     };
 }
 
-// Rotas de interface
+// --- ROTAS EXPRESS (COM LOGOUT-PANEL) ---
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 app.post('/login', async (req, res) => {
     const { user, pass } = req.body;
@@ -382,6 +377,15 @@ app.post('/login', async (req, res) => {
     if (admin && admin.pass === pass) { req.session.loggedIn = true; res.redirect('/'); }
     else res.send("<script>alert('Falha'); window.location='/login';</script>");
 });
-app.get('/', (req, res) => { if (!req.session.loggedIn) return res.redirect('/login'); res.sendFile(path.join(__dirname, 'index.html')); });
+
+app.get('/logout-panel', (req, res) => {
+    req.session.destroy();
+    res.redirect('/login');
+});
+
+app.get('/', (req, res) => { 
+    if (!req.session.loggedIn) return res.redirect('/login'); 
+    res.sendFile(path.join(__dirname, 'index.html')); 
+});
 
 server.listen(port, () => startBot());
