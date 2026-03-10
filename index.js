@@ -17,8 +17,8 @@ const axios = require('axios');
 const session = require('express-session');
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+let genAI = null; // Apenas declare a variável, sem valor por enquanto.
 let apiKeysColl;
-let genAI;
 
 const app = express();
 const server = http.createServer(app);
@@ -27,10 +27,19 @@ const port = process.env.PORT || 10000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+const MongoDBStore = require('connect-mongodb-session')(session);
+
+const store = new MongoDBStore({
+  uri: process.env.MONGODB_URI,
+  collection: 'sessions'
+});
+
 app.use(session({
-    secret: 'azevedo-secret-key',
-    resave: false,
-    saveUninitialized: true
+    secret: 'azevedo-secret-key',
+    resave: false,
+    saveUninitialized: false, // Melhor para produção
+    store: store, // Agora as sessões ficam salvas no Banco, não na memória!
+    cookie: { maxAge: 1000 * 60 * 60 * 24 } // 24 horas de login
 }));
 
 const mongoUri = process.env.MONGODB_URI;
@@ -67,10 +76,13 @@ async function startBot() {
         
         apiKeysColl = db.collection('api_keys');
         const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
+        
         if (geminiKeyDoc && geminiKeyDoc.chave) {
-            genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
+            // IMPORTANTE: Use 'genAI' sem o 'let' ou 'const' na frente aqui
+            genAI = new GoogleGenerativeAI(geminiKeyDoc.chave); 
+            console.log("✅ Conexão com Gemini estabelecida via MongoDB");
         } else {
-            console.error("⚠️ Chave do Gemini não encontrada na collection api_keys!");
+            console.error("⚠️ Chave do Gemini não encontrada!");
         }
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
@@ -234,7 +246,7 @@ Regras:
 
 Sua resposta:`;
 
-                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
                     const result = await model.generateContent(prompt);
                     const iaResponse = result.response.text().trim();
 
