@@ -246,11 +246,11 @@ Regras:
 
 Sua resposta:`;
 
-                    const model = genAI.getGenerativeModel({ 
-                                        model: "gemini-1.5-flash" 
-                                    }, { apiVersion: 'v1' });
+                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-002" });
                     const result = await model.generateContent(prompt);
                     const iaResponse = result.response.text().trim();
+
+                    console.log("Tentando integrar com Gemini usando o texto:", texto);
 
                     if (iaResponse === 'LEAD_ANUNCIO') {
                         await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele assumirá seu atendimento em breve.` });
