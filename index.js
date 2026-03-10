@@ -81,8 +81,8 @@ async function startBot() {
             genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
             // Definimos o modelo GLOBALMENTE com a API v1 para evitar o erro 404
             global.geminiModel = genAI.getGenerativeModel(
-                { model: "gemini-1.5-flash" }, 
-                { apiVersion: 'v1' }
+            { model: "gemini-1.5-flash" }, 
+            { apiVersion: 'v1beta' } // MUDAR DE 'v1' PARA 'v1beta'
             );
             console.log("✅ Sistema Gemini pronto e estável.");
         }
