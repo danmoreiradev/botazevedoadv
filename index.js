@@ -105,10 +105,18 @@ sock.ev.on('messages.upsert', async m => {
     if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
     if (!msg.key.id) return;
 
+    if (msg.key.remoteJid.endsWith('@lid')) return;
+
     const rawJid = msg.key.remoteJid;
-    const numeroReal = getRealNumber(msg);
+
+    // NORMALIZA QUALQUER TIPO DE JID
+    const normalized = jidNormalizedUser(rawJid);
+
+    // extrai número real
+    const numeroReal = normalized.split('@')[0];
+
     const cleanNumber = numeroReal;
-    const cleanJid = numeroReal + '@s.whatsapp.net';
+    const cleanJid = normalized;
 
     const isMe = msg.key.fromMe;
     const msgId = msg.key.id;
