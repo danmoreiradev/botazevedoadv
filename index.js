@@ -82,7 +82,7 @@ async function startBot() {
             // Definimos o modelo GLOBALMENTE com a API v1 para evitar o erro 404
             global.geminiModel = genAI.getGenerativeModel(
             { model: "gemini-2.5-flash" }, 
-            { apiVersion: '001' } // MUDAR DE 'v1' PARA 'v1beta'
+            { apiVersion: 'v1beta' } // MUDAR DE 'v1' PARA 'v1beta'
             );
             console.log("✅ Sistema Gemini pronto e estável.");
         }
@@ -250,7 +250,7 @@ Sua resposta:`;
 
                    const model = genAI.getGenerativeModel(
                                 { model: "gemini-2.5-flash" }, 
-                                { apiVersion: '001' } 
+                                { apiVersion: 'v1beta' } 
                             );
                     const result = await model.generateContent(prompt);
                     const iaResponse = result.response.text().trim();
