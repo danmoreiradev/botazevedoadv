@@ -4,7 +4,7 @@ const {
     fetchLatestBaileysVersion, 
     BufferJSON, 
     initAuthCreds,
-    jidNormalizedUser // Importado para unificação de IDs
+    jidNormalizedUser 
 } = require('@whiskeysockets/baileys');
 const { MongoClient } = require('mongodb');
 const express = require('express');
@@ -15,6 +15,10 @@ const P = require('pino');
 const { Boom } = require('@hapi/boom');
 const axios = require('axios');
 const session = require('express-session');
+
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+let apiKeysColl;
+let genAI;
 
 const app = express();
 const server = http.createServer(app);
@@ -60,6 +64,14 @@ async function startBot() {
         ticketsColl = db.collection('active_tickets');
         knowledgeColl = db.collection('knowledge_base');
         userLoginColl = db.collection('user_login');
+        
+        apiKeysColl = db.collection('api_keys');
+        const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
+        if (geminiKeyDoc && geminiKeyDoc.chave) {
+            genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
+        } else {
+            console.error("⚠️ Chave do Gemini não encontrada na collection api_keys!");
+        }
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
         const { version } = await fetchLatestBaileysVersion();
@@ -146,31 +158,117 @@ sock.ev.on('messages.upsert', async m => {
         const texto = textoRaw.trim();
         const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-        // 5. CRIAÇÃO / MENU
-        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-            const ticketId = Math.floor(1000 + Math.random() * 9000);
-            
-            await sendBotMsg(rawJid, { // Enviamos para o rawJid original para garantir entrega
-                text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️\n🎫 Atendimento: *${ticketId}*\n\nDigite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` 
-            });
+        // 5. CRIAÇÃO / MENU / SAUDAÇÃO IA
+        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+            const ticketId = Math.floor(1000 + Math.random() * 9000);
+            
+            // Verifica se é uma mensagem padrão de anúncio/lead logo de cara
+            const textoLower = texto.toLowerCase();
+            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
 
-            await ticketsColl.updateOne({ _id: cleanNumber }, {
-                $set: { 
-                    id: ticketId, 
-                    numeroReal: numeroRealExtraido, // Aqui salvamos o vínculo
-                    aguardandoOpcao: true, 
-                    obrigadoEnviado: false, 
-                    tentouInsistir: false,
-                    lastActivity: Date.now(), 
-                    paused: false,
-                    lastRawJid: rawJid 
-                }
-            }, { upsert: true });
-            return;
-        }
+            if (isLead) {
+                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                await ticketsColl.updateOne({ _id: cleanNumber }, {
+                    $set: { 
+                        id: ticketId, numeroReal: numeroRealExtraido,
+                        aguardandoOpcao: false, aguardandoIA: false, 
+                        obrigadoEnviado: true, paused: true, until: blockUntil,
+                        lastActivity: Date.now(), lastRawJid: rawJid
+                    }
+                }, { upsert: true });
+                return;
+            }
+
+            // Saudação inicial solicitada
+            await sendBotMsg(rawJid, { 
+                text: `Olá, você está no assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
+            });
+
+            await ticketsColl.updateOne({ _id: cleanNumber }, {
+                $set: { 
+                    id: ticketId, 
+                    numeroReal: numeroRealExtraido, 
+                    aguardandoIA: true, // Novo status para a IA atuar
+                    aguardandoOpcao: false, 
+                    obrigadoEnviado: false, 
+                    tentouInsistir: false,
+                    lastActivity: Date.now(), 
+                    paused: false,
+                    lastRawJid: rawJid 
+                }
+            }, { upsert: true });
+            return;
+        }
 
         // 6. Atualiza atividade SEMPRE no ID do ticket encontrado
         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
+
+        // --- NOVA LÓGICA DE INTELIGÊNCIA ARTIFICIAL ---
+        if (ticket.aguardandoIA) {
+            // Checagem de segurança para leads na segunda mensagem
+            const textoLower = texto.toLowerCase();
+            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
+
+            if (isLead) {
+                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                return;
+            }
+
+            if (genAI) {
+                try {
+                    // Monta o contexto buscando a knowledge_base no MongoDB
+                    const knowledgeDocs = await knowledgeColl.find({}).toArray();
+                    const contextText = knowledgeDocs.map(k => `Pergunta: ${k.pergunta}\nResposta: ${k.resposta}`).join('\n\n');
+
+                    const prompt = `Você é um assistente virtual do escritório Azevedo & Juvencio Advogados.
+Base de conhecimento autorizada:
+${contextText}
+
+Mensagem do cliente: "${texto}"
+
+Regras:
+1. Se o cliente pedir para falar com atendente, advogado, humano ou se o assunto não existir na base de conhecimento, responda APENAS com a palavra: ESCALAR_ATENDIMENTO
+2. Se a mensagem for claramente um lead automático de anúncios, responda APENAS com a palavra: LEAD_ANUNCIO
+3. Se a pergunta puder ser respondida usando a base de conhecimento, responda de forma natural e prestativa.
+
+Sua resposta:`;
+
+                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+                    const result = await model.generateContent(prompt);
+                    const iaResponse = result.response.text().trim();
+
+                    if (iaResponse === 'LEAD_ANUNCIO') {
+                        await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele assumirá seu atendimento em breve.` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                        return;
+                    } 
+                    
+                    if (iaResponse === 'ESCALAR_ATENDIMENTO') {
+                        // Cliente quer advogado ou assunto está fora da base, mostra o menu original
+                        await sendBotMsg(cleanJid, {
+                            text: `Certo! Vou transferir você. Digite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
+                        });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
+                        return;
+                    }
+
+                    // Responde com o conhecimento da base e continua no fluxo da IA
+                    await sendBotMsg(cleanJid, { text: `${iaResponse}\n\nPodemos te ajudar em algo a mais?` });
+                    return; 
+
+                } catch (iaError) {
+                    console.error("Erro na integração com o Gemini:", iaError);
+                    // Fallback para o menu caso a IA falhe
+                    await sendBotMsg(cleanJid, {
+                        text: `Tivemos uma instabilidade no assistente. Digite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
+                    });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
+                    return;
+                }
+            }
+        }
+        // --- FIM DA LÓGICA DE IA ---
 
         const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
