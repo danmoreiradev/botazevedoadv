@@ -102,56 +102,123 @@ async function startBot() {
         sock.ev.on('creds.update', saveCreds);
 
 sock.ev.on('messages.upsert', async m => {
-    const msg = m.messages[0];
-    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+    const msg = m.messages[0];
+    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-    const rawJid = msg.key.remoteJid;
-    // jidNormalizedUser converte IDs complexos para o formato padrão
-    const cleanJid = jidNormalizedUser(rawJid); 
-    const cleanNumber = cleanJid.split('@')[0];
-    const isMe = msg.key.fromMe;
-    const msgId = msg.key.id;
+    const rawJid = msg.key.remoteJid;
+    const cleanJid = jidNormalizedUser(rawJid); 
+    const cleanNumber = cleanJid.split('@')[0];
+    const isMe = msg.key.fromMe;
+    const msgId = msg.key.id;
 
-    // --- NOVA LÓGICA DE IDENTIFICAÇÃO ---
-    // Tentamos pegar o número real. Se for LID, ele pode vir no participant.
-    let numeroRealExtraido = cleanNumber;
-    if (rawJid.includes('@lid')) {
-        // Em conversas privadas, o participant às vezes é nulo, 
-        // mas o Baileys costuma vincular no pushName ou em metadados.
-        const vnumber = msg.key.participant || msg.participant || rawJid;
-        numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
-    }
+    // Identificação de número para casos de LID
+    let numeroRealExtraido = cleanNumber;
+    if (rawJid.includes('@lid')) {
+        const vnumber = msg.key.participant || msg.participant || rawJid;
+        numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
+    }
 
-    if (processing.has(msgId)) return;
-    processing.add(msgId);
-    setTimeout(() => processing.delete(msgId), 10000);
+    // Evita processamento duplicado
+    if (processing.has(msgId)) return;
+    processing.add(msgId);
+    setTimeout(() => processing.delete(msgId), 10000);
 
-    const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
+    const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+    const blockUntil = Date.now() + tresDiasEmMs;
 
-    try {
-        // 1. BUSCA AGRESSIVA: Procura o número em qualquer um dos campos
-        let ticket = await ticketsColl.findOne({
-            $or: [
-                { _id: cleanNumber },
-                { numeroReal: cleanNumber },
-                { _id: numeroRealExtraido },
-                { numeroReal: numeroRealExtraido }
-            ]
-        });
+    try {
+        // Busca o ticket associado
+        let ticket = await ticketsColl.findOne({
+            $or: [
+                { _id: cleanNumber },
+                { numeroReal: cleanNumber },
+                { _id: numeroRealExtraido },
+                { numeroReal: numeroRealExtraido }
+            ]
+        });
 
-        // 2. Lógica de Intervenção (Humano respondeu)
-        if (isMe) {
-            if (msgId !== lastBotMessageId) {
-                // Se o humano respondeu, travamos o ticket que foi encontrado ou criamos um com o ID atual
-                const targetId = ticket ? ticket._id : cleanNumber;
-                await ticketsColl.updateOne(
-                    { _id: targetId }, 
-                    { $set: { paused: true, until: blockUntil, lastActivity: Date.now() } }, 
-                    { upsert: true }
-                );
-            }
-            return; 
-        }
+        // --- LÓGICA DE INTERVENÇÃO HUMANA ---
+        if (isMe) {
+            // Se a mensagem partiu de VOCÊ e NÃO é o ID da última mensagem que o bot enviou
+            if (msgId !== lastBotMessageId) {
+                console.log(`[Intervenção] Humano detectado em ${cleanNumber}. Pausando bot por 3 dias.`);
+                
+                const targetId = ticket ? ticket._id : cleanNumber;
+                await ticketsColl.updateOne(
+                    { _id: targetId }, 
+                    { 
+                        $set: { 
+                            paused: true, 
+                            until: blockUntil, 
+                            lastActivity: Date.now(),
+                            aguardandoIA: false, // Desliga fluxos automáticos
+                            aguardandoOpcao: false 
+                        } 
+                    }, 
+                    { upsert: true }
+                );
+            }
+            return; 
+        }
+
+        // --- VERIFICAÇÃO DE BLOQUEIO ATIVO ---
+        if (ticket && ticket.paused) {
+            if (Date.now() < ticket.until) {
+                console.log(`[Bloqueio] Bot pausado para ${ticket._id} até ${new Date(ticket.until).toLocaleString()}`);
+                return; // Para aqui, não responde nada.
+            } else {
+                // Se o tempo passou, despausa automaticamente
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
+            }
+        }
+
+        // Se chegou aqui, o bot pode processar normalmente
+        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        const texto = textoRaw.trim();
+        const timeoutMenu = 2 * 60 * 60 * 1000; 
+
+        // 5. CRIAÇÃO / REABERTURA DE TICKET
+        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+            const ticketId = Math.floor(1000 + Math.random() * 9000);
+            
+            const textoLower = texto.toLowerCase();
+            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
+
+            if (isLead) {
+                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                await ticketsColl.updateOne({ _id: cleanNumber }, {
+                    $set: { 
+                        id: ticketId, numeroReal: numeroRealExtraido,
+                        aguardandoOpcao: false, aguardandoIA: false, 
+                        obrigadoEnviado: true, paused: true, until: blockUntil,
+                        lastActivity: Date.now(), lastRawJid: rawJid
+                    }
+                }, { upsert: true });
+                return;
+            }
+
+            await sendBotMsg(rawJid, { 
+                text: `Olá, você está no assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
+            });
+
+            await ticketsColl.updateOne({ _id: cleanNumber }, {
+                $set: { 
+                    id: ticketId, 
+                    numeroReal: numeroRealExtraido, 
+                    aguardandoIA: true, 
+                    aguardandoOpcao: false, 
+                    obrigadoEnviado: false, 
+                    tentouInsistir: false,
+                    lastActivity: Date.now(), 
+                    paused: false,
+                    lastRawJid: rawJid 
+                }
+            }, { upsert: true });
+            return;
+        }
+
+        // Atualiza atividade para tickets existentes
+        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
 
         // 3. SE ACHOU UM TICKET COM ID DIFERENTE (Unificação em tempo real)
         // Se a msg veio por LID (1109...) mas achamos um ticket pelo número real (5519...)
