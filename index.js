@@ -234,7 +234,7 @@ Regras:
 
 Sua resposta:`;
 
-                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
                     const result = await model.generateContent(prompt);
                     const iaResponse = result.response.text().trim();
 
