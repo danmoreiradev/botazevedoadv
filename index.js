@@ -111,14 +111,13 @@ sock.ev.on('messages.upsert', async m => {
     const isMe = msg.key.fromMe;
     const msgId = msg.key.id;
 
-    // Identificação de número para casos de LID
+    // --- IDENTIFICAÇÃO DO NÚMERO (LID vs REAL) ---
     let numeroRealExtraido = cleanNumber;
     if (rawJid.includes('@lid')) {
         const vnumber = msg.key.participant || msg.participant || rawJid;
         numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
     }
 
-    // Evita processamento duplicado
     if (processing.has(msgId)) return;
     processing.add(msgId);
     setTimeout(() => processing.delete(msgId), 10000);
@@ -127,7 +126,7 @@ sock.ev.on('messages.upsert', async m => {
     const blockUntil = Date.now() + tresDiasEmMs;
 
     try {
-        // Busca o ticket associado
+        // 1. BUSCA O TICKET (Unificada)
         let ticket = await ticketsColl.findOne({
             $or: [
                 { _id: cleanNumber },
@@ -137,13 +136,13 @@ sock.ev.on('messages.upsert', async m => {
             ]
         });
 
-        // --- LÓGICA DE INTERVENÇÃO HUMANA ---
+        // 2. LOGICA DE INTERVENÇÃO HUMANA (VOCÊ RESPONDEU)
         if (isMe) {
-            // Se a mensagem partiu de VOCÊ e NÃO é o ID da última mensagem que o bot enviou
             if (msgId !== lastBotMessageId) {
-                console.log(`[Intervenção] Humano detectado em ${cleanNumber}. Pausando bot por 3 dias.`);
+                console.log(`[Intervenção] Humano detectado em ${numeroRealExtraido}. Pausando bot.`);
                 
-                const targetId = ticket ? ticket._id : cleanNumber;
+                // Sempre salva no ID do ticket encontrado ou no número real (nunca no LID se possível)
+                const targetId = ticket ? ticket._id : numeroRealExtraido;
                 await ticketsColl.updateOne(
                     { _id: targetId }, 
                     { 
@@ -151,8 +150,9 @@ sock.ev.on('messages.upsert', async m => {
                             paused: true, 
                             until: blockUntil, 
                             lastActivity: Date.now(),
-                            aguardandoIA: false, // Desliga fluxos automáticos
-                            aguardandoOpcao: false 
+                            aguardandoIA: false,
+                            aguardandoOpcao: false,
+                            numeroReal: numeroRealExtraido // Garante que o número real esteja gravado
                         } 
                     }, 
                     { upsert: true }
@@ -161,32 +161,30 @@ sock.ev.on('messages.upsert', async m => {
             return; 
         }
 
-        // --- VERIFICAÇÃO DE BLOQUEIO ATIVO ---
+        // 3. VERIFICAÇÃO DE PAUSA ATIVA
         if (ticket && ticket.paused) {
             if (Date.now() < ticket.until) {
                 console.log(`[Bloqueio] Bot pausado para ${ticket._id} até ${new Date(ticket.until).toLocaleString()}`);
-                return; // Para aqui, não responde nada.
+                return;
             } else {
-                // Se o tempo passou, despausa automaticamente
                 await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
+                ticket.paused = false; // Atualiza a variável local para continuar o processamento
             }
         }
 
-        // Se chegou aqui, o bot pode processar normalmente
         const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const texto = textoRaw.trim();
         const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-        // 5. CRIAÇÃO / REABERTURA DE TICKET
+        // 4. CRIAÇÃO OU REABERTURA (Bloco Único)
         if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
             const ticketId = Math.floor(1000 + Math.random() * 9000);
-            
             const textoLower = texto.toLowerCase();
             const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
 
             if (isLead) {
                 await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
-                await ticketsColl.updateOne({ _id: cleanNumber }, {
+                await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
                     $set: { 
                         id: ticketId, numeroReal: numeroRealExtraido,
                         aguardandoOpcao: false, aguardandoIA: false, 
@@ -201,7 +199,7 @@ sock.ev.on('messages.upsert', async m => {
                 text: `Olá, você está no assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
             });
 
-            await ticketsColl.updateOne({ _id: cleanNumber }, {
+            await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
                 $set: { 
                     id: ticketId, 
                     numeroReal: numeroRealExtraido, 
@@ -217,72 +215,13 @@ sock.ev.on('messages.upsert', async m => {
             return;
         }
 
-        // Atualiza atividade para tickets existentes
+        // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
-
-        // 3. SE ACHOU UM TICKET COM ID DIFERENTE (Unificação em tempo real)
-        // Se a msg veio por LID (1109...) mas achamos um ticket pelo número real (5519...)
-        // vamos forçar o uso do ticket antigo para não duplicar.
-        if (ticket && ticket._id !== cleanNumber) {
-            console.log(`[Link] Unificando ${cleanNumber} ao ticket existente ${ticket._id}`);
-            // Opcional: Você pode atualizar o _id se quiser, mas o mais seguro é 
-            // apenas garantir que 'ticket' agora referencia o objeto correto.
-        }
-
-        // 4. Verifica Pausa
-        if (ticket && ticket.paused) {
-            if (Date.now() < ticket.until) return;
-            else await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
-        }
-
-        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        const texto = textoRaw.trim();
-        const timeoutMenu = 2 * 60 * 60 * 1000; 
-
-        // 5. CRIAÇÃO / MENU / SAUDAÇÃO IA
-        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-            const ticketId = Math.floor(1000 + Math.random() * 9000);
-            
-            // Verifica se é uma mensagem padrão de anúncio/lead logo de cara
-            const textoLower = texto.toLowerCase();
-            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
-
-            if (isLead) {
-                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
-                await ticketsColl.updateOne({ _id: cleanNumber }, {
-                    $set: { 
-                        id: ticketId, numeroReal: numeroRealExtraido,
-                        aguardandoOpcao: false, aguardandoIA: false, 
-                        obrigadoEnviado: true, paused: true, until: blockUntil,
-                        lastActivity: Date.now(), lastRawJid: rawJid
-                    }
-                }, { upsert: true });
-                return;
-            }
-
-            // Saudação inicial solicitada
-            await sendBotMsg(rawJid, { 
-                text: `Olá, você está no assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
-            });
-
-            await ticketsColl.updateOne({ _id: cleanNumber }, {
-                $set: { 
-                    id: ticketId, 
-                    numeroReal: numeroRealExtraido, 
-                    aguardandoIA: true, // Novo status para a IA atuar
-                    aguardandoOpcao: false, 
-                    obrigadoEnviado: false, 
-                    tentouInsistir: false,
-                    lastActivity: Date.now(), 
-                    paused: false,
-                    lastRawJid: rawJid 
-                }
-            }, { upsert: true });
-            return;
+        
+        // Se a mensagem veio por um LID mas o ticket está no Número Real, apaga o registro do LID se ele existir solto
+        if (cleanNumber !== ticket._id && cleanNumber.length > 13) {
+             await ticketsColl.deleteOne({ _id: cleanNumber });
         }
-
-        // 6. Atualiza atividade SEMPRE no ID do ticket encontrado
-        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
 
         // --- NOVA LÓGICA DE INTELIGÊNCIA ARTIFICIAL ---
         if (ticket.aguardandoIA) {
