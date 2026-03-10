@@ -199,12 +199,12 @@ sock.ev.on('messages.upsert', async m => {
         const timeoutMenu = 2 * 60 * 60 * 1000;
 
         // --- MENU INICIAL ---
-        if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
+       if (!ticket.id) {
 
-            const ticketId = Math.floor(1000 + Math.random() * 9000);
+    const ticketId = Math.floor(1000 + Math.random() * 9000);
 
-            await sendBotMsg(cleanJid, { // envio para jid normalizado
-                text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️
+    await sendBotMsg(cleanJid, {
+        text: `Olá! 👋 Bem-vindo(a) ao *Azevedo e Juvencio Advogados* ⚖️
 🎫 Atendimento: *${ticketId}*
 
 Digite o número da opção desejada:
@@ -217,27 +217,27 @@ Digite o número da opção desejada:
 6️⃣ Direito Empresarial
 7️⃣ Outros Assuntos
 8️⃣ Processo em andamento`
-            });
+    });
 
-            await ticketsColl.updateOne(
-                { numero: cleanNumber }, // FIX
-                {
-                    $set: {
-                        id: ticketId,
-                        numeroReal: numeroRealExtraido,
-                        aguardandoOpcao: true,
-                        obrigadoEnviado: false,
-                        tentouInsistir: false,
-                        lastActivity: Date.now(),
-                        paused: false,
-                        lastRawJid: rawJid
-                    }
-                },
-                { upsert: true }
-            );
-
-            return;
+    await ticketsColl.updateOne(
+        { numero: cleanNumber },
+        {
+            $set: {
+                id: ticketId,
+                numeroReal: numeroRealExtraido,
+                aguardandoOpcao: true,
+                obrigadoEnviado: false,
+                tentouInsistir: false,
+                errosMenu: 0,
+                paused: false,
+                lastActivity: Date.now(),
+                lastRawJid: rawJid
+            }
         }
+    );
+
+    return;
+}
 
         // Atualiza atividade
         await ticketsColl.updateOne(
