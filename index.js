@@ -139,10 +139,11 @@ sock.ev.on('messages.upsert', async m => {
         // 2. LOGICA DE INTERVENÇÃO HUMANA (VOCÊ RESPONDEU)
         if (isMe) {
             if (msgId !== lastBotMessageId) {
-                console.log(`[Intervenção] Humano detectado em ${numeroRealExtraido}. Pausando bot.`);
+                console.log(`[Intervenção] Humano detectado para ${numeroRealExtraido}. Pausando bot.`);
                 
-                // Sempre salva no ID do ticket encontrado ou no número real (nunca no LID se possível)
+                // Define o alvo: prioriza o ID do ticket encontrado, senão usa o número extraído
                 const targetId = ticket ? ticket._id : numeroRealExtraido;
+
                 await ticketsColl.updateOne(
                     { _id: targetId }, 
                     { 
@@ -152,8 +153,14 @@ sock.ev.on('messages.upsert', async m => {
                             lastActivity: Date.now(),
                             aguardandoIA: false,
                             aguardandoOpcao: false,
-                            numeroReal: numeroRealExtraido // Garante que o número real esteja gravado
-                        } 
+                            obrigadoEnviado: true, // Evita que o bot mande "Recebido" depois
+                            numeroReal: numeroRealExtraido
+                        },
+                        // Se o ticket for novo (criado agora pelo advogado), gera o ID numérico
+                        $setOnInsert: {
+                            id: Math.floor(1000 + Math.random() * 9000),
+                            lastRawJid: rawJid
+                        }
                     }, 
                     { upsert: true }
                 );
