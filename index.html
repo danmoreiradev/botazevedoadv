@@ -136,7 +136,50 @@
             width: 100%; 
             max-width: 300px;
         }
-        
+
+        /* Estilo para o campo de busca */
+        .search-container {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        .search-input {
+            padding-left: 40px;
+            border-radius: 12px;
+            border: 1px solid #ddd;
+        }
+        .search-icon {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #999;
+        }
+
+        /* Estilo para o item da lista com lixeira */
+        .knowledge-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            transition: background 0.2s;
+        }
+        .knowledge-item:hover {
+            background: #f8f9fa;
+        }
+        .btn-delete {
+            color: var(--danger-red);
+            background: none;
+            border: none;
+            padding: 5px 10px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: 0.3s;
+        }
+        .btn-delete:hover {
+            opacity: 1;
+            transform: scale(1.1);
+    }
+            
         .hidden { display: none !important; }
 
         /* RESPONSIVIDADE MOBILE APRIMORADA */
@@ -168,12 +211,12 @@
         </div>
         
         <div class="nav flex-column mt-md-2">
-            <div class="nav-link active" onclick="switchTab('tab-chatbot', this)">🤖 CHATBOT</div>
-            <div class="nav-link" onclick="switchTab('tab-ia', this)">🧠 GESTÃO IA</div>
+            <div class="nav-link active" onclick="switchTab('tab-chatbot', this)">🤖 Chatbot - Conexão</div>
+            <div class="nav-link" onclick="switchTab('tab-ia', this)">🧠 Gestão IA</div>
         </div>
 
         <div class="mt-auto nav-link border-0 text-white-50" onclick="window.location.href='/logout-panel'" style="font-size: 0.85rem; background: rgba(0,0,0,0.2); cursor: pointer;">
-    🚪      SAIR DO PAINEL
+    🚪      Sair
         </div>
     </div>
 
@@ -221,6 +264,12 @@
                 <div class="col-lg-7">
                     <div class="card-custom text-start p-4" style="min-height: 480px;">
                         <h5 class="mb-4" style="color: var(--adv-blue)">Conhecimentos Ativos</h5>
+                        
+                        <div class="search-container">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" id="input_busca" class="form-control search-input" placeholder="Pesquisar conhecimento..." onkeyup="filtrarConhecimento()">
+                        </div>
+
                         <div id="lista_conhecimento" class="list-group list-group-flush overflow-auto" style="max-height: 400px;">
                             </div>
                     </div>
@@ -290,22 +339,60 @@
             }
         }
 
-        async function carregarConhecimento() {
-            const res = await fetch('/api/knowledgeColl');
-            const data = await res.json();
-            const container = document.getElementById('lista_conhecimento');
-            
-            if(!data.length) {
-                container.innerHTML = `<p class="text-muted p-3">Nenhuma instrução cadastrada.</p>`;
-                return;
-            }
+        // Função para carregar e exibir a lista com botão de lixo
+async function carregarConhecimento() {
+    const res = await fetch('/api/knowledgeColl');
+    const data = await res.json();
+    const container = document.getElementById('lista_conhecimento');
+    
+    // Guardamos os dados globalmente para a busca funcionar sem nova requisição
+    window.todosConhecimentos = data; 
 
-            container.innerHTML = data.map(item => `
-                <div class="list-group-item py-3 border-bottom">
-                    <div class="fw-bold mb-1" style="color: var(--adv-blue);">${item.pergunta}</div>
-                    <div class="text-muted small">${item.resposta}</div>
-                </div>
-            `).join('');
+    renderizarLista(data);
+}
+
+// Função auxiliar para desenhar a lista na tela
+function renderizarLista(itens) {
+    const container = document.getElementById('lista_conhecimento');
+    if(!itens.length) {
+        container.innerHTML = `<p class="text-muted p-3">Nenhum resultado encontrado.</p>`;
+        return;
+    }
+
+    container.innerHTML = itens.map(item => `
+        <div class="list-group-item py-3 border-bottom knowledge-item">
+            <div style="flex: 1;">
+                <div class="fw-bold mb-1" style="color: var(--adv-blue);">${item.pergunta}</div>
+                <div class="text-muted small">${item.resposta}</div>
+            </div>
+            <button class="btn-delete" onclick="removerConhecimento('${item._id}')" title="Excluir">
+                🗑️
+            </button>
+        </div>
+    `).join('');
+}
+
+        function filtrarConhecimento() {
+            const termo = document.getElementById('input_busca').value.toLowerCase();
+            const filtrados = window.todosConhecimentos.filter(item => 
+                item.pergunta.toLowerCase().includes(termo) || 
+                item.resposta.toLowerCase().includes(termo)
+            );
+            renderizarLista(filtrados);
+        }
+        async function removerConhecimento(id) {
+            if(!confirm("Tem certeza que deseja remover este conhecimento?")) return;
+
+            try {
+                const res = await fetch(`/api/knowledgeColl/${id}`, { method: 'DELETE' });
+                if(res.ok) {
+                    carregarConhecimento(); // Recarrega a lista
+                } else {
+                    alert("Erro ao remover o item.");
+                }
+            } catch (err) {
+                console.error("Erro:", err);
+            }
         }
 
         function handleWhatsAppLogout() {

@@ -29,6 +29,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 const MongoDBStore = require('connect-mongodb-session')(session);
 
+const { MongoClient, ObjectId } = require('mongodb');
+
 const store = new MongoDBStore({
   uri: process.env.MONGODB_URI,
   collection: 'sessions'
@@ -203,7 +205,7 @@ sock.ev.on('messages.upsert', async m => {
             }
 
             await sendBotMsg(rawJid, { 
-                text: `Olá, você está no assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
+                text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
             });
 
             await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
@@ -535,9 +537,10 @@ app.get('/logout-whatsapp', async (req, res) => {
 });
 
 app.get('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    const data = await knowledgeColl.find({}).toArray();
-    res.json(data);
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    // Buscamos e ordenamos pelos mais recentes primeiro
+    const data = await knowledgeColl.find({}).sort({ updatedAt: -1 }).toArray();
+    res.json(data);
 });
 
 app.post('/api/knowledgeColl', async (req, res) => {
@@ -545,6 +548,24 @@ app.post('/api/knowledgeColl', async (req, res) => {
     const { pergunta, resposta } = req.body;
     await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
     res.sendStatus(200);
+});
+
+app.delete('/api/knowledgeColl/:id', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    
+    try {
+        const { id } = req.params;
+        const result = await knowledgeColl.deleteOne({ _id: new ObjectId(id) });
+        
+        if (result.deletedCount === 1) {
+            res.sendStatus(200);
+        } else {
+            res.status(404).send("Conhecimento não encontrado");
+        }
+    } catch (err) {
+        console.error("Erro ao deletar:", err);
+        res.status(500).send("Erro interno ao deletar");
+    }
 });
 
 setInterval(async () => {
