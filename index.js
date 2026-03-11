@@ -466,7 +466,6 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
     }
 }
 
-// --- RESTO DO CÓDIGO (useMongoDBAuthState, Rotas, etc) MANTIDO IGUAL ---
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
     const readData = async (id) => {
@@ -553,16 +552,17 @@ app.delete('/api/knowledgeColl/:id', async (req, res) => {
     
     try {
         const { id } = req.params;
+        // O segredo está em converter a string recebida em ObjectId do MongoDB
         const result = await knowledgeColl.deleteOne({ _id: new ObjectId(id) });
         
         if (result.deletedCount === 1) {
             res.sendStatus(200);
         } else {
-            res.status(404).send("Conhecimento não encontrado");
+            res.status(404).send("Item não encontrado");
         }
     } catch (err) {
         console.error("Erro ao deletar:", err);
-        res.status(500).send("Erro interno ao deletar");
+        res.status(500).send("Erro interno");
     }
 });
 

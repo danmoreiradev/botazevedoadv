@@ -352,24 +352,30 @@ async function carregarConhecimento() {
 }
 
 // Função auxiliar para desenhar a lista na tela
+// Função auxiliar para desenhar a lista na tela
 function renderizarLista(itens) {
     const container = document.getElementById('lista_conhecimento');
-    if(!itens.length) {
+    if(!itens || !itens.length) {
         container.innerHTML = `<p class="text-muted p-3">Nenhum resultado encontrado.</p>`;
         return;
     }
 
-    container.innerHTML = itens.map(item => `
-        <div class="list-group-item py-3 border-bottom knowledge-item">
-            <div style="flex: 1;">
-                <div class="fw-bold mb-1" style="color: var(--adv-blue);">${item.pergunta}</div>
-                <div class="text-muted small">${item.resposta}</div>
+    container.innerHTML = itens.map(item => {
+        // Garante que pegamos o ID independente se vier como string ou objeto do Mongo
+        const idString = item._id.$oid || item._id; 
+        
+        return `
+            <div class="list-group-item py-3 border-bottom knowledge-item">
+                <div style="flex: 1;">
+                    <div class="fw-bold mb-1" style="color: var(--adv-blue);">${item.pergunta}</div>
+                    <div class="text-muted small">${item.resposta}</div>
+                </div>
+                <button class="btn-delete" onclick="removerConhecimento('${idString}')" title="Excluir">
+                    🗑️
+                </button>
             </div>
-            <button class="btn-delete" onclick="removerConhecimento('${item._id}')" title="Excluir">
-                🗑️
-            </button>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
         function filtrarConhecimento() {
