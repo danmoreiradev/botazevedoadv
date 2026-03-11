@@ -29,8 +29,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 const MongoDBStore = require('connect-mongodb-session')(session);
 
-const { MongoClient, ObjectId } = require('mongodb');
-
 const store = new MongoDBStore({
   uri: process.env.MONGODB_URI,
   collection: 'sessions'
