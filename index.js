@@ -323,15 +323,27 @@ async function startBot() {
     } catch (err) { setTimeout(startBot, 5000); }
 }
 
-// --- FUNÇÃO DE AUTENTICAÇÃO MONGODB ---
+// --- FUNÇÃO DE AUTENTICAÇÃO MONGODB (CORRIGIDA) ---
 async function useMongoDBAuthState(collection) {
-    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
+    const writeData = async (data, id) => {
+        return await collection.replaceOne(
+            { _id: id }, 
+            JSON.parse(JSON.stringify(data, BufferJSON.replacer)), 
+            { upsert: true }
+        );
+    };
+
     const readData = async (id) => {
         const data = await collection.findOne({ _id: id });
         return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
     };
-    const removeData = (id) => collection.deleteOne({ _id: id });
+
+    const removeData = async (id) => {
+        return await collection.deleteOne({ _id: id });
+    };
+
     const creds = await readData('creds') || initAuthCreds();
+
     return {
         state: {
             creds,
@@ -340,7 +352,9 @@ async function useMongoDBAuthState(collection) {
                     const data = {};
                     await Promise.all(ids.map(async id => {
                         let value = await readData(`${type}-${id}`);
-                        if (type === 'app-state-sync-key' && value) value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                        if (type === 'app-state-sync-key' && value) {
+                            value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                        }
                         data[id] = value;
                     }));
                     return data;
@@ -349,13 +363,21 @@ async function useMongoDBAuthState(collection) {
                     for (const type in data) {
                         for (const id in data[type]) {
                             const value = data[type][id];
-                            value ? writeData(value, `${type}-${id}`) : removeData(`${type}-${id}`);
+                            const key = `${type}-${id}`;
+                            // O SEGREDO ESTÁ AQUI: O 'await' obriga o banco a gravar uma chave antes de ir para a próxima
+                            if (value) {
+                                await writeData(value, key);
+                            } else {
+                                await removeData(key);
+                            }
                         }
                     }
                 }
             }
         },
-        saveCreds: () => writeData(creds, 'creds')
+        saveCreds: async () => {
+            await writeData(creds, 'creds');
+        }
     };
 }
 
