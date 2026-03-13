@@ -258,6 +258,7 @@ Regras:
 1. Se o cliente pedir para falar com atendente, advogado, humano ou se o assunto não existir na base de conhecimento, responda APENAS com a palavra: ESCALAR_ATENDIMENTO
 2. Se a mensagem for claramente um lead automático de anúncios, responda APENAS com a palavra: LEAD_ANUNCIO
 3. Se a pergunta puder ser respondida usando a base de conhecimento, responda de forma natural e prestativa.
+4. Se o cliente agradecer e indicar que a dúvida foi resolvida (ex: "obrigado", "pode encerrar", "era só isso"), responda APENAS com a palavra: ENCERRAR_TICKET
 
 Sua resposta:`;
 
@@ -276,12 +277,14 @@ Sua resposta:`;
                         return;
                     } 
                     
-                    if (iaResponse === 'ESCALAR_ATENDIMENTO') {
-                        // Cliente quer advogado ou assunto está fora da base, mostra o menu original
-                        await sendBotMsg(cleanJid, {
-                            text: `Certo! Vou transferir você. Digite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
-                        });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
+                    if (iaResponse === 'ENCERRAR_TICKET') {
+                        console.log(`[Encerramento] Cliente ${ticket._id} solicitou fechar. Deletando ticket.`);
+                        
+                        // Envia uma mensagem de despedida cordial
+                        await sendBotMsg(cleanJid, { text: `De nada! Ficamos à disposição. Se precisar de algo no futuro, é só chamar. Tenha um ótimo dia! 👋` });
+                        
+                        // Remove o ticket do banco de dados (Limpa do Mongo)
+                        await ticketsColl.deleteOne({ _id: ticket._id });
                         return;
                     }
 
@@ -578,5 +581,13 @@ io.on('connection', (socket) => {
     if (currentUser) socket.emit('connected', currentUser);
     else if (lastQr) socket.emit('qr', lastQr);
 });
+
+setInterval(async () => {
+    if (ticketsColl) {
+        const limiteInatividade = Date.now() - (24 * 60 * 60 * 1000); // 24 horas
+        const result = await ticketsColl.deleteMany({ lastActivity: { $lt: limiteInatividade } });
+        if (result.deletedCount > 0) console.log(`[Auto-Limpeza] ${result.deletedCount} tickets antigos removidos.`);
+    }
+}, 60 * 60 * 1000); // Executa a cada 1 hora
 
 server.listen(port, () => startBot());
