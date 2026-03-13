@@ -242,7 +242,23 @@ async function startBot() {
                     }
                 }
 
-                const texto = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
+                // Captura o texto de qualquer origem (Web, Android, iOS, Desktop)
+const texto = (
+    msg.message?.conversation || 
+    msg.message?.extendedTextMessage?.text || 
+    msg.message?.imageMessage?.caption || 
+    msg.message?.videoMessage?.caption || 
+    msg.message?.buttonsResponseMessage?.selectedButtonId || 
+    msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    ""
+).trim();
+
+// LOG DE DEPURAÇÃO (Importante para você ver no terminal)
+if (texto) {
+    console.log(`[Mensagem] Conteúdo extraído: "${texto}" de ${numeroPuro}`);
+} else {
+    console.log(`[Aviso] Mensagem recebida de ${numeroPuro}, mas o texto veio vazio ou em formato não suportado.`);
+}
                 const timeoutMenu = 2 * 60 * 60 * 1000; 
 
                 // 3. NOVO TICKET / REABERTURA
