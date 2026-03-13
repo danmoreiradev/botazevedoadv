@@ -201,7 +201,7 @@ async function startBot() {
 
         sock.ev.on('messages.upsert', async m => {
             const msg = m.messages[0];
-            if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+           if (!msg.message || msg.key.remoteJid === 'status@broadcast' || msg.key.remoteJid.includes('@lid')) return;
 
             const rawJid = msg.key.remoteJid;
             const numeroPuro = extrairIDUnico(rawJid);
