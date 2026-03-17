@@ -1,10 +1,10 @@
 const { 
-    default: makeWASocket, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion, 
-    BufferJSON, 
-    initAuthCreds,
-    jidNormalizedUser 
+    default: makeWASocket, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    BufferJSON, 
+    initAuthCreds,
+    jidNormalizedUser 
 } = require('@whiskeysockets/baileys');
 const { MongoClient, ObjectId } = require('mongodb');
 const express = require('express');
@@ -15,11 +15,9 @@ const P = require('pino');
 const { Boom } = require('@hapi/boom');
 const axios = require('axios');
 const session = require('express-session');
-
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-let genAI = null; // Apenas declare a variável, sem valor por enquanto.
-let apiKeysColl;
 
+// --- CONFIGURAÇÕES INICIAIS ---
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -27,19 +25,19 @@ const port = process.env.PORT || 10000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-const MongoDBStore = require('connect-mongodb-session')(session);
 
+const MongoDBStore = require('connect-mongodb-session')(session);
 const store = new MongoDBStore({
-  uri: process.env.MONGODB_URI,
-  collection: 'sessions'
+    uri: process.env.MONGODB_URI,
+    collection: 'sessions'
 });
 
 app.use(session({
     secret: 'azevedo-secret-key',
     resave: false,
-    saveUninitialized: false, // Melhor para produção
-    store: store, // Agora as sessões ficam salvas no Banco, não na memória!
-    cookie: { maxAge: 1000 * 60 * 60 * 24 } // 24 horas de login
+    saveUninitialized: false,
+    store: store,
+    cookie: { maxAge: 1000 * 60 * 60 * 24 } // 24 horas
 }));
 
 const mongoUri = process.env.MONGODB_URI;
@@ -50,259 +48,187 @@ let currentUser = null;
 let sock;
 let lastBotMessageId = null; 
 let processing = new Set(); 
+let genAI = null;
 
-let ticketsColl, authColl, knowledgeColl, userLoginColl;
+let ticketsColl, authColl, knowledgeColl, userLoginColl, apiKeysColl;
 
+// --- FUNÇÕES AUXILIARES ---
 async function sendBotMsg(jid, content) {
-    try {
-        // Envia exatamente para o JID que originou a mensagem (seja LID ou número)
-        const sent = await sock.sendMessage(jid, content);
-        lastBotMessageId = sent.key.id; 
-        return sent;
-    } catch (err) {
-        console.error("Erro ao enviar:", err);
-        return null;
-    }
+    try {
+        const sent = await sock.sendMessage(jid, content);
+        lastBotMessageId = sent.key.id; 
+        return sent;
+    } catch (err) {
+        console.error("Erro ao enviar:", err);
+        return null;
+    }
 }
 
 async function startBot() {
-    try {
-        await client.connect();
-        const db = client.db('bot_whatsapp');
-        authColl = db.collection('auth_session');
-        ticketsColl = db.collection('active_tickets');
-        knowledgeColl = db.collection('knowledge_base');
-        userLoginColl = db.collection('user_login');
-        
+    try {
+        await client.connect();
+        const db = client.db('bot_whatsapp');
+        authColl = db.collection('auth_session');
+        ticketsColl = db.collection('active_tickets');
+        knowledgeColl = db.collection('knowledge_base');
+        userLoginColl = db.collection('user_login');
         apiKeysColl = db.collection('api_keys');
+
+        // Inicialização Gemini
         const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
-        
         if (geminiKeyDoc && geminiKeyDoc.chave) {
             genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
-            // Definimos o modelo GLOBALMENTE com a API v1 para evitar o erro 404
             global.geminiModel = genAI.getGenerativeModel(
-            { model: "gemini-3.1-flash-lite-preview" }, 
-            { apiVersion: 'v1beta' } // MUDAR DE 'v1' PARA 'v1beta'
+                { model: "gemini-3.1-flash-lite-preview" }, 
+                { apiVersion: 'v1beta' }
             );
-            console.log("✅ Sistema Gemini pronto e estável.");
+            console.log("✅ Sistema Gemini pronto.");
         }
 
-        const { state, saveCreds } = await useMongoDBAuthState(authColl);
-        const { version } = await fetchLatestBaileysVersion();
+        const { state, saveCreds } = await useMongoDBAuthState(authColl);
+        const { version } = await fetchLatestBaileysVersion();
 
-        sock = makeWASocket({
-            version,
-            auth: state,
-            logger: P({ level: 'silent' }),
-            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-            connectTimeoutMs: 60000,
-            generateHighQualityLinkPreview: false
-        });
-
-        sock.ev.on('creds.update', saveCreds);
-
-sock.ev.on('messages.upsert', async m => {
-    const msg = m.messages[0];
-    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
-
-    const rawJid = msg.key.remoteJid;
-    const cleanJid = jidNormalizedUser(rawJid); 
-    const cleanNumber = cleanJid.split('@')[0];
-    const isMe = msg.key.fromMe;
-    const msgId = msg.key.id;
-
-    let numeroRealExtraido = cleanNumber;
-    if (rawJid.includes('@lid')) {
-        const vnumber = msg.key.participant || msg.participant || rawJid;
-        numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
-    }
-
-    if (processing.has(msgId)) return;
-    processing.add(msgId);
-    setTimeout(() => processing.delete(msgId), 10000);
-
-    const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
-    const blockUntil = Date.now() + tresDiasEmMs;
-
-    try {
-        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        const texto = textoRaw.trim();
-        const cpfApenasNumeros = texto.replace(/\D/g, '');
-        const isCpfValido = cpfApenasNumeros.length === 11;
-
-        // 1. BUSCA O TICKET (CPF primeiro, depois número)
-        let ticket = await ticketsColl.findOne({
-            $or: [
-                { cpf: cpfApenasNumeros },
-                { _id: numeroRealExtraido },
-                { numeroReal: numeroRealExtraido }
-            ]
+        sock = makeWASocket({
+            version,
+            auth: state,
+            logger: P({ level: 'silent' }),
+            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
+            connectTimeoutMs: 60000,
+            generateHighQualityLinkPreview: false
         });
 
-        // 2. LOGICA DE INTERVENÇÃO HUMANA
-        if (isMe) {
-            if (msgId !== lastBotMessageId) {
-                const targetId = ticket ? ticket._id : numeroRealExtraido;
-                await ticketsColl.updateOne(
-                    { _id: targetId }, 
-                    { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), obrigadoEnviado: true } }, 
-                    { upsert: true }
-                );
+        sock.ev.on('creds.update', saveCreds);
+
+        // --- LÓGICA DE MENSAGENS (UPSERT) ---
+        sock.ev.on('messages.upsert', async m => {
+            const msg = m.messages[0];
+            if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+
+            const rawJid = msg.key.remoteJid;
+            const cleanJid = jidNormalizedUser(rawJid); 
+            const cleanNumber = cleanJid.split('@')[0];
+            const isMe = msg.key.fromMe;
+            const msgId = msg.key.id;
+
+            let numeroRealExtraido = cleanNumber;
+            if (rawJid.includes('@lid')) {
+                const vnumber = msg.key.participant || msg.participant || rawJid;
+                numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
             }
-            return; 
-        }
 
-        // 3. FLUXO DE IDENTIFICAÇÃO (O "PORTEIRO")
-        if (!ticket || !ticket.cpf) {
-            if (!isCpfValido) {
-                // Primeira fala do bot sempre pede CPF agora
-                await sendBotMsg(rawJid, { text: `Olá! Bem-vindo ao Azevedo & Juvencio Advogados. ⚖️\n\nPara segurança do seu atendimento, por favor, **digite seu CPF** (apenas números):` });
-                
-                // Salva o estado inicial (Aguardando CPF)
-                await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
-                    $set: { _id: numeroRealExtraido, numeroReal: numeroRealExtraido, lastActivity: Date.now(), lastRawJid: rawJid }
-                }, { upsert: true });
-                return;
-            } else {
-                // CLIENTE ENVIOU CPF - Verificar se já existe ticket para este CPF
-                const ticketExistente = await ticketsColl.findOne({ cpf: cpfApenasNumeros });
+            if (processing.has(msgId)) return;
+            processing.add(msgId);
+            setTimeout(() => processing.delete(msgId), 10000);
 
-                if (ticketExistente && ticketExistente.paused && (Date.now() < ticketExistente.until)) {
-                    // MENSAGEM DE CLIENTE ATIVO (Menos de 3 dias)
-                    await sendBotMsg(rawJid, { text: `Já identificamos você! Vou encaminhar para o especialista.` });
-                    
-                    // Prorroga e atualiza o JID (caso tenha trocado de aparelho/aparelho vs web)
-                    await ticketsColl.updateOne({ cpf: cpfApenasNumeros }, {
-                        $set: { until: blockUntil, lastActivity: Date.now(), lastRawJid: rawJid, numeroReal: numeroRealExtraido }
-                    });
-                    return;
-                }
+            const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+            const blockUntil = Date.now() + tresDiasEmMs;
 
-                // IDENTIFICADO - CHECAR SE É LEAD DE ANÚNCIO
-                const textoLower = texto.toLowerCase();
-                const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
+            try {
+                const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+                const texto = textoRaw.trim();
+                const cpfApenasNumeros = texto.replace(/\D/g, '');
+                const isCpfValido = cpfApenasNumeros.length === 11;
 
-                if (isLead) {
-                    await sendBotMsg(rawJid, { text: `✅ CPF Identificado! Recebemos seu interesse pelo anúncio. Um especialista assumirá o seu caso em breve.` });
-                    await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
-                        $set: { 
-                            cpf: cpfApenasNumeros, numeroReal: numeroRealExtraido,
-                            obrigadoEnviado: true, paused: true, until: blockUntil,
-                            lastActivity: Date.now(), lastRawJid: rawJid
-                        }
-                    }, { upsert: true });
-                    return;
-                }
+                // 1. BUSCA O TICKET
+                let ticket = await ticketsColl.findOne({
+                    $or: [
+                        { _id: numeroRealExtraido },
+                        { numeroReal: numeroRealExtraido },
+                        { cpf: isCpfValido ? cpfApenasNumeros : "INVALIDO" }
+                    ]
+                });
 
-                // IDENTIFICADO - FLUXO NORMAL (Inicia IA)
-                await sendBotMsg(rawJid, { text: `CPF identificado com sucesso! Como podemos te ajudar hoje?` });
-                await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
-                    $set: { 
-                        id: Math.floor(1000 + Math.random() * 9000),
-                        cpf: cpfApenasNumeros, numeroReal: numeroRealExtraido,
-                        aguardandoIA: true, lastActivity: Date.now(),
-                        paused: false, lastRawJid: rawJid 
+                // 2. INTERVENÇÃO HUMANA (isMe)
+                if (isMe) {
+                    if (msgId !== lastBotMessageId) {
+                        const targetId = ticket ? ticket._id : numeroRealExtraido;
+                        await ticketsColl.updateOne(
+                            { _id: targetId }, 
+                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), aguardandoIA: false, aguardandoOpcao: false, obrigadoEnviado: true, numeroReal: numeroRealExtraido } }, 
+                            { upsert: true }
+                        );
                     }
-                }, { upsert: true });
-                return;
-            }
-        }
+                    return; 
+                }
 
-        // 4. VERIFICAÇÃO DE PAUSA ATIVA
-        if (ticket && ticket.paused) {
-            if (Date.now() < ticket.until) {
-                // Se o bot está pausado, ele não responde nada, apenas mantém o silêncio para o humano falar
-                return;
-            } else {
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
-                ticket.paused = false;
-            }
-        }
+                // 3. FLUXO DE IDENTIFICAÇÃO CPF (PORTEIRO)
+                if (!ticket || !ticket.cpf) {
+                    if (!isCpfValido) {
+                        await sendBotMsg(rawJid, { text: `Olá! Sou o assistente do escritório Azevedo & Juvencio. ⚖️\n\nPara iniciarmos, por favor, **digite seu CPF** (apenas os 11 números):` });
+                        await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+                            $set: { _id: numeroRealExtraido, numeroReal: numeroRealExtraido, lastActivity: Date.now(), lastRawJid: rawJid }
+                        }, { upsert: true });
+                        return;
+                    } else {
+                        // Verificação de CPF Duplicado/Ativo
+                        const ticketExistente = await ticketsColl.findOne({ cpf: cpfApenasNumeros });
 
-        // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
-        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
-        
-        // Se a mensagem veio por um LID mas o ticket está no Número Real, apaga o registro do LID se ele existir solto
-        if (cleanNumber !== ticket._id && cleanNumber.length > 13) {
-             await ticketsColl.deleteOne({ _id: cleanNumber });
-        }
+                        if (ticketExistente && ticketExistente.paused && (Date.now() < ticketExistente.until)) {
+                            await sendBotMsg(rawJid, { text: `Já identificamos você, e percebi que possui um atendimento recente. Vamos encaminhar!` });
+                            await ticketsColl.updateOne({ _id: ticketExistente._id }, {
+                                $set: { until: blockUntil, lastActivity: Date.now(), lastRawJid: rawJid, numeroReal: numeroRealExtraido, paused: true, obrigadoEnviado: true, aguardandoIA: false }
+                            });
+                            if (ticketExistente._id !== numeroRealExtraido) await ticketsColl.deleteOne({ _id: numeroRealExtraido });
+                            return;
+                        }
 
-        // --- NOVA LÓGICA DE INTELIGÊNCIA ARTIFICIAL ---
-        if (ticket.aguardandoIA) {
-            // Checagem de segurança para leads na segunda mensagem
-            const textoLower = texto.toLowerCase();
-            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
+                        // Lead ou Novo Atendimento
+                        const textoLower = texto.toLowerCase();
+                        const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
+                        
+                        if (isLead) {
+                            await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                        } else {
+                            await sendBotMsg(rawJid, { text: `CPF identificado com sucesso! Como podemos te ajudar hoje?` });
+                        }
 
-            if (isLead) {
-                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
-                return;
-            }
+                        await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+                            $set: { 
+                                cpf: cpfApenasNumeros, numeroReal: numeroRealExtraido, id: Math.floor(1000 + Math.random() * 9000),
+                                aguardandoIA: !isLead, obrigadoEnviado: isLead, paused: isLead, until: isLead ? blockUntil : 0,
+                                lastActivity: Date.now(), lastRawJid: rawJid
+                            }
+                        }, { upsert: true });
+                        return;
+                    }
+                }
 
-            if (genAI) {
-                try {
-                    // Monta o contexto buscando a knowledge_base no MongoDB
+                // 4. VERIFICAÇÃO DE PAUSA
+                if (ticket.paused) {
+                    if (Date.now() < ticket.until) return;
+                    else await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
+                }
+
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
+
+                // 5. LÓGICA DE IA (GEMINI)
+                if (ticket.aguardandoIA && genAI) {
                     const knowledgeDocs = await knowledgeColl.find({}).toArray();
-                    const contextText = knowledgeDocs.map(k => `Pergunta: ${k.pergunta}\nResposta: ${k.resposta}`).join('\n\n');
+                    const contextText = knowledgeDocs.map(k => `P: ${k.pergunta}\nR: ${k.resposta}`).join('\n\n');
+                    const prompt = `Assis. Azevedo & Juvencio.\nBase:\n${contextText}\n\nCliente: "${texto}"\n\nRegras: ESCALAR_ATENDIMENTO se pedir humano ou não souber. ENCERRAR_TICKET se agradecer.`;
 
-                    const prompt = `Você é um assistente virtual do escritório Azevedo & Juvencio Advogados.
-Base de conhecimento autorizada:
-${contextText}
-
-Mensagem do cliente: "${texto}"
-
-Regras:
-1. Se o cliente pedir para falar com atendente, advogado, humano ou se o assunto não existir na base de conhecimento, responda APENAS com a palavra: ESCALAR_ATENDIMENTO
-2. Se a mensagem for claramente um lead automático de anúncios, responda APENAS com a palavra: LEAD_ANUNCIO
-3. Se a pergunta puder ser respondida usando a base de conhecimento, responda de forma natural e prestativa.
-4. Se o cliente agradecer e indicar que a dúvida foi resolvida (ex: "obrigado", "pode encerrar", "era só isso"), responda APENAS com a palavra: ENCERRAR_TICKET
-
-Sua resposta:`;
-
-                   const model = genAI.getGenerativeModel(
-                                { model: "gemini-3.1-flash-lite-preview" }, 
-                                { apiVersion: 'v1beta' } 
-                            );
-                    const result = await model.generateContent(prompt);
+                    const result = await global.geminiModel.generateContent(prompt);
                     const iaResponse = result.response.text().trim();
 
-                    console.log("Tentando integrar com Gemini usando o texto:", texto);
-
-                    if (iaResponse === 'LEAD_ANUNCIO') {
-                        await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele assumirá seu atendimento em breve.` });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
-                        return;
-                    } 
-                    
-                    if (iaResponse === 'ENCERRAR_TICKET') {
-                        console.log(`[Encerramento] Cliente ${ticket._id} solicitou fechar. Deletando ticket.`);
-                        
-                      
-                        await sendBotMsg(cleanJid, { text: `De nada! Ficamos à disposição. Se precisar de algo no futuro, é só chamar. Tenha um ótimo dia! 👋` });
-                        
-                        // Remove o ticket do banco de dados (Limpa do Mongo)
-                        await ticketsColl.deleteOne({ _id: ticket._id });
+                    if (iaResponse.includes('ENCERRAR_TICKET')) {
+                        await sendBotMsg(rawJid, { text: `De nada! Ficamos à disposição. 👋` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true } });
                         return;
                     }
 
-                    // Responde com o conhecimento da base e continua no fluxo da IA
-                    await sendBotMsg(cleanJid, { text: `${iaResponse}\n\nPodemos te ajudar em algo a mais?` });
-                    return; 
+                    if (iaResponse.includes('ESCALAR_ATENDIMENTO')) {
+                        await sendBotMsg(rawJid, { text: `Entendido. Digite o número da opção:\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros\n8️⃣ Processo` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
+                        return;
+                    }
 
-                } catch (iaError) {
-                    console.error("Erro na integração com o Gemini:", iaError);
-                    // Fallback para o menu caso a IA falhe
-                    await sendBotMsg(cleanJid, {
-                        text: `Tivemos uma instabilidade no assistente. Digite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
-                    });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
+                    await sendBotMsg(rawJid, { text: `${iaResponse}\n\nAlgo mais?` });
                     return;
                 }
-            }
-        }
-        // --- FIM DA LÓGICA DE IA ---
 
-        const respostas = {
+                // 6. RESPOSTAS (Switch de Opções) - Resumido aqui por espaço, use seus textos completos
+                if (ticket.aguardandoOpcao) {
+                    const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
 Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
@@ -400,191 +326,142 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
+                    if (respostas[texto]) {
+                        await sendBotMsg(rawJid, { text: respostas[texto] });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                    } else {
+                        await sendBotMsg(rawJid, { text: `Opção inválida (1-8).` });
+                    }
+                    return;
+                }
 
-        // 5. Resposta às Opções
-        if (ticket.aguardandoOpcao) {
-            if (respostas[texto]) {
-                await sendBotMsg(cleanJid, { text: respostas[texto] });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
-            } else {
-                const novosErros = (ticket.errosMenu || 0) + 1;
-                if (novosErros >= 2) {
-                    await sendBotMsg(cleanJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
-                } else {
-                    await sendBotMsg(cleanJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros } });
-                }
-            }
-            return;
-        }
+            } catch (err) { console.error("Erro processamento:", err); }
+        });
 
-        // 6. Lógica de Insistência (Detalhamento)
-        if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
-            const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
-            if (texto.length >= 20 || isMedia) {
-                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
-            } else if (!ticket.tentouInsistir) {
-                await sendBotMsg(cleanJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { tentouInsistir: true } });
-            } else {
-                await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
-            }
-        }
+        sock.ev.on('connection.update', (update) => {
+            const { connection, lastDisconnect, qr } = update;
+            if (qr) { lastQr = qr; io.emit('qr', qr); }
+            if (connection === 'open') {
+                lastQr = null;
+                currentUser = { number: sock.user.id.split(':')[0], name: 'Azevedo e Juvencio' };
+                io.emit('connected', currentUser);
+            }
+            if (connection === 'close') {
+                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+                if (shouldReconnect) startBot();
+            }
+        });
 
-    } catch (err) {
-        console.error("Erro interno:", err);
-    }
-    });
-
-        sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update;
-            if (qr) { lastQr = qr; io.emit('qr', qr); }
-            
-            if (connection === 'open') {
-                lastQr = null;
-                const userNumber = sock.user.id.split(':')[0];
-                let ppUrl = null;
-                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch (e) { ppUrl = null; }
-
-                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
-                io.emit('connected', currentUser);
-            }
-                        
-            if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-                if (shouldReconnect) startBot();
-                else { currentUser = null; io.emit('disconnected'); }
-            }
-        });
-
-    } catch (err) { 
-        console.error("Erro crítico:", err);
-        setTimeout(startBot, 5000);
-    }
+    } catch (err) { setTimeout(startBot, 5000); }
 }
 
+// --- AUTENTICAÇÃO MONGODB ---
 async function useMongoDBAuthState(collection) {
-    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
-    const readData = async (id) => {
-        const data = await collection.findOne({ _id: id });
-        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
-    };
-    const removeData = (id) => collection.deleteOne({ _id: id });
-    const creds = await readData('creds') || initAuthCreds();
-    return {
-        state: {
-            creds,
-            keys: {
-                get: async (type, ids) => {
-                    const data = {};
-                    await Promise.all(ids.map(async id => {
-                        let value = await readData(`${type}-${id}`);
-                        if (type === 'app-state-sync-key' && value) value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
-                        data[id] = value;
-                    }));
-                    return data;
-                },
-                set: async (data) => {
-                    for (const type in data) {
-                        for (const id in data[type]) {
-                            const value = data[type][id];
-                            if (value) writeData(value, `${type}-${id}`);
-                            else removeData(`${type}-${id}`);
-                        }
-                    }
-                }
-            }
-        },
-        saveCreds: () => writeData(creds, 'creds')
-    };
+    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
+    const readData = async (id) => {
+        const data = await collection.findOne({ _id: id });
+        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
+    };
+    const removeData = (id) => collection.deleteOne({ _id: id });
+    const creds = await readData('creds') || initAuthCreds();
+    return {
+        state: { creds, keys: {
+            get: async (type, ids) => {
+                const data = {};
+                await Promise.all(ids.map(async id => { 
+                    let value = await readData(`${type}-${id}`);
+                    if (type === 'app-state-sync-key' && value) value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                    data[id] = value;
+                }));
+                return data;
+            },
+            set: async (data) => {
+                for (const type in data) {
+                    for (const id in data[type]) {
+                        const value = data[type][id];
+                        if (value) await writeData(value, `${type}-${id}`);
+                        else await removeData(`${type}-${id}`);
+                    }
+                }
+            }
+        }},
+        saveCreds: () => writeData(creds, 'creds')
+    };
 }
 
+// --- ROTAS DO SERVIDOR ---
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 app.post('/login', async (req, res) => {
-    const { user, pass } = req.body;
-    try {
-        const adminAccount = await userLoginColl.findOne({ user });
-        if (adminAccount && adminAccount.pass === pass) {
-            req.session.loggedIn = true;
-            res.redirect('/');
-        } else res.send("<script>alert('Erro'); window.location='/login';</script>");
-    } catch (e) { res.status(500).send("Erro"); }
+    const { user, pass } = req.body;
+    const adminAccount = await userLoginColl.findOne({ user, pass });
+    if (adminAccount) { req.session.loggedIn = true; res.redirect('/'); }
+    else res.send("<script>alert('Erro'); window.location='/login';</script>");
 });
 
-app.get('/', (req, res) => {
-    if (!req.session.loggedIn) return res.redirect('/login');
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+app.get('/', (req, res) => req.session.loggedIn ? res.sendFile(path.join(__dirname, 'index.html')) : res.redirect('/login'));
 
 app.get('/logout-panel', (req, res) => {
-    req.session.destroy(() => { res.redirect('/login'); });
+    req.session.destroy(() => { res.redirect('/login'); });
 });
 
 app.get('/logout-whatsapp', async (req, res) => {
-    try {
-        await authColl.deleteMany({});
-        if (sock) await sock.logout();
-        currentUser = null; lastQr = null;
-        io.emit('disconnected');
-        res.sendStatus(200);
-    } catch (err) { res.status(500).send("Erro"); }
+    try {
+        await authColl.deleteMany({});
+        if (sock) await sock.logout();
+        currentUser = null; lastQr = null;
+        io.emit('disconnected');
+        res.sendStatus(200);
+    } catch (err) { res.status(500).send("Erro"); }
 });
 
+// API Knowledge Base
 app.get('/api/knowledgeColl', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    // Buscamos e ordenamos pelos mais recentes primeiro
     const data = await knowledgeColl.find({}).sort({ updatedAt: -1 }).toArray();
     res.json(data);
 });
 
 app.post('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    const { pergunta, resposta } = req.body;
-    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
-    res.sendStatus(200);
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    const { pergunta, resposta } = req.body;
+    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
+    res.sendStatus(200);
 });
 
 app.delete('/api/knowledgeColl/:id', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    
     try {
-        const { id } = req.params;
-        // O segredo está em converter a string recebida em ObjectId do MongoDB
-        const result = await knowledgeColl.deleteOne({ _id: new ObjectId(id) });
-        
-        if (result.deletedCount === 1) {
-            res.sendStatus(200);
-        } else {
-            res.status(404).send("Item não encontrado");
-        }
-    } catch (err) {
-        console.error("Erro ao deletar:", err);
-        res.status(500).send("Erro interno");
-    }
+        await knowledgeColl.deleteOne({ _id: new ObjectId(req.params.id) });
+        res.sendStatus(200);
+    } catch (err) { res.status(500).send("Erro"); }
 });
 
+// --- INTERVALOS E AUTO-LIMPEZA ---
 setInterval(async () => {
-    try {
-        const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
-        const protocol = host.includes('localhost') ? 'http' : 'https';
-        await axios.get(`${protocol}://${host}/`);
-    } catch (e) {}
+    if (ticketsColl) {
+        // Encerramento por inatividade de 1 min (após obrigado)
+        const umMinuto = Date.now() - 60000;
+        await ticketsColl.updateMany(
+            { obrigadoEnviado: true, lastActivity: { $lt: umMinuto }, paused: false },
+            { $set: { aguardandoIA: false, aguardandoOpcao: false } }
+        );
+        // Limpeza de 24h
+        const vinteQuatroHoras = Date.now() - (24 * 60 * 60 * 1000);
+        await ticketsColl.deleteMany({ lastActivity: { $lt: vinteQuatroHoras } });
+    }
+}, 60000);
+
+// Keep-alive Render
+setInterval(async () => {
+    try {
+        const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
+        await axios.get(`${host.includes('localhost') ? 'http' : 'https'}://${host}/`);
+    } catch (e) {}
 }, 5 * 60 * 1000);
 
 io.on('connection', (socket) => {
-    if (currentUser) socket.emit('connected', currentUser);
-    else if (lastQr) socket.emit('qr', lastQr);
+    if (currentUser) socket.emit('connected', currentUser);
+    else if (lastQr) socket.emit('qr', lastQr);
 });
-
-setInterval(async () => {
-    if (ticketsColl) {
-        const limiteInatividade = Date.now() - (24 * 60 * 60 * 1000); // 24 horas
-        const result = await ticketsColl.deleteMany({ lastActivity: { $lt: limiteInatividade } });
-        if (result.deletedCount > 0) console.log(`[Auto-Limpeza] ${result.deletedCount} tickets antigos removidos.`);
-    }
-}, 60 * 60 * 1000); // Executa a cada 1 hora
 
 server.listen(port, () => startBot());
