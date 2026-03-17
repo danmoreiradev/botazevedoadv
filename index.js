@@ -16,6 +16,7 @@ const { Boom } = require('@hapi/boom');
 const session = require('express-session');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+// --- CONFIGURAÇÃO DO SERVIDOR WEB ---
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -43,14 +44,19 @@ let processing = new Set();
 let genAI = null;
 let ticketsColl, authColl, knowledgeColl, userLoginColl, apiKeysColl;
 
+// --- FUNÇÃO AUXILIAR DE ENVIO ---
 async function sendBotMsg(jid, content) {
     try {
         const sent = await sock.sendMessage(jid, content);
         lastBotMessageId = sent.key.id; 
         return sent;
-    } catch (err) { return null; }
+    } catch (err) { 
+        console.error("Erro no envio:", err);
+        return null; 
+    }
 }
 
+// --- CORE DO SISTEMA ---
 async function startBot() {
     try {
         await client.connect();
@@ -60,6 +66,8 @@ async function startBot() {
         knowledgeColl = db.collection('knowledge_base');
         userLoginColl = db.collection('user_login');
         apiKeysColl = db.collection('api_keys');
+
+        console.log("✅ Banco MongoDB Conectado");
 
         const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
         if (geminiKeyDoc && geminiKeyDoc.chave) {
@@ -74,11 +82,13 @@ async function startBot() {
             version,
             auth: state,
             logger: P({ level: 'silent' }),
-            browser: ['Azevedo Advogados', 'Chrome', '1.0.0']
+            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
+            getNextPreKeyId: () => Math.floor(Math.random() * 10000)
         });
 
         sock.ev.on('creds.update', saveCreds);
 
+        // --- TRATAMENTO DE MENSAGENS ---
         sock.ev.on('messages.upsert', async m => {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
@@ -105,24 +115,26 @@ async function startBot() {
                 const isCpfValido = cpfApenasNumeros.length === 11;
                 const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
 
+                // Busca Ticket Ativo
                 let ticket = await ticketsColl.findOne({
                     $or: [ { _id: numeroRealExtraido }, { cpf: isCpfValido ? cpfApenasNumeros : "NULL" } ]
                 });
 
-                // --- INTERVENÇÃO HUMANA ---
+                // 1. LÓGICA DE INTERVENÇÃO HUMANA
                 if (isMe) {
                     if (msgId !== lastBotMessageId && ticket) {
                         await ticketsColl.updateOne({ _id: ticket._id }, { 
                             $set: { paused: true, until: blockUntil, lastActivity: Date.now(), aguardandoIA: false, aguardandoOpcao: false } 
                         });
+                        console.log(`👨‍⚖️ Atendimento manual detectado no CPF ${ticket.cpf}. Bot em pausa.`);
                     }
                     return; 
                 }
 
-                // 1. PORTEIRO DE CPF
+                // 2. PORTEIRO DE CPF E UNIFICAÇÃO DE HISTÓRICO
                 if (!ticket || !ticket.cpf) {
                     if (!isCpfValido) {
-                        await sendBotMsg(rawJid, { text: `Olá! Sou o assistente virtual do escritório Azevedo & Juvencio Advogados. ⚖️\n\nPara iniciarmos seu atendimento, por favor, informe seu **CPF** (apenas os 11 números):` });
+                        await sendBotMsg(rawJid, { text: `Olá! Sou o assistente virtual do escritório Azevedo & Juvencio Advogados. ⚖️\n\nPara iniciarmos seu atendimento, informe seu **CPF** (apenas os 11 números):` });
                         await ticketsColl.updateOne({ _id: numeroRealExtraido }, { $set: { lastActivity: Date.now(), lastRawJid: rawJid } }, { upsert: true });
                         return;
                     } else {
@@ -133,48 +145,42 @@ async function startBot() {
                             await ticketsColl.updateOne({ _id: ticket._id }, { 
                                 $set: { _id: numeroRealExtraido, numeroReal: numeroRealExtraido, lastRawJid: rawJid, lastActivity: Date.now(), encerrado: false, aguardandoIA: true, paused: false, obrigadoEnviado: false } 
                             });
+                            await sendBotMsg(rawJid, { text: `✅ CPF localizado! Já identifiquei seu atendimento anterior em nosso sistema.\n\nComo o escritório Azevedo & Juvencio pode ajudar você hoje?` });
                         } else {
                             await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
                                 $set: { cpf: cpfApenasNumeros, numeroReal: numeroRealExtraido, aguardandoIA: true, encerrado: false, lastActivity: Date.now(), lastRawJid: rawJid, paused: false, obrigadoEnviado: false }
                             }, { upsert: true });
-                            await sendBotMsg(rawJid, { text: `CPF validado com sucesso! Como podemos ajudar você hoje?` });
-                            return;
+                            await sendBotMsg(rawJid, { text: `✅ CPF validado com sucesso! Como o escritório Azevedo & Juvencio pode ajudar você hoje?` });
                         }
+                        return;
                     }
                 }
 
                 // CADEADO DE PAUSA
                 if (ticket.paused && (Date.now() < ticket.until)) return;
 
-                // REABERTURA
-                if (ticket.encerrado && (Date.now() - ticket.lastActivity > 60 * 60 * 1000)) {
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: true, encerrado: false, lastActivity: Date.now(), obrigadoEnviado: false, tentouInsistir: false } });
-                    await sendBotMsg(rawJid, { text: `Olá! Vi que retornou. Como posso ajudar o Sr(a) novamente?` });
-                    return;
-                }
-
-                // 2. MOTOR IA
+                // 3. MOTOR IA (PROMPT E FALLBACK)
                 if (ticket.aguardandoIA && genAI) {
                     try {
                         const docs = await knowledgeColl.find({}).toArray();
                         const contextText = docs.map(k => `P: ${k.pergunta}\nR: ${k.resposta}`).join('\n\n');
-                        const prompt = `Você é um assistente virtual do escritório Azevedo & Juvencio Advogados.\nBase de conhecimento:\n${contextText}\n\nMensagem do cliente: "${texto}"\n\nRegras:\n1. Se pedir atendente/advogado/humano ou assunto fora da base: ESCALAR_ATENDIMENTO\n2. Se for lead automático: LEAD_ANUNCIO\n3. Responda de forma natural se estiver na base.\n4. Se agradecer/resolver: ENCERRAR_TICKET\n\nSua resposta:`;
+                        const prompt = `Você é um assistente virtual da Azevedo & Juvencio Advogados.\nBase:\n${contextText}\n\nCliente: "${texto}"\n\nRegras:\n1. Fora da base/atendente: ESCALAR_ATENDIMENTO\n2. Lead: LEAD_ANUNCIO\n3. Resolvido: ENCERRAR_TICKET\n\nResposta:`;
 
                         const result = await global.geminiModel.generateContent(prompt);
                         const iaRes = result.response.text().trim();
 
                         if (iaRes.includes('ENCERRAR_TICKET')) {
-                            await sendBotMsg(rawJid, { text: `Azevedo & Juvencio agradece. Ficamos à disposição! 👋` });
+                            await sendBotMsg(rawJid, { text: `Azevedo & Juvencio agradece seu contato. Tenha um excelente dia! 👋` });
                             await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, encerrado: true, lastActivity: Date.now() } });
                             return;
                         }
                         if (iaRes.includes('LEAD_ANUNCIO')) {
-                            await sendBotMsg(rawJid, { text: `Olá! Recebemos seu interesse. Um especialista entrará em contato em instantes! 🤝` });
+                            await sendBotMsg(rawJid, { text: `Recebemos seu interesse! Um especialista jurídico entrará em contato em instantes! 🤝` });
                             await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, paused: true, until: Date.now() + (48*60*60*1000) } });
                             return;
                         }
                         if (iaRes.includes('ESCALAR_ATENDIMENTO')) {
-                            await sendBotMsg(rawJid, { text: `Para um suporte especializado, escolha uma opção:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` });
+                            await sendBotMsg(rawJid, { text: `Para que possamos te ajudar com precisão, escolha uma das opções abaixo:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` });
                             await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true, errosMenu: 0 } });
                             return;
                         }
@@ -184,15 +190,15 @@ async function startBot() {
                         return;
 
                     } catch (e) {
+                        await sendBotMsg(rawJid, { text: `Para prosseguirmos com seu atendimento jurídico, escolha uma opção:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` });
                         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true, errosMenu: 0 } });
-                        await sendBotMsg(rawJid, { text: `Tivemos uma instabilidade. Digite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` });
                         return;
                     }
                 }
 
-                // 3. CONSTANTE DE RESPOSTAS
-                const respostas = {
-      '1': `📱 *Direito Digital (Desbloqueio de Contas)*
+                // 4. RESPOSTA ÀS OPÇÕES E LÓGICA DE ERROS
+                const respostasMenu = {
+                    '1': `📱 *Direito Digital (Desbloqueio de Contas)*
 
 Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
 Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
@@ -290,10 +296,9 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
 
-                // 4. RESPOSTA ÀS OPÇÕES (SUA LÓGICA DE ERROS)
                 if (ticket.aguardandoOpcao) {
-                    if (respostas[texto]) {
-                        await sendBotMsg(rawJid, { text: respostas[texto] });
+                    if (respostasMenu[texto]) {
+                        await sendBotMsg(rawJid, { text: respostasMenu[texto] });
                         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0, lastActivity: Date.now() } });
                     } else {
                         const novosErros = (ticket.errosMenu || 0) + 1;
@@ -301,59 +306,62 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
                             await sendBotMsg(rawJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
                             await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
                         } else {
-                            await sendBotMsg(rawJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
+                            await sendBotMsg(rawJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número correspondente (1 a 8).` });
                             await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros } });
                         }
                     }
                     return;
                 }
 
-                // 5. LÓGICA DE INSISTÊNCIA / DETALHAMENTO (SUA LÓGICA)
+                // 5. LÓGICA DE INSISTÊNCIA / DETALHAMENTO (FINALIZE)
                 if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
                     const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
                     
                     if (texto.length >= 20 || isMedia) {
-                        await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
+                        await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista da Azevedo & Juvencio já vai atendê-lo, aguarde um momento.` });
                         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
                     } else if (!ticket.tentouInsistir) {
-                        await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
+                        await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para que possamos realizar uma pré-análise.` });
                         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { tentouInsistir: true } });
                     } else {
-                        await sendBotMsg(rawJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
+                        await sendBotMsg(rawJid, { text: `✅ Recebido! Já encaminhei seu caso para análise interna, entraremos em contato em breve.` });
                         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
                     }
                 }
 
-            } catch (err) { console.error(err); }
+            } catch (err) { console.error("Erro Fluxo:", err); }
         });
 
+        // --- CONEXÃO ---
         sock.ev.on('connection.update', (upd) => {
             const { connection, lastDisconnect, qr } = upd;
             if (qr) io.emit('qr', qr);
             if (connection === 'open') io.emit('connected', { number: sock.user.id.split(':')[0] });
             if (connection === 'close') {
-                if ((lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut) startBot();
+                const code = (lastDisconnect.error instanceof Boom)?.output?.statusCode;
+                if (code !== DisconnectReason.loggedOut) startBot();
             }
         });
 
     } catch (err) { setTimeout(startBot, 5000); }
 }
 
-// --- ROTAS DO PAINEL ---
+// --- ROTAS DO PAINEL ADMIN ---
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 app.post('/login', async (req, res) => {
     const admin = await userLoginColl.findOne({ user: req.body.user, pass: req.body.pass });
     if (admin) { req.session.loggedIn = true; res.redirect('/'); }
-    else res.send("<script>alert('Erro'); window.location='/login';</script>");
+    else res.send("<script>alert('Credenciais Inválidas'); window.location='/login';</script>");
 });
 app.get('/', (req, res) => req.session.loggedIn ? res.sendFile(path.join(__dirname, 'index.html')) : res.redirect('/login'));
 app.get('/logout-panel', (req, res) => req.session.destroy(() => res.redirect('/login')));
 app.get('/logout-whatsapp', async (req, res) => {
+    if (!req.session.loggedIn) return res.sendStatus(401);
     await authColl.deleteMany({}); if (sock) await sock.logout();
     io.emit('disconnected'); res.sendStatus(200);
 });
 
-// APIs
+// APIs DO PAINEL
 app.get('/api/knowledgeColl', async (req, res) => {
     if (!req.session.loggedIn) return res.sendStatus(401);
     res.json(await knowledgeColl.find({}).toArray());
@@ -370,6 +378,7 @@ app.delete('/api/knowledgeColl/:id', async (req, res) => {
     res.sendStatus(200);
 });
 
+// --- PERSISTÊNCIA MONGODB (BAILEYS) ---
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
     const readData = async (id) => {
