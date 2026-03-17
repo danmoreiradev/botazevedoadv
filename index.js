@@ -101,35 +101,49 @@ async function startBot() {
 
         sock.ev.on('creds.update', saveCreds);
 
-function getRealNumber(msg) {
-    const remoteJid = msg.key.remoteJid;
+async function getNumeroPadrao(msg) {
+    const rawJid = msg.key.remoteJid;
 
-    let userJid = msg.key.participant || msg.participant || remoteJid;
-
+    let userJid = msg.key.participant || msg.participant || rawJid;
     userJid = jidNormalizedUser(userJid);
 
-    let number = userJid.split('@')[0];
+    let numero = userJid.split('@')[0];
 
-    if (number.includes(':')) {
-        number = number.split(':')[0];
+    if (numero.includes(':')) {
+        numero = numero.split(':')[0];
     }
 
-    return number;
-}
+    // 🚨 Se for LID
+    if (rawJid.includes('@lid')) {
 
+        const existente = await ticketsColl.findOne({
+            lastRawJid: rawJid
+        });
+
+        if (existente && existente.numeroReal) {
+            return existente.numeroReal;
+        }
+
+        return numero; // fallback
+    }
+
+    return numero;
+}
 sock.ev.on('messages.upsert', async m => {
     const msg = m.messages[0];
     if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
     const rawJid = msg.key.remoteJid;
-    const numeroRealExtraido = getRealNumber(msg);
-    const numeroFinal = (numeroRealExtraido && numeroRealExtraido.length >= 10) 
-        ? numeroRealExtraido 
-        : rawJid;
-
-    const cleanJid = jidNormalizedUser(rawJid); // mantém para envio
+    const cleanJid = jidNormalizedUser(rawJid);
     const isMe = msg.key.fromMe;
     const msgId = msg.key.id;
+
+    // 🔥 NOVA FORMA CORRETA
+    const numeroRealExtraido = await getNumeroPadrao(msg);
+
+    const numeroFinal = (numeroRealExtraido && numeroRealExtraido.length >= 10)
+        ? numeroRealExtraido
+        : rawJid;
 
     if (processing.has(msgId)) return;
     processing.add(msgId);
@@ -140,7 +154,13 @@ sock.ev.on('messages.upsert', async m => {
 
     try {
         // 1. BUSCA O TICKET (Unificada)
-        let ticket = await ticketsColl.findOne({ _id: numeroFinal });
+        let ticket = await ticketsColl.findOne({
+            $or: [
+                { _id: numeroFinal },
+                { numeroReal: numeroFinal },
+                { lastRawJid: rawJid }
+            ]
+        });
 
         // 2. LOGICA DE INTERVENÇÃO HUMANA (VOCÊ RESPONDEU)
         if (isMe) {
@@ -157,10 +177,11 @@ sock.ev.on('messages.upsert', async m => {
                             paused: true, 
                             until: blockUntil, 
                             lastActivity: Date.now(),
+                            lastRawJid: rawJid,
                             aguardandoIA: false,
                             aguardandoOpcao: false,
                             obrigadoEnviado: true, // Evita que o bot mande "Recebido" depois
-                            numeroReal: numeroRealExtraido
+                            numeroReal: numeroFinal
                         },
                         // Se o ticket for novo (criado agora pelo advogado), gera o ID numérico
                         $setOnInsert: {
@@ -199,10 +220,10 @@ sock.ev.on('messages.upsert', async m => {
                 await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
                 await ticketsColl.updateOne({ _id: numeroFinal }, {
                     $set: { 
-                        id: ticketId, numeroReal: numeroFinal,
+                        id: ticketId, numeroReal: numeroFinal, lastRawJid: rawJid,
                         aguardandoOpcao: false, aguardandoIA: false, 
                         obrigadoEnviado: true, paused: true, until: blockUntil,
-                        lastActivity: Date.now(), lastRawJid: rawJid
+                        lastActivity: Date.now()
                     }
                 }, { upsert: true });
                 return;
@@ -215,21 +236,21 @@ sock.ev.on('messages.upsert', async m => {
             await ticketsColl.updateOne({ _id: numeroFinal }, {
                 $set: { 
                     id: ticketId, 
-                    numeroReal: numeroRealExtraido, 
+                    numeroReal: numeroFinal,
+                    lastRawJid: rawJid,
                     aguardandoIA: true, 
                     aguardandoOpcao: false, 
                     obrigadoEnviado: false, 
                     tentouInsistir: false,
                     lastActivity: Date.now(), 
                     paused: false,
-                    lastRawJid: rawJid 
                 }
             }, { upsert: true });
             return;
         }
 
         // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
-        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
+        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now(),lastRawJid: rawJid } });
                 
         // --- NOVA LÓGICA DE INTELIGÊNCIA ARTIFICIAL ---
         if (ticket.aguardandoIA) {
@@ -238,8 +259,8 @@ sock.ev.on('messages.upsert', async m => {
             const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
 
             if (isLead) {
-                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil, lastRawJid: rawJid } });
                 return;
             }
 
@@ -272,9 +293,30 @@ Sua resposta:`;
 
                     console.log("Tentando integrar com Gemini usando o texto:", texto);
 
+                    if (iaResponse === 'ESCALAR_ATENDIMENTO') {
+                        await sendBotMsg(rawJid, { 
+                            text: `Perfeito, vou encaminhar você para um especialista humano. Aguarde um momento.` 
+                        });
+
+                        await ticketsColl.updateOne(
+                            { _id: ticket._id }, 
+                            { 
+                                $set: { 
+                                    aguardandoIA: false,
+                                    obrigadoEnviado: true,
+                                    paused: true,
+                                    until: blockUntil,
+                                    lastRawJid: rawJid
+                                } 
+                            }
+                        );
+
+                        return;
+}
+
                     if (iaResponse === 'LEAD_ANUNCIO') {
-                        await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele assumirá seu atendimento em breve.` });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                        await sendBotMsg(rawJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele assumirá seu atendimento em breve.` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil,lastRawJid: rawJid } });
                         return;
                     } 
                     
@@ -282,7 +324,7 @@ Sua resposta:`;
                         console.log(`[Encerramento] Cliente ${ticket._id} solicitou fechar. Deletando ticket.`);
                         
                       
-                        await sendBotMsg(cleanJid, { text: `De nada! Ficamos à disposição. Se precisar de algo no futuro, é só chamar. Tenha um ótimo dia! 👋` });
+                        await sendBotMsg(rawJid, { text: `De nada! Ficamos à disposição. Se precisar de algo no futuro, é só chamar. Tenha um ótimo dia! 👋` });
                         
                         // Remove o ticket do banco de dados (Limpa do Mongo)
                         await ticketsColl.deleteOne({ _id: ticket._id });
@@ -290,16 +332,16 @@ Sua resposta:`;
                     }
 
                     // Responde com o conhecimento da base e continua no fluxo da IA
-                    await sendBotMsg(cleanJid, { text: `${iaResponse}\n\nPodemos te ajudar em algo a mais?` });
+                    await sendBotMsg(rawJid, { text: `${iaResponse}\n\nPodemos te ajudar em algo a mais?` });
                     return; 
 
                 } catch (iaError) {
                     console.error("Erro na integração com o Gemini:", iaError);
                     // Fallback para o menu caso a IA falhe
-                    await sendBotMsg(cleanJid, {
+                    await sendBotMsg(rawJid, {
                         text: `Tivemos uma instabilidade no assistente. Digite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
                     });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true,lastRawJid: rawJid } });
                     return;
                 }
             }
@@ -408,16 +450,16 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
         // 5. Resposta às Opções
         if (ticket.aguardandoOpcao) {
             if (respostas[texto]) {
-                await sendBotMsg(cleanJid, { text: respostas[texto] });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
+                await sendBotMsg(rawJid, { text: respostas[texto] });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0,lastRawJid: rawJid } });
             } else {
                 const novosErros = (ticket.errosMenu || 0) + 1;
                 if (novosErros >= 2) {
-                    await sendBotMsg(cleanJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                    await sendBotMsg(rawJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil,lastRawJid: rawJid } });
                 } else {
-                    await sendBotMsg(cleanJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros } });
+                    await sendBotMsg(rawJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros,lastRawJid: rawJid } });
                 }
             }
             return;
@@ -427,14 +469,14 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
         if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
             const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
             if (texto.length >= 20 || isMedia) {
-                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+                await sendBotMsg(rawJid,{ text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil,lastRawJid: rawJid} });
             } else if (!ticket.tentouInsistir) {
-                await sendBotMsg(cleanJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
+                await sendBotMsg(rawJid,{ text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
                 await ticketsColl.updateOne({ _id: ticket._id }, { $set: { tentouInsistir: true } });
             } else {
-                await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+                await sendBotMsg(rawJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil,lastRawJid: rawJid } });
             }
         }
 
