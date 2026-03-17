@@ -107,22 +107,26 @@ sock.ev.on('messages.upsert', async m => {
 
     const rawJid = msg.key.remoteJid;
     const cleanJid = jidNormalizedUser(rawJid);
-    const msgId = msg.key.id; // Declaração que faltava
-    const isMe = msg.key.fromMe; // Declaração que faltava
+    const msgId = msg.key.id; // <--- ADICIONE ISSO
+    const isMe = msg.key.fromMe; // <--- ADICIONE ISSO
+    
+    let numeroFinal = cleanJid.split('@')[0];
 
-    // --- UNIFICAÇÃO DE IDENTIDADE ---
-    // Começamos com o ID que veio no remetente
-    let uniqueId = cleanJid.split('@')[0]; 
-
-    // Se vier de um dispositivo vinculado (LID), tentamos extrair o número real
-    const participant = msg.key.participant || msg.participant;
-    if (participant) {
-        const extracted = jidNormalizedUser(participant).split('@')[0];
-        // Se o extraído for menor que 15 dígitos, é o número de telefone (Unique ID real)
-        if (extracted.length < 15) {
-            uniqueId = extracted;
+    // --- BUSCA AVANÇADA DE IDENTIDADE ---
+    if (cleanJid.includes('@lid')) {
+        const contact = sock.contacts ? sock.contacts[cleanJid] : null;
+        if (contact && contact.pnJid) {
+            numeroFinal = contact.pnJid.split('@')[0];
+        } else {
+            const participant = msg.key.participant || msg.participant;
+            if (participant && !participant.includes('@lid')) {
+                numeroFinal = jidNormalizedUser(participant).split('@')[0];
+            }
         }
     }
+
+    // AGORA DEFINIMOS O uniqueId QUE SEU CÓDIGO USA ABAIXO
+    const uniqueId = numeroFinal;
 
     if (processing.has(msgId)) return;
     processing.add(msgId);
@@ -132,22 +136,32 @@ sock.ev.on('messages.upsert', async m => {
     const blockUntil = Date.now() + tresDiasEmMs;
 
     try {
-        // 1. BUSCA O TICKET (Unificada por $or)
-        let ticket = await ticketsColl.findOne({
+    let ticket = await ticketsColl.findOne({
             $or: [
                 { _id: uniqueId },           
-                { lastRawJid: cleanJid },    
-                { numeroReal: uniqueId }     
+                { lastRawJid: cleanJid },       
+                { todosOsLids: cleanJid }       
             ]
         });
 
-        // 2. FUSÃO DE TICKETS (Se o Baileys finalmente entregou o número real)
-        if (ticket && ticket._id.includes('@lid') && uniqueId.length < 15) {
-            console.log(`[Fusão] Migrando ticket do LID ${ticket._id} para o número ${uniqueId}`);
-            await ticketsColl.deleteOne({ _id: ticket._id });
-            ticket._id = uniqueId;
-            ticket.numeroReal = uniqueId;
-            await ticketsColl.replaceOne({ _id: uniqueId }, ticket, { upsert: true });
+        // Se achamos pelo LID mas agora temos o Telefone (uniqueId), fazemos a migração
+        if (ticket && ticket._id !== uniqueId && !cleanJid.includes('@s.whatsapp.net')) {
+             // Só migra se o ID atual for um LID e o novo for um Telefone
+             if (ticket._id.includes('@lid')) {
+                const dadosAntigos = { ...ticket };
+                delete dadosAntigos._id; // Remove o ID antigo para não dar conflito
+                
+                await ticketsColl.deleteOne({ _id: ticket._id }); 
+                await ticketsColl.updateOne(
+                    { _id: uniqueId },
+                    { 
+                        $set: { ...dadosAntigos, numeroReal: uniqueId },
+                        $addToSet: { todosOsLids: ticket._id } 
+                    },
+                    { upsert: true }
+                );
+                ticket = await ticketsColl.findOne({ _id: uniqueId });
+             }
         }
 
         // 3. LÓGICA DE INTERVENÇÃO (VOCÊ RESPONDEU)
