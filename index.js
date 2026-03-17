@@ -82,7 +82,7 @@ async function startBot() {
             // Definimos o modelo GLOBALMENTE com a API v1 para evitar o erro 404
             global.geminiModel = genAI.getGenerativeModel(
             { model: "gemini-1.5-flash" }, 
-            { apiVersion: 'v1' } // MUDAR DE 'v1' PARA 'v1beta'
+            { apiVersion: 'v1beta' } // MUDAR DE 'v1' PARA 'v1beta'
             );
             console.log("✅ Sistema Gemini pronto e estável.");
         }
@@ -264,7 +264,7 @@ Sua resposta:`;
 
                    const model = genAI.getGenerativeModel(
                                 { model: "gemini-1.5-flash" }, 
-                                { apiVersion: 'v1' } 
+                                { apiVersion: 'v1beta' } 
                             );
                     const result = await model.generateContent(prompt);
                     const iaResponse = result.response.text().trim();
@@ -280,7 +280,7 @@ Sua resposta:`;
                     if (iaResponse === 'ENCERRAR_TICKET') {
                         console.log(`[Encerramento] Cliente ${ticket._id} solicitou fechar. Deletando ticket.`);
                         
-                        // Envia uma mensagem de despedida cordial
+                      
                         await sendBotMsg(cleanJid, { text: `De nada! Ficamos à disposição. Se precisar de algo no futuro, é só chamar. Tenha um ótimo dia! 👋` });
                         
                         // Remove o ticket do banco de dados (Limpa do Mongo)
