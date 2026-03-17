@@ -81,8 +81,8 @@ async function startBot() {
             genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
             // Definimos o modelo GLOBALMENTE com a API v1 para evitar o erro 404
             global.geminiModel = genAI.getGenerativeModel(
-            { model: "gemini-1.5-flash" }, 
-            { apiVersion: 'v1beta' } // MUDAR DE 'v1' PARA 'v1beta'
+            { model: "gemini-3.1-flash-lite" }, 
+            { apiVersion: 'v1' } // MUDAR DE 'v1' PARA 'v1beta'
             );
             console.log("✅ Sistema Gemini pronto e estável.");
         }
@@ -263,8 +263,8 @@ Regras:
 Sua resposta:`;
 
                    const model = genAI.getGenerativeModel(
-                                { model: "gemini-1.5-flash" }, 
-                                { apiVersion: 'v1beta' } 
+                                { model: "gemini-3.1-flash-lite" }, 
+                                { apiVersion: 'v1' } 
                             );
                     const result = await model.generateContent(prompt);
                     const iaResponse = result.response.text().trim();
