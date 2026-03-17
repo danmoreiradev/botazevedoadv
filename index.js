@@ -181,9 +181,7 @@ sock.ev.on('messages.upsert', async m => {
 
         const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const texto = textoRaw.trim();
-        const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-        const timeoutMenu = 2 * 60 * 60 * 1000; 
         const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
         const agora = Date.now();
 
