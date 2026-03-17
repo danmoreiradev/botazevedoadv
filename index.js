@@ -13,11 +13,10 @@ const { Server } = require('socket.io');
 const path = require('path');
 const P = require('pino');
 const { Boom } = require('@hapi/boom');
-const axios = require('axios');
 const session = require('express-session');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// --- CONFIGURAÇÕES INICIAIS ---
+// --- INICIALIZAÇÃO ---
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -33,35 +32,32 @@ const store = new MongoDBStore({
 });
 
 app.use(session({
-    secret: 'azevedo-secret-key',
+    secret: 'azevedo-secret-key-2026',
     resave: false,
     saveUninitialized: false,
     store: store,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 } // 24 horas
+    cookie: { maxAge: 1000 * 60 * 60 * 24 }
 }));
 
 const mongoUri = process.env.MONGODB_URI;
 const client = new MongoClient(mongoUri);
 
+let sock;
 let lastQr = null;
 let currentUser = null;
-let sock;
 let lastBotMessageId = null; 
 let processing = new Set(); 
 let genAI = null;
 
 let ticketsColl, authColl, knowledgeColl, userLoginColl, apiKeysColl;
 
-// --- FUNÇÕES AUXILIARES ---
+// --- FUNÇÃO DE ENVIO ---
 async function sendBotMsg(jid, content) {
     try {
         const sent = await sock.sendMessage(jid, content);
         lastBotMessageId = sent.key.id; 
         return sent;
-    } catch (err) {
-        console.error("Erro ao enviar:", err);
-        return null;
-    }
+    } catch (err) { return null; }
 }
 
 async function startBot() {
@@ -74,15 +70,11 @@ async function startBot() {
         userLoginColl = db.collection('user_login');
         apiKeysColl = db.collection('api_keys');
 
-        // Inicialização Gemini
         const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
         if (geminiKeyDoc && geminiKeyDoc.chave) {
             genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
-            global.geminiModel = genAI.getGenerativeModel(
-                { model: "gemini-3.1-flash-lite-preview" }, 
-                { apiVersion: 'v1beta' }
-            );
-            console.log("✅ Sistema Gemini pronto.");
+            global.geminiModel = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" }, 
+            { apiVersion: 'v1beta' });
         }
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
@@ -92,14 +84,11 @@ async function startBot() {
             version,
             auth: state,
             logger: P({ level: 'silent' }),
-            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-            connectTimeoutMs: 60000,
-            generateHighQualityLinkPreview: false
+            browser: ['Azevedo Advogados', 'Chrome', '1.0.0']
         });
 
         sock.ev.on('creds.update', saveCreds);
 
-        // --- LÓGICA DE MENSAGENS (UPSERT) ---
         sock.ev.on('messages.upsert', async m => {
             const msg = m.messages[0];
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
@@ -120,113 +109,121 @@ async function startBot() {
             processing.add(msgId);
             setTimeout(() => processing.delete(msgId), 10000);
 
-            const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
-            const blockUntil = Date.now() + tresDiasEmMs;
-
             try {
                 const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
                 const texto = textoRaw.trim();
                 const cpfApenasNumeros = texto.replace(/\D/g, '');
                 const isCpfValido = cpfApenasNumeros.length === 11;
 
-                // 1. BUSCA O TICKET
+                // Busca Ticket
                 let ticket = await ticketsColl.findOne({
-                    $or: [
-                        { _id: numeroRealExtraido },
-                        { numeroReal: numeroRealExtraido },
-                        { cpf: isCpfValido ? cpfApenasNumeros : "INVALIDO" }
-                    ]
+                    $or: [ { _id: numeroRealExtraido }, { cpf: isCpfValido ? cpfApenasNumeros : "NULL" } ]
                 });
 
-                // 2. INTERVENÇÃO HUMANA (isMe)
+                // --- [LÓGICA: INTERVENÇÃO HUMANA] ---
                 if (isMe) {
-                    if (msgId !== lastBotMessageId) {
-                        const targetId = ticket ? ticket._id : numeroRealExtraido;
-                        await ticketsColl.updateOne(
-                            { _id: targetId }, 
-                            { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), aguardandoIA: false, aguardandoOpcao: false, obrigadoEnviado: true, numeroReal: numeroRealExtraido } }, 
-                            { upsert: true }
-                        );
+                    if (msgId !== lastBotMessageId && ticket) {
+                        // Se VOCÊ mandou mensagem, o bot pausa por 3 dias para não atrapalhar
+                        await ticketsColl.updateOne({ _id: ticket._id }, { 
+                            $set: { 
+                                paused: true, 
+                                until: Date.now() + (3 * 24 * 60 * 60 * 1000), 
+                                lastActivity: Date.now(), 
+                                aguardandoIA: false,
+                                aguardandoOpcao: false
+                            } 
+                        });
+                        console.log(`👨‍⚖️ Intervenção humana detectada no CPF ${ticket.cpf}. Bot pausado.`);
                     }
                     return; 
                 }
 
-                // 3. FLUXO DE IDENTIFICAÇÃO CPF (PORTEIRO)
+                // 1. PORTEIRO DE CPF (Acesso Restrito)
                 if (!ticket || !ticket.cpf) {
                     if (!isCpfValido) {
-                        await sendBotMsg(rawJid, { text: `Olá! Sou o assistente do escritório Azevedo & Juvencio. ⚖️\n\nPara iniciarmos, por favor, **digite seu CPF** (apenas os 11 números):` });
-                        await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
-                            $set: { _id: numeroRealExtraido, numeroReal: numeroRealExtraido, lastActivity: Date.now(), lastRawJid: rawJid }
-                        }, { upsert: true });
+                        await sendBotMsg(rawJid, { text: `Olá! Sou o assistente virtual do escritório Azevedo & Juvencio Advogados. ⚖️\n\nPara iniciarmos seu atendimento, por favor, informe seu **CPF** (apenas os 11 números):` });
+                        await ticketsColl.updateOne({ _id: numeroRealExtraido }, { $set: { lastActivity: Date.now(), lastRawJid: rawJid } }, { upsert: true });
                         return;
                     } else {
-                        // Verificação de CPF Duplicado/Ativo
                         const ticketExistente = await ticketsColl.findOne({ cpf: cpfApenasNumeros });
-
-                        if (ticketExistente && ticketExistente.paused && (Date.now() < ticketExistente.until)) {
-                            await sendBotMsg(rawJid, { text: `Já identificamos você, e percebi que possui um atendimento recente. Vamos encaminhar!` });
-                            await ticketsColl.updateOne({ _id: ticketExistente._id }, {
-                                $set: { until: blockUntil, lastActivity: Date.now(), lastRawJid: rawJid, numeroReal: numeroRealExtraido, paused: true, obrigadoEnviado: true, aguardandoIA: false }
+                        if (ticketExistente) {
+                            await ticketsColl.deleteOne({ _id: numeroRealExtraido });
+                            ticket = ticketExistente;
+                            await ticketsColl.updateOne({ _id: ticket._id }, { 
+                                $set: { _id: numeroRealExtraido, numeroReal: numeroRealExtraido, lastRawJid: rawJid, lastActivity: Date.now(), encerrado: false, aguardandoIA: true, paused: false } 
                             });
-                            if (ticketExistente._id !== numeroRealExtraido) await ticketsColl.deleteOne({ _id: numeroRealExtraido });
+                            ticket._id = numeroRealExtraido;
+                        } else {
+                            await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+                                $set: { cpf: cpfApenasNumeros, numeroReal: numeroRealExtraido, aguardandoIA: true, encerrado: false, lastActivity: Date.now(), lastRawJid: rawJid, paused: false }
+                            }, { upsert: true });
+                            await sendBotMsg(rawJid, { text: `CPF validado com sucesso! Como podemos ajudar você hoje?` });
                             return;
                         }
-
-                        // Lead ou Novo Atendimento
-                        const textoLower = texto.toLowerCase();
-                        const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
-                        
-                        if (isLead) {
-                            await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
-                        } else {
-                            await sendBotMsg(rawJid, { text: `CPF identificado com sucesso! Como podemos te ajudar hoje?` });
-                        }
-
-                        await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
-                            $set: { 
-                                cpf: cpfApenasNumeros, numeroReal: numeroRealExtraido, id: Math.floor(1000 + Math.random() * 9000),
-                                aguardandoIA: !isLead, obrigadoEnviado: isLead, paused: isLead, until: isLead ? blockUntil : 0,
-                                lastActivity: Date.now(), lastRawJid: rawJid
-                            }
-                        }, { upsert: true });
-                        return;
                     }
                 }
 
-                // 4. VERIFICAÇÃO DE PAUSA
-                if (ticket.paused) {
-                    if (Date.now() < ticket.until) return;
-                    else await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
-                }
+                // Verifica se está pausado (Cadeado do Bot)
+                if (ticket.paused && (Date.now() < ticket.until)) return;
 
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
-
-                // 5. LÓGICA DE IA (GEMINI)
-                if (ticket.aguardandoIA && genAI) {
-                    const knowledgeDocs = await knowledgeColl.find({}).toArray();
-                    const contextText = knowledgeDocs.map(k => `P: ${k.pergunta}\nR: ${k.resposta}`).join('\n\n');
-                    const prompt = `Assis. Azevedo & Juvencio.\nBase:\n${contextText}\n\nCliente: "${texto}"\n\nRegras: ESCALAR_ATENDIMENTO se pedir humano ou não souber. ENCERRAR_TICKET se agradecer.`;
-
-                    const result = await global.geminiModel.generateContent(prompt);
-                    const iaResponse = result.response.text().trim();
-
-                    if (iaResponse.includes('ENCERRAR_TICKET')) {
-                        await sendBotMsg(rawJid, { text: `De nada! Ficamos à disposição. 👋` });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true } });
-                        return;
-                    }
-
-                    if (iaResponse.includes('ESCALAR_ATENDIMENTO')) {
-                        await sendBotMsg(rawJid, { text: `Entendido. Digite o número da opção:\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros\n8️⃣ Processo` });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
-                        return;
-                    }
-
-                    await sendBotMsg(rawJid, { text: `${iaResponse}\n\nAlgo mais?` });
+                // Reabertura de Ticket Encerrado (após 1h)
+                if (ticket.encerrado && (Date.now() - ticket.lastActivity > 60 * 60 * 1000)) {
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: true, encerrado: false, lastActivity: Date.now() } });
+                    await sendBotMsg(rawJid, { text: `Olá! Vi que retornou. Como posso ajudar o Sr(a) novamente?` });
                     return;
                 }
 
-                // 6. RESPOSTAS (Switch de Opções) - Resumido aqui por espaço, use seus textos completos
+                // 2. MOTOR DE IA (SEU PROMPT)
+                if (ticket.aguardandoIA && genAI) {
+                    try {
+                        const docs = await knowledgeColl.find({}).toArray();
+                        const contextText = docs.map(k => `P: ${k.pergunta}\nR: ${k.resposta}`).join('\n\n');
+                        
+                        const prompt = `Você é um assistente virtual do escritório Azevedo & Juvencio Advogados.
+Base de conhecimento autorizada:
+${contextText}
+
+Mensagem do cliente: "${texto}"
+
+Regras:
+1. Se o cliente pedir para falar com atendente, advogado, humano ou se o assunto não existir na base de conhecimento, responda APENAS com a palavra: ESCALAR_ATENDIMENTO
+2. Se a mensagem for claramente um lead automático de anúncios, responda APENAS com a palavra: LEAD_ANUNCIO
+3. Se a pergunta puder ser respondida usando a base de conhecimento, responda de forma natural e prestativa.
+4. Se o cliente agradecer e indicar que a dúvida foi resolvida (ex: "obrigado", "pode encerrar", "era só isso"), responda APENAS com a palavra: ENCERRAR_TICKET
+
+Sua resposta:`;
+
+                        const result = await global.geminiModel.generateContent(prompt);
+                        const iaRes = result.response.text().trim();
+
+                        if (iaRes.includes('ENCERRAR_TICKET')) {
+                            await sendBotMsg(rawJid, { text: `O escritório Azevedo & Juvencio agradece. Ficamos à disposição! 👋` });
+                            await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, encerrado: true, lastActivity: Date.now() } });
+                            return;
+                        }
+                        if (iaRes.includes('LEAD_ANUNCIO')) {
+                            await sendBotMsg(rawJid, { text: `Recebemos seu interesse! Um de nossos advogados entrará em contato em instantes para te auxiliar! 🤝` });
+                            await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, paused: true, until: Date.now() + (48*60*60*1000) } });
+                            return;
+                        }
+                        if (iaRes.includes('ESCALAR_ATENDIMENTO')) {
+                            await sendBotMsg(rawJid, { text: `Para um suporte especializado, escolha uma opção:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` });
+                            await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
+                            return;
+                        }
+
+                        await sendBotMsg(rawJid, { text: iaRes });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
+
+                    } catch (e) {
+                        // --- FALLBACK EM CASO DE ERRO NA API ---
+                        await sendBotMsg(rawJid, { text: `Tivemos uma instabilidade no assistente. Digite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
+                    }
+                    return;
+                }
+
+                // 3. MENU DE OPÇÕES (TRANSBORDO HUMANO)
                 if (ticket.aguardandoOpcao) {
                     const respostas = {
       '1': `📱 *Direito Digital (Desbloqueio de Contas)*
@@ -326,36 +323,69 @@ Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos
 
 ⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
     };
+
                     if (respostas[texto]) {
-                        await sendBotMsg(rawJid, { text: respostas[texto] });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                        await sendBotMsg(rawJid, { text: `${respostas[texto]}\n\nAguarde o contato de um advogado especialista.` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, paused: true, until: Date.now() + (24*60*60*1000) } });
                     } else {
-                        await sendBotMsg(rawJid, { text: `Opção inválida (1-8).` });
+                        await sendBotMsg(rawJid, { text: `Opção inválida. Digite de 1 a 8.` });
                     }
                     return;
                 }
 
-            } catch (err) { console.error("Erro processamento:", err); }
+            } catch (err) { console.error("Erro Mensagem:", err); }
         });
 
         sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect, qr } = update;
             if (qr) { lastQr = qr; io.emit('qr', qr); }
             if (connection === 'open') {
-                lastQr = null;
                 currentUser = { number: sock.user.id.split(':')[0], name: 'Azevedo e Juvencio' };
                 io.emit('connected', currentUser);
             }
             if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-                if (shouldReconnect) startBot();
+                if ((lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut) startBot();
             }
         });
 
     } catch (err) { setTimeout(startBot, 5000); }
 }
 
-// --- AUTENTICAÇÃO MONGODB ---
+// --- ROTAS DO PAINEL ---
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
+app.post('/login', async (req, res) => {
+    const { user, pass } = req.body;
+    const admin = await userLoginColl.findOne({ user, pass });
+    if (admin) { req.session.loggedIn = true; res.redirect('/'); }
+    else res.send("<script>alert('Erro'); window.location='/login';</script>");
+});
+app.get('/', (req, res) => req.session.loggedIn ? res.sendFile(path.join(__dirname, 'index.html')) : res.redirect('/login'));
+app.get('/logout-panel', (req, res) => req.session.destroy(() => res.redirect('/login')));
+app.get('/logout-whatsapp', async (req, res) => {
+    await authColl.deleteMany({});
+    if (sock) await sock.logout();
+    currentUser = null; io.emit('disconnected');
+    res.sendStatus(200);
+});
+
+// APIs Conhecimento
+app.get('/api/knowledgeColl', async (req, res) => {
+    if (!req.session.loggedIn) return res.sendStatus(401);
+    const data = await knowledgeColl.find({}).toArray();
+    res.json(data);
+});
+app.post('/api/knowledgeColl', async (req, res) => {
+    if (!req.session.loggedIn) return res.sendStatus(401);
+    const { pergunta, resposta } = req.body;
+    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
+    res.sendStatus(200);
+});
+app.delete('/api/knowledgeColl/:id', async (req, res) => {
+    if (!req.session.loggedIn) return res.sendStatus(401);
+    await knowledgeColl.deleteOne({ _id: new ObjectId(req.params.id) });
+    res.sendStatus(200);
+});
+
 async function useMongoDBAuthState(collection) {
     const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
     const readData = async (id) => {
@@ -368,11 +398,7 @@ async function useMongoDBAuthState(collection) {
         state: { creds, keys: {
             get: async (type, ids) => {
                 const data = {};
-                await Promise.all(ids.map(async id => { 
-                    let value = await readData(`${type}-${id}`);
-                    if (type === 'app-state-sync-key' && value) value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
-                    data[id] = value;
-                }));
+                await Promise.all(ids.map(async id => { data[id] = await readData(`${type}-${id}`); }));
                 return data;
             },
             set: async (data) => {
@@ -388,80 +414,5 @@ async function useMongoDBAuthState(collection) {
         saveCreds: () => writeData(creds, 'creds')
     };
 }
-
-// --- ROTAS DO SERVIDOR ---
-app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
-app.post('/login', async (req, res) => {
-    const { user, pass } = req.body;
-    const adminAccount = await userLoginColl.findOne({ user, pass });
-    if (adminAccount) { req.session.loggedIn = true; res.redirect('/'); }
-    else res.send("<script>alert('Erro'); window.location='/login';</script>");
-});
-
-app.get('/', (req, res) => req.session.loggedIn ? res.sendFile(path.join(__dirname, 'index.html')) : res.redirect('/login'));
-
-app.get('/logout-panel', (req, res) => {
-    req.session.destroy(() => { res.redirect('/login'); });
-});
-
-app.get('/logout-whatsapp', async (req, res) => {
-    try {
-        await authColl.deleteMany({});
-        if (sock) await sock.logout();
-        currentUser = null; lastQr = null;
-        io.emit('disconnected');
-        res.sendStatus(200);
-    } catch (err) { res.status(500).send("Erro"); }
-});
-
-// API Knowledge Base
-app.get('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    const data = await knowledgeColl.find({}).sort({ updatedAt: -1 }).toArray();
-    res.json(data);
-});
-
-app.post('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    const { pergunta, resposta } = req.body;
-    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
-    res.sendStatus(200);
-});
-
-app.delete('/api/knowledgeColl/:id', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    try {
-        await knowledgeColl.deleteOne({ _id: new ObjectId(req.params.id) });
-        res.sendStatus(200);
-    } catch (err) { res.status(500).send("Erro"); }
-});
-
-// --- INTERVALOS E AUTO-LIMPEZA ---
-setInterval(async () => {
-    if (ticketsColl) {
-        // Encerramento por inatividade de 1 min (após obrigado)
-        const umMinuto = Date.now() - 60000;
-        await ticketsColl.updateMany(
-            { obrigadoEnviado: true, lastActivity: { $lt: umMinuto }, paused: false },
-            { $set: { aguardandoIA: false, aguardandoOpcao: false } }
-        );
-        // Limpeza de 24h
-        const vinteQuatroHoras = Date.now() - (24 * 60 * 60 * 1000);
-        await ticketsColl.deleteMany({ lastActivity: { $lt: vinteQuatroHoras } });
-    }
-}, 60000);
-
-// Keep-alive Render
-setInterval(async () => {
-    try {
-        const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
-        await axios.get(`${host.includes('localhost') ? 'http' : 'https'}://${host}/`);
-    } catch (e) {}
-}, 5 * 60 * 1000);
-
-io.on('connection', (socket) => {
-    if (currentUser) socket.emit('connected', currentUser);
-    else if (lastQr) socket.emit('qr', lastQr);
-});
 
 server.listen(port, () => startBot());
