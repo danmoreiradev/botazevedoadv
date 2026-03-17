@@ -110,30 +110,34 @@ sock.ev.on('messages.upsert', async m => {
     const msgId = msg.key.id;
 
     // --- TRADUTOR DE IDENTIDADE (UNIFICAÇÃO) ---
+// --- TRADUTOR DE IDENTIDADE (VERSÃO REFORÇADA) ---
     let numeroRealExtraido;
     const cleanJid = jidNormalizedUser(rawJid);
 
     try {
         if (cleanJid.includes('@lid')) {
-            // Se for LID, perguntamos ao servidor qual o número real (JID)
+            // 1. Tenta tradução oficial
             const [result] = await sock.onWhatsApp(cleanJid);
-            if (result && result.exists) {
-                // Se o servidor responder, pegamos o número (ex: 5519...)
+            
+            if (result && result.exists && result.jid.includes('@s.whatsapp.net')) {
                 numeroRealExtraido = result.jid.split('@')[0];
             } else {
-                numeroRealExtraido = cleanJid.split('@')[0];
+                // 2. Fallback: Procura se já existe um ticket com este LID salvo no histórico
+                const ticketExistente = await ticketsColl.findOne({ lastRawJid: cleanJid });
+                if (ticketExistente) {
+                    numeroRealExtraido = ticketExistente._id;
+                } else {
+                    numeroRealExtraido = cleanJid.split('@')[0];
+                    console.log(`[Aviso] LID não traduzido, usando ID temporário: ${numeroRealExtraido}`);
+                }
             }
         } else {
-            // Se já é @s.whatsapp.net, pegamos o número direto
             numeroRealExtraido = cleanJid.split('@')[0];
         }
     } catch (e) {
-        console.error("Erro na tradução do JID:", e);
+        console.error("Erro na tradução crítica:", e);
         numeroRealExtraido = cleanJid.split('@')[0];
     }
-    // A partir daqui, 'numeroRealExtraido' é sua CHAVE ÚNICA (ex: 55199...)
-    // -------------------------------------------
-
     if (processing.has(msgId)) return;
     processing.add(msgId);
     setTimeout(() => processing.delete(msgId), 10000);
