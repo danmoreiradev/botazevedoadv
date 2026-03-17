@@ -106,27 +106,17 @@ sock.ev.on('messages.upsert', async m => {
     if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
     const rawJid = msg.key.remoteJid;
-    const cleanJid = jidNormalizedUser(rawJid);
-    const msgId = msg.key.id; // <--- ADICIONE ISSO
-    const isMe = msg.key.fromMe; // <--- ADICIONE ISSO
-    
-    let numeroFinal = cleanJid.split('@')[0];
+    const cleanJid = jidNormalizedUser(rawJid); 
+    const cleanNumber = cleanJid.split('@')[0];
+    const isMe = msg.key.fromMe;
+    const msgId = msg.key.id;
 
-    // --- BUSCA AVANÇADA DE IDENTIDADE ---
-    if (cleanJid.includes('@lid')) {
-        const contact = sock.contacts ? sock.contacts[cleanJid] : null;
-        if (contact && contact.pnJid) {
-            numeroFinal = contact.pnJid.split('@')[0];
-        } else {
-            const participant = msg.key.participant || msg.participant;
-            if (participant && !participant.includes('@lid')) {
-                numeroFinal = jidNormalizedUser(participant).split('@')[0];
-            }
-        }
+    // --- IDENTIFICAÇÃO DO NÚMERO (LID vs REAL) ---
+    let numeroRealExtraido = cleanNumber;
+    if (rawJid.includes('@lid')) {
+        const vnumber = msg.key.participant || msg.participant || rawJid;
+        numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
     }
-
-    // AGORA DEFINIMOS O uniqueId QUE SEU CÓDIGO USA ABAIXO
-    const uniqueId = numeroFinal;
 
     if (processing.has(msgId)) return;
     processing.add(msgId);
@@ -136,40 +126,23 @@ sock.ev.on('messages.upsert', async m => {
     const blockUntil = Date.now() + tresDiasEmMs;
 
     try {
-    let ticket = await ticketsColl.findOne({
+        // 1. BUSCA O TICKET (Unificada)
+        let ticket = await ticketsColl.findOne({
             $or: [
-                { _id: uniqueId },           
-                { lastRawJid: cleanJid },       
-                { todosOsLids: cleanJid }       
+                { _id: cleanNumber },
+                { numeroReal: cleanNumber },
+                { _id: numeroRealExtraido },
+                { numeroReal: numeroRealExtraido }
             ]
         });
 
-        // Se achamos pelo LID mas agora temos o Telefone (uniqueId), fazemos a migração
-        if (ticket && ticket._id !== uniqueId && !cleanJid.includes('@s.whatsapp.net')) {
-             // Só migra se o ID atual for um LID e o novo for um Telefone
-             if (ticket._id.includes('@lid')) {
-                const dadosAntigos = { ...ticket };
-                delete dadosAntigos._id; // Remove o ID antigo para não dar conflito
-                
-                await ticketsColl.deleteOne({ _id: ticket._id }); 
-                await ticketsColl.updateOne(
-                    { _id: uniqueId },
-                    { 
-                        $set: { ...dadosAntigos, numeroReal: uniqueId },
-                        $addToSet: { todosOsLids: ticket._id } 
-                    },
-                    { upsert: true }
-                );
-                ticket = await ticketsColl.findOne({ _id: uniqueId });
-             }
-        }
-
-        // 3. LÓGICA DE INTERVENÇÃO (VOCÊ RESPONDEU)
+        // 2. LOGICA DE INTERVENÇÃO HUMANA (VOCÊ RESPONDEU)
         if (isMe) {
             if (msgId !== lastBotMessageId) {
-                console.log(`[Intervenção] Humano detectado para ${uniqueId}. Pausando bot.`);
+                console.log(`[Intervenção] Humano detectado para ${numeroRealExtraido}. Pausando bot.`);
                 
-                const targetId = ticket ? ticket._id : uniqueId;
+                // Define o alvo: prioriza o ID do ticket encontrado, senão usa o número extraído
+                const targetId = ticket ? ticket._id : numeroRealExtraido;
 
                 await ticketsColl.updateOne(
                     { _id: targetId }, 
@@ -180,12 +153,13 @@ sock.ev.on('messages.upsert', async m => {
                             lastActivity: Date.now(),
                             aguardandoIA: false,
                             aguardandoOpcao: false,
-                            obrigadoEnviado: true,
-                            numeroReal: uniqueId,
-                            lastRawJid: cleanJid
+                            obrigadoEnviado: true, // Evita que o bot mande "Recebido" depois
+                            numeroReal: numeroRealExtraido
                         },
+                        // Se o ticket for novo (criado agora pelo advogado), gera o ID numérico
                         $setOnInsert: {
-                            id: Math.floor(1000 + Math.random() * 9000)
+                            id: Math.floor(1000 + Math.random() * 9000),
+                            lastRawJid: rawJid
                         }
                     }, 
                     { upsert: true }
@@ -209,62 +183,52 @@ sock.ev.on('messages.upsert', async m => {
         const texto = textoRaw.trim();
         const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-        // 4. CRIAÇÃO OU REABERTURA (Ajustado para unificar o ID)
-// 4. CRIAÇÃO OU REABERTURA (Ajustado para usar uniqueId)
-if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-    const ticketId = Math.floor(1000 + Math.random() * 9000);
-    const textoLower = texto.toLowerCase();
-    const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
+        // 4. CRIAÇÃO OU REABERTURA (Bloco Único)
+        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+            const ticketId = Math.floor(1000 + Math.random() * 9000);
+            const textoLower = texto.toLowerCase();
+            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
 
-    // Decidimos o ID principal: Sempre priorize o uniqueId (que agora contém o número real ou o LID)
-    const primaryId = uniqueId; 
+            if (isLead) {
+                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+                    $set: { 
+                        id: ticketId, numeroReal: numeroRealExtraido,
+                        aguardandoOpcao: false, aguardandoIA: false, 
+                        obrigadoEnviado: true, paused: true, until: blockUntil,
+                        lastActivity: Date.now(), lastRawJid: rawJid
+                    }
+                }, { upsert: true });
+                return;
+            }
 
-    const updateData = {
-        $set: { 
-            id: ticketId,
-            numeroReal: uniqueId,   // Aqui usamos o uniqueId corrigido
-            lastRawJid: cleanJid,  // Armazena o LID ou JID atual para resposta
-            lastActivity: Date.now(),
-            paused: isLead,
-            until: isLead ? blockUntil : 0,
-            aguardandoIA: !isLead,
-            aguardandoOpcao: false,
-            obrigadoEnviado: isLead,
-            tentouInsistir: false
+            await sendBotMsg(rawJid, { 
+                text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
+            });
+
+            await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+                $set: { 
+                    id: ticketId, 
+                    numeroReal: numeroRealExtraido, 
+                    aguardandoIA: true, 
+                    aguardandoOpcao: false, 
+                    obrigadoEnviado: false, 
+                    tentouInsistir: false,
+                    lastActivity: Date.now(), 
+                    paused: false,
+                    lastRawJid: rawJid 
+                }
+            }, { upsert: true });
+            return;
         }
-    };
 
-    if (isLead) {
-        await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
-    } else {
-        await sendBotMsg(rawJid, { text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` });
-    }
-
-    // O segredo do sucesso: Upsert pelo uniqueId
-    await ticketsColl.updateOne({ _id: primaryId }, updateData, { upsert: true });
-    return;
-}
-
-        await ticketsColl.updateOne(
-    { _id: ticket._id }, 
-    { 
-        $set: { 
-            lastActivity: Date.now(),
-            lastRawJid: cleanJid // Crucial para o bot responder no dispositivo que o cliente está usando agora
-        } 
-    }
-);
-
-// Se existia um ticket "temporário" criado apenas com o LID, e agora descobrimos o número real, limpamos o lixo
-if (cleanJid !== ticket._id && cleanJid.includes('@lid')) {
-    // Evita duplicidade se o MongoDB criou um doc com o LID como _id por erro anterior
-    await ticketsColl.deleteOne({ _id: cleanJid });
-}
+        // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
+        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
         
-       if (cleanJid.includes('@lid') && cleanJid !== ticket._id) {
-    console.log(`[Limpeza] Removendo rastro de LID (${cleanJid}) pois o ticket oficial é ${ticket._id}`);
-    await ticketsColl.deleteOne({ _id: cleanJid });
-}
+        // Se a mensagem veio por um LID mas o ticket está no Número Real, apaga o registro do LID se ele existir solto
+        if (cleanNumber !== ticket._id && cleanNumber.length > 13) {
+             await ticketsColl.deleteOne({ _id: cleanNumber });
+        }
 
         // --- NOVA LÓGICA DE INTELIGÊNCIA ARTIFICIAL ---
         if (ticket.aguardandoIA) {
