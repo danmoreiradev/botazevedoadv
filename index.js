@@ -111,7 +111,6 @@ sock.ev.on('messages.upsert', async m => {
     const isMe = msg.key.fromMe;
     const msgId = msg.key.id;
 
-    // --- IDENTIFICAÇÃO DO NÚMERO (LID vs REAL) ---
     let numeroRealExtraido = cleanNumber;
     if (rawJid.includes('@lid')) {
         const vnumber = msg.key.participant || msg.participant || rawJid;
@@ -126,100 +125,98 @@ sock.ev.on('messages.upsert', async m => {
     const blockUntil = Date.now() + tresDiasEmMs;
 
     try {
-        // 1. BUSCA O TICKET (Unificada)
+        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        const texto = textoRaw.trim();
+        const cpfApenasNumeros = texto.replace(/\D/g, '');
+        const isCpfValido = cpfApenasNumeros.length === 11;
+
+        // 1. BUSCA O TICKET (CPF primeiro, depois número)
         let ticket = await ticketsColl.findOne({
             $or: [
-                { _id: cleanNumber },
-                { numeroReal: cleanNumber },
+                { cpf: cpfApenasNumeros },
                 { _id: numeroRealExtraido },
                 { numeroReal: numeroRealExtraido }
             ]
         });
 
-        // 2. LOGICA DE INTERVENÇÃO HUMANA (VOCÊ RESPONDEU)
+        // 2. LOGICA DE INTERVENÇÃO HUMANA
         if (isMe) {
             if (msgId !== lastBotMessageId) {
-                console.log(`[Intervenção] Humano detectado para ${numeroRealExtraido}. Pausando bot.`);
-                
-                // Define o alvo: prioriza o ID do ticket encontrado, senão usa o número extraído
                 const targetId = ticket ? ticket._id : numeroRealExtraido;
-
                 await ticketsColl.updateOne(
                     { _id: targetId }, 
-                    { 
-                        $set: { 
-                            paused: true, 
-                            until: blockUntil, 
-                            lastActivity: Date.now(),
-                            aguardandoIA: false,
-                            aguardandoOpcao: false,
-                            obrigadoEnviado: true, // Evita que o bot mande "Recebido" depois
-                            numeroReal: numeroRealExtraido
-                        },
-                        // Se o ticket for novo (criado agora pelo advogado), gera o ID numérico
-                        $setOnInsert: {
-                            id: Math.floor(1000 + Math.random() * 9000),
-                            lastRawJid: rawJid
-                        }
-                    }, 
+                    { $set: { paused: true, until: blockUntil, lastActivity: Date.now(), obrigadoEnviado: true } }, 
                     { upsert: true }
                 );
             }
             return; 
         }
 
-        // 3. VERIFICAÇÃO DE PAUSA ATIVA
-        if (ticket && ticket.paused) {
-            if (Date.now() < ticket.until) {
-                console.log(`[Bloqueio] Bot pausado para ${ticket._id} até ${new Date(ticket.until).toLocaleString()}`);
+        // 3. FLUXO DE IDENTIFICAÇÃO (O "PORTEIRO")
+        if (!ticket || !ticket.cpf) {
+            if (!isCpfValido) {
+                // Primeira fala do bot sempre pede CPF agora
+                await sendBotMsg(rawJid, { text: `Olá! Bem-vindo ao Azevedo & Juvencio Advogados. ⚖️\n\nPara segurança do seu atendimento, por favor, **digite seu CPF** (apenas números):` });
+                
+                // Salva o estado inicial (Aguardando CPF)
+                await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+                    $set: { _id: numeroRealExtraido, numeroReal: numeroRealExtraido, lastActivity: Date.now(), lastRawJid: rawJid }
+                }, { upsert: true });
                 return;
             } else {
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
-                ticket.paused = false; // Atualiza a variável local para continuar o processamento
-            }
-        }
+                // CLIENTE ENVIOU CPF - Verificar se já existe ticket para este CPF
+                const ticketExistente = await ticketsColl.findOne({ cpf: cpfApenasNumeros });
 
-        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        const texto = textoRaw.trim();
-        const timeoutMenu = 2 * 60 * 60 * 1000; 
+                if (ticketExistente && ticketExistente.paused && (Date.now() < ticketExistente.until)) {
+                    // MENSAGEM DE CLIENTE ATIVO (Menos de 3 dias)
+                    await sendBotMsg(rawJid, { text: `Já identificamos você! Vou encaminhar para o especialista.` });
+                    
+                    // Prorroga e atualiza o JID (caso tenha trocado de aparelho/aparelho vs web)
+                    await ticketsColl.updateOne({ cpf: cpfApenasNumeros }, {
+                        $set: { until: blockUntil, lastActivity: Date.now(), lastRawJid: rawJid, numeroReal: numeroRealExtraido }
+                    });
+                    return;
+                }
 
-        // 4. CRIAÇÃO OU REABERTURA (Bloco Único)
-        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-            const ticketId = Math.floor(1000 + Math.random() * 9000);
-            const textoLower = texto.toLowerCase();
-            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
+                // IDENTIFICADO - CHECAR SE É LEAD DE ANÚNCIO
+                const textoLower = texto.toLowerCase();
+                const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
 
-            if (isLead) {
-                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                if (isLead) {
+                    await sendBotMsg(rawJid, { text: `✅ CPF Identificado! Recebemos seu interesse pelo anúncio. Um especialista assumirá o seu caso em breve.` });
+                    await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+                        $set: { 
+                            cpf: cpfApenasNumeros, numeroReal: numeroRealExtraido,
+                            obrigadoEnviado: true, paused: true, until: blockUntil,
+                            lastActivity: Date.now(), lastRawJid: rawJid
+                        }
+                    }, { upsert: true });
+                    return;
+                }
+
+                // IDENTIFICADO - FLUXO NORMAL (Inicia IA)
+                await sendBotMsg(rawJid, { text: `CPF identificado com sucesso! Como podemos te ajudar hoje?` });
                 await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
                     $set: { 
-                        id: ticketId, numeroReal: numeroRealExtraido,
-                        aguardandoOpcao: false, aguardandoIA: false, 
-                        obrigadoEnviado: true, paused: true, until: blockUntil,
-                        lastActivity: Date.now(), lastRawJid: rawJid
+                        id: Math.floor(1000 + Math.random() * 9000),
+                        cpf: cpfApenasNumeros, numeroReal: numeroRealExtraido,
+                        aguardandoIA: true, lastActivity: Date.now(),
+                        paused: false, lastRawJid: rawJid 
                     }
                 }, { upsert: true });
                 return;
             }
+        }
 
-            await sendBotMsg(rawJid, { 
-                text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
-            });
-
-            await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
-                $set: { 
-                    id: ticketId, 
-                    numeroReal: numeroRealExtraido, 
-                    aguardandoIA: true, 
-                    aguardandoOpcao: false, 
-                    obrigadoEnviado: false, 
-                    tentouInsistir: false,
-                    lastActivity: Date.now(), 
-                    paused: false,
-                    lastRawJid: rawJid 
-                }
-            }, { upsert: true });
-            return;
+        // 4. VERIFICAÇÃO DE PAUSA ATIVA
+        if (ticket && ticket.paused) {
+            if (Date.now() < ticket.until) {
+                // Se o bot está pausado, ele não responde nada, apenas mantém o silêncio para o humano falar
+                return;
+            } else {
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
+                ticket.paused = false;
+            }
         }
 
         // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
