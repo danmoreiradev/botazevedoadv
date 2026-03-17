@@ -1,10 +1,10 @@
 const { 
-    default: makeWASocket, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion, 
-    BufferJSON, 
-    initAuthCreds,
-    jidNormalizedUser 
+    default: makeWASocket, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    BufferJSON, 
+    initAuthCreds,
+    jidNormalizedUser 
 } = require('@whiskeysockets/baileys');
 const { MongoClient, ObjectId } = require('mongodb');
 const express = require('express');
@@ -13,10 +13,13 @@ const { Server } = require('socket.io');
 const path = require('path');
 const P = require('pino');
 const { Boom } = require('@hapi/boom');
+const axios = require('axios');
 const session = require('express-session');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// --- CONFIGURAÇÃO DO SERVIDOR WEB ---
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+let genAI = null; // Apenas declare a variável, sem valor por enquanto.
+let apiKeysColl;
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -24,323 +27,567 @@ const port = process.env.PORT || 10000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
 const MongoDBStore = require('connect-mongodb-session')(session);
-const store = new MongoDBStore({ uri: process.env.MONGODB_URI, collection: 'sessions' });
+
+const store = new MongoDBStore({
+  uri: process.env.MONGODB_URI,
+  collection: 'sessions'
+});
+
 app.use(session({
-    secret: 'azevedo-secret-key-2026',
+    secret: 'azevedo-secret-key',
     resave: false,
-    saveUninitialized: false,
-    store: store,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 }
+    saveUninitialized: false, // Melhor para produção
+    store: store, // Agora as sessões ficam salvas no Banco, não na memória!
+    cookie: { maxAge: 1000 * 60 * 60 * 24 } // 24 horas de login
 }));
 
 const mongoUri = process.env.MONGODB_URI;
 const client = new MongoClient(mongoUri);
 
+let lastQr = null;
+let currentUser = null;
 let sock;
 let lastBotMessageId = null; 
 let processing = new Set(); 
-let genAI = null;
-let ticketsColl, authColl, knowledgeColl, userLoginColl, apiKeysColl;
+
+let ticketsColl, authColl, knowledgeColl, userLoginColl;
 
 async function sendBotMsg(jid, content) {
-    try {
-        const sent = await sock.sendMessage(jid, content);
-        lastBotMessageId = sent.key.id; 
-        return sent;
-    } catch (err) { 
-        console.error("Erro no envio:", err);
-        return null; 
-    }
+    try {
+        // Envia exatamente para o JID que originou a mensagem (seja LID ou número)
+        const sent = await sock.sendMessage(jid, content);
+        lastBotMessageId = sent.key.id; 
+        return sent;
+    } catch (err) {
+        console.error("Erro ao enviar:", err);
+        return null;
+    }
 }
 
 async function startBot() {
-    try {
-        await client.connect();
-        const db = client.db('bot_whatsapp');
-        authColl = db.collection('auth_session');
-        ticketsColl = db.collection('active_tickets');
-        knowledgeColl = db.collection('knowledge_base');
-        userLoginColl = db.collection('user_login');
+    try {
+        await client.connect();
+        const db = client.db('bot_whatsapp');
+        authColl = db.collection('auth_session');
+        ticketsColl = db.collection('active_tickets');
+        knowledgeColl = db.collection('knowledge_base');
+        userLoginColl = db.collection('user_login');
+        
         apiKeysColl = db.collection('api_keys');
-
-        console.log("✅ Banco MongoDB Conectado");
-
         const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
+        
         if (geminiKeyDoc && geminiKeyDoc.chave) {
             genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
-            global.geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            // Definimos o modelo GLOBALMENTE com a API v1 para evitar o erro 404
+            global.geminiModel = genAI.getGenerativeModel(
+            { model: "gemini-3.1-flash-lite-preview" }, 
+            { apiVersion: 'v1beta' } // MUDAR DE 'v1' PARA 'v1beta'
+            );
+            console.log("✅ Sistema Gemini pronto e estável.");
         }
 
-        const { state, saveCreds } = await useMongoDBAuthState(authColl);
-        const { version } = await fetchLatestBaileysVersion();
+        const { state, saveCreds } = await useMongoDBAuthState(authColl);
+        const { version } = await fetchLatestBaileysVersion();
 
-        sock = makeWASocket({
-            version,
-            auth: state,
-            logger: P({ level: 'silent' }),
-            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-            getNextPreKeyId: () => Math.floor(Math.random() * 10000)
+        sock = makeWASocket({
+            version,
+            auth: state,
+            logger: P({ level: 'silent' }),
+            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
+            connectTimeoutMs: 60000,
+            generateHighQualityLinkPreview: false
+        });
+
+        sock.ev.on('creds.update', saveCreds);
+
+sock.ev.on('messages.upsert', async m => {
+    const msg = m.messages[0];
+    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+
+    const rawJid = msg.key.remoteJid;
+    const cleanJid = jidNormalizedUser(rawJid); 
+    const cleanNumber = cleanJid.split('@')[0];
+    const isMe = msg.key.fromMe;
+    const msgId = msg.key.id;
+
+    // --- IDENTIFICAÇÃO DO NÚMERO (LID vs REAL) ---
+    let numeroRealExtraido = cleanNumber;
+    if (rawJid.includes('@lid')) {
+        const vnumber = msg.key.participant || msg.participant || rawJid;
+        numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
+    }
+
+    if (processing.has(msgId)) return;
+    processing.add(msgId);
+    setTimeout(() => processing.delete(msgId), 10000);
+
+    const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+    const blockUntil = Date.now() + tresDiasEmMs;
+
+    try {
+        // 1. BUSCA O TICKET (Unificada)
+        let ticket = await ticketsColl.findOne({
+            $or: [
+                { _id: cleanNumber },
+                { numeroReal: cleanNumber },
+                { _id: numeroRealExtraido },
+                { numeroReal: numeroRealExtraido }
+            ]
         });
 
-        sock.ev.on('creds.update', saveCreds);
+        // 2. LOGICA DE INTERVENÇÃO HUMANA (VOCÊ RESPONDEU)
+        if (isMe) {
+            if (msgId !== lastBotMessageId) {
+                console.log(`[Intervenção] Humano detectado para ${numeroRealExtraido}. Pausando bot.`);
+                
+                // Define o alvo: prioriza o ID do ticket encontrado, senão usa o número extraído
+                const targetId = ticket ? ticket._id : numeroRealExtraido;
 
-        sock.ev.on('messages.upsert', async m => {
-            const msg = m.messages[0];
-            if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+                await ticketsColl.updateOne(
+                    { _id: targetId }, 
+                    { 
+                        $set: { 
+                            paused: true, 
+                            until: blockUntil, 
+                            lastActivity: Date.now(),
+                            aguardandoIA: false,
+                            aguardandoOpcao: false,
+                            obrigadoEnviado: true, // Evita que o bot mande "Recebido" depois
+                            numeroReal: numeroRealExtraido
+                        },
+                        // Se o ticket for novo (criado agora pelo advogado), gera o ID numérico
+                        $setOnInsert: {
+                            id: Math.floor(1000 + Math.random() * 9000),
+                            lastRawJid: rawJid
+                        }
+                    }, 
+                    { upsert: true }
+                );
+            }
+            return; 
+        }
 
-            const rawJid = msg.key.remoteJid;
-            const cleanNumber = jidNormalizedUser(rawJid).split('@')[0];
-            const isMe = msg.key.fromMe;
-            const msgId = msg.key.id;
+        // 3. VERIFICAÇÃO DE PAUSA ATIVA
+        if (ticket && ticket.paused) {
+            if (Date.now() < ticket.until) {
+                console.log(`[Bloqueio] Bot pausado para ${ticket._id} até ${new Date(ticket.until).toLocaleString()}`);
+                return;
+            } else {
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
+                ticket.paused = false; // Atualiza a variável local para continuar o processamento
+            }
+        }
 
-            let numeroRealExtraido = cleanNumber;
-            if (rawJid.includes('@lid')) {
-                const vnumber = msg.key.participant || msg.participant || rawJid;
-                numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
+        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        const texto = textoRaw.trim();
+        const timeoutMenu = 2 * 60 * 60 * 1000; 
+
+        // 4. CRIAÇÃO OU REABERTURA (Bloco Único)
+        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+            const ticketId = Math.floor(1000 + Math.random() * 9000);
+            const textoLower = texto.toLowerCase();
+            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
+
+            if (isLead) {
+                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+                    $set: { 
+                        id: ticketId, numeroReal: numeroRealExtraido,
+                        aguardandoOpcao: false, aguardandoIA: false, 
+                        obrigadoEnviado: true, paused: true, until: blockUntil,
+                        lastActivity: Date.now(), lastRawJid: rawJid
+                    }
+                }, { upsert: true });
+                return;
             }
 
-            if (processing.has(msgId)) return;
-            processing.add(msgId);
-            setTimeout(() => processing.delete(msgId), 10000);
+            await sendBotMsg(rawJid, { 
+                text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
+            });
 
-            try {
-                const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-                const texto = textoRaw.trim();
-                const cpfApenasNumeros = texto.replace(/\D/g, '');
-                const isCpfValido = cpfApenasNumeros.length === 11;
-                const blockUntil = Date.now() + (3 * 24 * 60 * 60 * 1000);
-
-                // Busca inicial do ticket
-                let ticket = await ticketsColl.findOne({
-                    $or: [ { _id: numeroRealExtraido }, { cpf: isCpfValido ? cpfApenasNumeros : "NULL" } ]
-                });
-
-                // 1. INTERVENÇÃO HUMANA
-                if (isMe) {
-                    if (msgId !== lastBotMessageId && ticket) {
-                        await ticketsColl.updateOne({ _id: ticket._id }, { 
-                            $set: { paused: true, until: blockUntil, lastActivity: Date.now(), aguardandoIA: false, aguardandoOpcao: false } 
-                        });
-                    }
-                    return; 
+            await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+                $set: { 
+                    id: ticketId, 
+                    numeroReal: numeroRealExtraido, 
+                    aguardandoIA: true, 
+                    aguardandoOpcao: false, 
+                    obrigadoEnviado: false, 
+                    tentouInsistir: false,
+                    lastActivity: Date.now(), 
+                    paused: false,
+                    lastRawJid: rawJid 
                 }
+            }, { upsert: true });
+            return;
+        }
 
-                // 2. PORTEIRO DE CPF E UNIFICAÇÃO (CORRIGIDO)
-                if (!ticket || !ticket.cpf) {
-                    if (!isCpfValido) {
-                        await sendBotMsg(rawJid, { text: `Olá! Sou o assistente virtual do escritório Azevedo & Juvencio Advogados. ⚖️\n\nPara iniciarmos seu atendimento, informe seu **CPF** (apenas os 11 números):` });
-                        await ticketsColl.updateOne({ _id: numeroRealExtraido }, { $set: { lastActivity: Date.now(), lastRawJid: rawJid } }, { upsert: true });
+        // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
+        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
+        
+        // Se a mensagem veio por um LID mas o ticket está no Número Real, apaga o registro do LID se ele existir solto
+        if (cleanNumber !== ticket._id && cleanNumber.length > 13) {
+             await ticketsColl.deleteOne({ _id: cleanNumber });
+        }
+
+        // --- NOVA LÓGICA DE INTELIGÊNCIA ARTIFICIAL ---
+        if (ticket.aguardandoIA) {
+            // Checagem de segurança para leads na segunda mensagem
+            const textoLower = texto.toLowerCase();
+            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
+
+            if (isLead) {
+                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                return;
+            }
+
+            if (genAI) {
+                try {
+                    // Monta o contexto buscando a knowledge_base no MongoDB
+                    const knowledgeDocs = await knowledgeColl.find({}).toArray();
+                    const contextText = knowledgeDocs.map(k => `Pergunta: ${k.pergunta}\nResposta: ${k.resposta}`).join('\n\n');
+
+                    const prompt = `Você é um assistente virtual do escritório Azevedo & Juvencio Advogados.
+Base de conhecimento autorizada:
+${contextText}
+
+Mensagem do cliente: "${texto}"
+
+Regras:
+1. Se o cliente pedir para falar com atendente, advogado, humano ou se o assunto não existir na base de conhecimento, responda APENAS com a palavra: ESCALAR_ATENDIMENTO
+2. Se a mensagem for claramente um lead automático de anúncios, responda APENAS com a palavra: LEAD_ANUNCIO
+3. Se a pergunta puder ser respondida usando a base de conhecimento, responda de forma natural e prestativa.
+4. Se o cliente agradecer e indicar que a dúvida foi resolvida (ex: "obrigado", "pode encerrar", "era só isso"), responda APENAS com a palavra: ENCERRAR_TICKET
+
+Sua resposta:`;
+
+                   const model = genAI.getGenerativeModel(
+                                { model: "gemini-3.1-flash-lite-preview" }, 
+                                { apiVersion: 'v1beta' } 
+                            );
+                    const result = await model.generateContent(prompt);
+                    const iaResponse = result.response.text().trim();
+
+                    console.log("Tentando integrar com Gemini usando o texto:", texto);
+
+                    if (iaResponse === 'LEAD_ANUNCIO') {
+                        await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele assumirá seu atendimento em breve.` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
                         return;
-                    } else {
-                        const ticketExistente = await ticketsColl.findOne({ cpf: cpfApenasNumeros });
-                        
-                        if (ticketExistente) {
-                            // Se o ticket já existe mas com ID diferente, removemos o antigo para criar o novo (unificação)
-                            await ticketsColl.deleteOne({ _id: ticketExistente._id });
-                            await ticketsColl.deleteOne({ _id: numeroRealExtraido }); // Limpa lixo temporário se houver
-
-                            const novoTicket = {
-                                _id: numeroRealExtraido,
-                                cpf: cpfApenasNumeros,
-                                numeroReal: numeroRealExtraido,
-                                lastRawJid: rawJid,
-                                lastActivity: Date.now(),
-                                encerrado: false,
-                                aguardandoIA: true,
-                                paused: false,
-                                obrigadoEnviado: false,
-                                tentouInsistir: false,
-                                errosMenu: 0
-                            };
-                            await ticketsColl.insertOne(novoTicket);
-                            ticket = novoTicket; // Atualiza a referência local
-
-                            await sendBotMsg(rawJid, { text: `✅ CPF localizado! Já identifiquei seu atendimento anterior em nosso sistema.\n\nComo o escritório Azevedo & Juvencio pode ajudar você hoje?` });
-                        } else {
-                            // Cadastro novo
-                            await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
-                                $set: { 
-                                    cpf: cpfApenasNumeros, 
-                                    numeroReal: numeroRealExtraido, 
-                                    aguardandoIA: true, 
-                                    encerrado: false, 
-                                    lastActivity: Date.now(), 
-                                    lastRawJid: rawJid, 
-                                    paused: false, 
-                                    obrigadoEnviado: false 
-                                }
-                            }, { upsert: true });
-                            await sendBotMsg(rawJid, { text: `✅ CPF validado com sucesso! Como o escritório Azevedo & Juvencio pode ajudar você hoje?` });
-                        }
-                        return;
-                    }
-                }
-
-                // CADEADO DE PAUSA (Bloqueia o bot se estiver em atendimento humano)
-                if (ticket.paused && (Date.now() < ticket.until)) {
-                    console.log(`⏸️ Bot pausado para o CPF ${ticket.cpf}`);
-                    return;
-                }
-
-                // 3. MOTOR IA
-                if (ticket.aguardandoIA && genAI) {
-                    try {
-                        const docs = await knowledgeColl.find({}).toArray();
-                        const contextText = docs.map(k => `P: ${k.pergunta}\nR: ${k.resposta}`).join('\n\n');
-                        const prompt = `Você é um assistente virtual da Azevedo & Juvencio Advogados.\nBase:\n${contextText}\n\nCliente: "${texto}"\n\nRegras:\n1. Fora da base/atendente: ESCALAR_ATENDIMENTO\n2. Lead: LEAD_ANUNCIO\n3. Resolvido: ENCERRAR_TICKET\n\nResposta:`;
-
-                        const result = await global.geminiModel.generateContent(prompt);
-                        const iaRes = result.response.text().trim();
-
-                        if (iaRes.includes('ENCERRAR_TICKET')) {
-                            await sendBotMsg(rawJid, { text: `Azevedo & Juvencio agradece seu contato. Tenha um excelente dia! 👋` });
-                            await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, encerrado: true, lastActivity: Date.now() } });
-                            return;
-                        }
-                        if (iaRes.includes('LEAD_ANUNCIO')) {
-                            await sendBotMsg(rawJid, { text: `Recebemos seu interesse! Um especialista jurídico entrará em contato em instantes! 🤝` });
-                            await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, paused: true, until: Date.now() + (48*60*60*1000) } });
-                            return;
-                        }
-                        if (iaRes.includes('ESCALAR_ATENDIMENTO')) {
-                            await sendBotMsg(rawJid, { text: `Para que possamos te ajudar com precisão, escolha uma das opções abaixo:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` });
-                            await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true, errosMenu: 0 } });
-                            return;
-                        }
-
-                        await sendBotMsg(rawJid, { text: iaRes });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
-                        return;
-
-                    } catch (e) {
-                        await sendBotMsg(rawJid, { text: `Escolha uma opção para prosseguirmos:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento` });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true, errosMenu: 0 } });
-                        return;
-                    }
-                }
-
-                // 4. RESPOSTA ÀS OPÇÕES
-                const respostasMenu = {
-                    '1': '⚖️ Direito Digital: Entendido. Por favor, envie um resumo do ocorrido e eventuais provas.',
-                    '2': '⚖️ Direito Cível: Certo. Nossa equipe cível analisará sua mensagem em breve.',
-                    '3': '⚖️ Direito do Consumidor: Registrado. Informe a empresa e o problema enfrentado.',
-                    '4': '⚖️ Direito Imobiliário: Compreendido. Um especialista jurídico falará com você.',
-                    '5': '⚖️ Direito Trabalhista: Certo. Informe se você ainda possui vínculo com a empresa.',
-                    '6': '⚖️ Direito Empresarial: Setor Empresarial notificado. Por favor, aguarde o contato.',
-                    '7': '⚖️ Outros Assuntos: Descreva seu caso com detalhes para direcionarmos corretamente.',
-                    '8': '⚖️ Processo em andamento: Informe o número do processo ou o nome completo das partes.'
-                };
-
-                if (ticket.aguardandoOpcao) {
-                    if (respostasMenu[texto]) {
-                        await sendBotMsg(rawJid, { text: respostasMenu[texto] });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0, lastActivity: Date.now() } });
-                    } else {
-                        const novosErros = (ticket.errosMenu || 0) + 1;
-                        if (novosErros >= 2) {
-                            await sendBotMsg(rawJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
-                            await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
-                        } else {
-                            await sendBotMsg(rawJid, { text: `⚠️ Opção inválida. Digite apenas o número (1 a 8).` });
-                            await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros } });
-                        }
-                    }
-                    return;
-                }
-
-                // 5. LÓGICA DE INSISTÊNCIA
-                if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
-                    const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
+                    } 
                     
-                    if (texto.length >= 20 || isMedia) {
-                        await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista da Azevedo & Juvencio já vai atendê-lo.` });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
-                    } else if (!ticket.tentouInsistir) {
-                        await sendBotMsg(rawJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar nossa análise.` });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { tentouInsistir: true } });
-                    } else {
-                        await sendBotMsg(rawJid, { text: `✅ Recebido! Já encaminhei seu caso para análise interna.` });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+                    if (iaResponse === 'ENCERRAR_TICKET') {
+                        console.log(`[Encerramento] Cliente ${ticket._id} solicitou fechar. Deletando ticket.`);
+                        
+                      
+                        await sendBotMsg(cleanJid, { text: `De nada! Ficamos à disposição. Se precisar de algo no futuro, é só chamar. Tenha um ótimo dia! 👋` });
+                        
+                        // Remove o ticket do banco de dados (Limpa do Mongo)
+                        await ticketsColl.deleteOne({ _id: ticket._id });
+                        return;
                     }
+
+                    // Responde com o conhecimento da base e continua no fluxo da IA
+                    await sendBotMsg(cleanJid, { text: `${iaResponse}\n\nPodemos te ajudar em algo a mais?` });
+                    return; 
+
+                } catch (iaError) {
+                    console.error("Erro na integração com o Gemini:", iaError);
+                    // Fallback para o menu caso a IA falhe
+                    await sendBotMsg(cleanJid, {
+                        text: `Tivemos uma instabilidade no assistente. Digite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
+                    });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
+                    return;
                 }
-
-            } catch (err) { console.error("Erro Fluxo:", err); }
-        });
-
-        sock.ev.on('connection.update', (upd) => {
-            const { connection, lastDisconnect, qr } = upd;
-            if (qr) io.emit('qr', qr);
-            if (connection === 'open') io.emit('connected', { number: sock.user.id.split(':')[0] });
-            if (connection === 'close') {
-                const code = (lastDisconnect.error instanceof Boom)?.output?.statusCode;
-                if (code !== DisconnectReason.loggedOut) startBot();
             }
-        });
+        }
+        // --- FIM DA LÓGICA DE IA ---
 
-    } catch (err) { setTimeout(startBot, 5000); }
+        const respostas = {
+      '1': `📱 *Direito Digital (Desbloqueio de Contas)*
+
+Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
+Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
+
+📌 Qual a plataforma? (Instagram, Facebook, WhatsApp, Mercado Livre, Uber, etc.)
+
+📌 O que aconteceu? A conta foi hackeada, banida por "violação de termos" ou você perdeu o acesso de outra forma? Detalhe os fatos de maneira fundamentada.
+
+📸 Prints são fundamentais: Envie documentos, como capturas de tela da mensagem de erro ou do aviso de suspensão que aparece para você.
+
+👨‍⚖️ Um especialista em Direito Digital analisará seu caso e entrará em contato em breve.`,
+
+      '2': `📄 *Direito Cível e Contratual*
+
+Perfeito. Para direcionarmos você ao especialista em contratos e questões cíveis, precisamos entender o cenário:
+
+📌 Tipo de demanda: Trata-se de uma análise/elaboração de contrato, uma cobrança, um problema imobiliário ou outra questão de responsabilidade civil?
+
+📝 Resumo do caso: Explique brevemente a situação (pode ser por texto ou áudio).
+
+📎 Documentação: Se houver um contrato, notificação ou documento assinado envolvido, por favor, anexe o arquivo ou foto aqui.
+
+⏳ Aguarde um momento, nossa equipe jurídica especializada em Direito Cível/Contratual já foi notificada e falará com você em instantes.`,
+
+      '3': `🛒 *Direito do Consumidor*
+
+Compreendido! Vamos ajudar você a garantir seus direitos. Por favor, forneça os detalhes abaixo:
+
+📌 Qual o problema? É uma cobrança/negativação indevida, produto com defeito, serviço não entregue ou problema com bancos/telefonia/planos de saúde?
+
+💰 Houve prejuízo financeiro? Se sim, informe o valor aproximado.
+
+📸 Provas: Envie fotos de notas fiscais, números de protocolo de atendimento, emails de reclamação ou prints de conversas.
+
+👨‍⚖️ Um de nossos advogados especialistas em Defesa do Consumidor entrará em contato para dar os próximos passos.`,
+
+      '4': `🏠 *Direito Imobiliário*
+
+Entendido! Questões imobiliárias exigem atenção aos detalhes. Para que possamos te orientar, por favor, nos envie:
+
+📌 Qual o objeto da consulta? É sobre compra e venda, aluguel, despejo, usucapião, regularização de escritura ou problemas com condomínio?
+
+📝 Resumo da situação: Conte-nos o que está acontecendo (pode ser por texto ou áudio).
+
+📎 Documentos: Se possível, envie fotos do contrato, matrícula do imóvel ou notificações recebidas.
+
+👨‍⚖️ Um especialista em Direito Imobiliário analisará seu caso e entrará em contato em breve.`,
+
+      '5': `👷 *Direito Trabalhista*
+
+Compreendido. Vamos analisar seus direitos trabalhistas. Por favor, nos forneça as seguintes informações:
+
+📌 Situação atual: Você ainda trabalha na empresa ou já foi desligado? Se saiu, qual foi a data de saída?
+
+📌 Principais reclamações: O problema é sobre horas extras, falta de registro, verbas rescisórias, assédio ou acidente de trabalho?
+
+📝 Detalhes: Explique brevemente os fatos (texto ou áudio).
+
+👨‍⚖️ Nossa equipe especializada em Direito do Trabalho entrará em contato em instantes para te orientar.`,
+
+      '6': `🏢 *Direito Empresarial*
+
+Perfeito. Para atendermos sua empresa com a agilidade necessária, por favor, informe:
+
+📌 Natureza da demanda: Trata-se de consultoria preventiva, defesa em processos, questões societárias, tributárias ou recuperação de crédito?
+
+🏷️ Dados da empresa: Se preferir, informe o nome da empresa ou o segmento de atuação.
+
+📝 Descrição: Descreva o cenário atual ou a dúvida específica que você possui.
+
+👨‍⚖️ Um de nossos advogados corporativos entrará em contato para agendar uma conversa ou dar continuidade ao atendimento.`,
+
+      '7': `📝 *Outros Assuntos*
+
+Sem problemas! Se o seu caso não se encaixa nas opções anteriores, queremos te ouvir da mesma forma.
+
+📌 Por favor, descreva brevemente o seu assunto ou dúvida.
+
+🎤 Sinta-se à vontade para enviar um áudio, se preferir explicar com mais detalhes.
+
+🔎 Sua mensagem será encaminhada para nossa triagem e o profissional mais adequado para o seu tema entrará em contato o mais rápido possível.`,
+
+      '8': `📂 *Atendimento/Processo em Andamento*
+
+Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos informe:
+
+📌 Nome completo do titular da ação/contrato.
+
+📌 Número do processo ou CPF (caso você tenha em mãos).
+
+📌 Qual a sua solicitação? Você deseja saber o andamento, enviar um documento novo ou falar com o advogado responsável?
+
+📎 Se precisar enviar algum documento novo, pode anexar aqui agora.
+
+⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
+    };
+
+        // 5. Resposta às Opções
+        if (ticket.aguardandoOpcao) {
+            if (respostas[texto]) {
+                await sendBotMsg(cleanJid, { text: respostas[texto] });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
+            } else {
+                const novosErros = (ticket.errosMenu || 0) + 1;
+                if (novosErros >= 2) {
+                    await sendBotMsg(cleanJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                } else {
+                    await sendBotMsg(cleanJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
+                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros } });
+                }
+            }
+            return;
+        }
+
+        // 6. Lógica de Insistência (Detalhamento)
+        if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
+            const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
+            if (texto.length >= 20 || isMedia) {
+                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+            } else if (!ticket.tentouInsistir) {
+                await sendBotMsg(cleanJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { tentouInsistir: true } });
+            } else {
+                await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
+            }
+        }
+
+    } catch (err) {
+        console.error("Erro interno:", err);
+    }
+    });
+
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
+            if (qr) { lastQr = qr; io.emit('qr', qr); }
+            
+            if (connection === 'open') {
+                lastQr = null;
+                const userNumber = sock.user.id.split(':')[0];
+                let ppUrl = null;
+                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch (e) { ppUrl = null; }
+
+                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
+                io.emit('connected', currentUser);
+            }
+                        
+            if (connection === 'close') {
+                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+                if (shouldReconnect) startBot();
+                else { currentUser = null; io.emit('disconnected'); }
+            }
+        });
+
+    } catch (err) { 
+        console.error("Erro crítico:", err);
+        setTimeout(startBot, 5000);
+    }
 }
-
-// --- ROTAS DO PAINEL ADMIN ---
-app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
-app.post('/login', async (req, res) => {
-    const admin = await userLoginColl.findOne({ user: req.body.user, pass: req.body.pass });
-    if (admin) { req.session.loggedIn = true; res.redirect('/'); }
-    else res.send("<script>alert('Credenciais Inválidas'); window.location='/login';</script>");
-});
-app.get('/', (req, res) => req.session.loggedIn ? res.sendFile(path.join(__dirname, 'index.html')) : res.redirect('/login'));
-app.get('/logout-panel', (req, res) => req.session.destroy(() => res.redirect('/login')));
-app.get('/logout-whatsapp', async (req, res) => {
-    if (!req.session.loggedIn) return res.sendStatus(401);
-    await authColl.deleteMany({}); if (sock) await sock.logout();
-    io.emit('disconnected'); res.sendStatus(200);
-});
-
-// APIs DO PAINEL
-app.get('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.sendStatus(401);
-    res.json(await knowledgeColl.find({}).toArray());
-});
-app.post('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.sendStatus(401);
-    const { pergunta, resposta } = req.body;
-    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
-    res.sendStatus(200);
-});
-app.delete('/api/knowledgeColl/:id', async (req, res) => {
-    if (!req.session.loggedIn) return res.sendStatus(401);
-    await knowledgeColl.deleteOne({ _id: new ObjectId(req.params.id) });
-    res.sendStatus(200);
-});
 
 async function useMongoDBAuthState(collection) {
-    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
-    const readData = async (id) => {
-        const data = await collection.findOne({ _id: id });
-        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
-    };
-    const removeData = (id) => collection.deleteOne({ _id: id });
-    const creds = await readData('creds') || initAuthCreds();
-    return {
-        state: { creds, keys: {
-            get: async (type, ids) => {
-                const data = {};
-                await Promise.all(ids.map(async id => { data[id] = await readData(`${type}-${id}`); }));
-                return data;
-            },
-            set: async (data) => {
-                for (const type in data) {
-                    for (const id in data[type]) {
-                        const value = data[type][id];
-                        if (value) await writeData(value, `${type}-${id}`);
-                        else await removeData(`${type}-${id}`);
-                    }
-                }
-            }
-        }},
-        saveCreds: () => writeData(creds, 'creds')
-    };
+    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
+    const readData = async (id) => {
+        const data = await collection.findOne({ _id: id });
+        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
+    };
+    const removeData = (id) => collection.deleteOne({ _id: id });
+    const creds = await readData('creds') || initAuthCreds();
+    return {
+        state: {
+            creds,
+            keys: {
+                get: async (type, ids) => {
+                    const data = {};
+                    await Promise.all(ids.map(async id => {
+                        let value = await readData(`${type}-${id}`);
+                        if (type === 'app-state-sync-key' && value) value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                        data[id] = value;
+                    }));
+                    return data;
+                },
+                set: async (data) => {
+                    for (const type in data) {
+                        for (const id in data[type]) {
+                            const value = data[type][id];
+                            if (value) writeData(value, `${type}-${id}`);
+                            else removeData(`${type}-${id}`);
+                        }
+                    }
+                }
+            }
+        },
+        saveCreds: () => writeData(creds, 'creds')
+    };
 }
+
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
+app.post('/login', async (req, res) => {
+    const { user, pass } = req.body;
+    try {
+        const adminAccount = await userLoginColl.findOne({ user });
+        if (adminAccount && adminAccount.pass === pass) {
+            req.session.loggedIn = true;
+            res.redirect('/');
+        } else res.send("<script>alert('Erro'); window.location='/login';</script>");
+    } catch (e) { res.status(500).send("Erro"); }
+});
+
+app.get('/', (req, res) => {
+    if (!req.session.loggedIn) return res.redirect('/login');
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.get('/logout-panel', (req, res) => {
+    req.session.destroy(() => { res.redirect('/login'); });
+});
+
+app.get('/logout-whatsapp', async (req, res) => {
+    try {
+        await authColl.deleteMany({});
+        if (sock) await sock.logout();
+        currentUser = null; lastQr = null;
+        io.emit('disconnected');
+        res.sendStatus(200);
+    } catch (err) { res.status(500).send("Erro"); }
+});
+
+app.get('/api/knowledgeColl', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    // Buscamos e ordenamos pelos mais recentes primeiro
+    const data = await knowledgeColl.find({}).sort({ updatedAt: -1 }).toArray();
+    res.json(data);
+});
+
+app.post('/api/knowledgeColl', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    const { pergunta, resposta } = req.body;
+    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
+    res.sendStatus(200);
+});
+
+app.delete('/api/knowledgeColl/:id', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    
+    try {
+        const { id } = req.params;
+        // O segredo está em converter a string recebida em ObjectId do MongoDB
+        const result = await knowledgeColl.deleteOne({ _id: new ObjectId(id) });
+        
+        if (result.deletedCount === 1) {
+            res.sendStatus(200);
+        } else {
+            res.status(404).send("Item não encontrado");
+        }
+    } catch (err) {
+        console.error("Erro ao deletar:", err);
+        res.status(500).send("Erro interno");
+    }
+});
+
+setInterval(async () => {
+    try {
+        const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
+        const protocol = host.includes('localhost') ? 'http' : 'https';
+        await axios.get(`${protocol}://${host}/`);
+    } catch (e) {}
+}, 5 * 60 * 1000);
+
+io.on('connection', (socket) => {
+    if (currentUser) socket.emit('connected', currentUser);
+    else if (lastQr) socket.emit('qr', lastQr);
+});
+
+setInterval(async () => {
+    if (ticketsColl) {
+        const limiteInatividade = Date.now() - (24 * 60 * 60 * 1000); // 24 horas
+        const result = await ticketsColl.deleteMany({ lastActivity: { $lt: limiteInatividade } });
+        if (result.deletedCount > 0) console.log(`[Auto-Limpeza] ${result.deletedCount} tickets antigos removidos.`);
+    }
+}, 60 * 60 * 1000); // Executa a cada 1 hora
 
 server.listen(port, () => startBot());
