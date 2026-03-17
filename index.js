@@ -181,65 +181,27 @@ sock.ev.on('messages.upsert', async m => {
 
         const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const texto = textoRaw.trim();
+        const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-        const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
-        const agora = Date.now();
-
-        // Se o ticket existe e foi criado nos últimos 3 dias, identificamos como chat ativo
-        if (ticket && (agora - (ticket.createdAt || 0) < tresDiasEmMs) && !ticket.aguardandoCPF) {
-            if (!ticket.paused) {
-                await sendBotMsg(rawJid, { text: `Olá! Já identificamos você. Seu atendimento continuará com nossos advogados em breve.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { 
-                    $set: { paused: true, until: agora + tresDiasEmMs, lastActivity: agora } 
-                });
-            }
-            return;
-        }
-
-        // LÓGICA PARA LEADS QUE PRECISAM INSERIR CPF
-        if (ticket && ticket.aguardandoCPF) {
-            const cpfLimpo = texto.replace(/\D/g, '');
-            if (cpfLimpo.length === 11) {
-                await sendBotMsg(rawJid, { text: `✅ CPF Recebido! Já transferimos você. Um especialista assumirá o seu caso em breve.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, {
-                    $set: { 
-                        cpf: cpfLimpo,
-                        aguardandoCPF: false,
-                        paused: true,
-                        until: agora + tresDiasEmMs,
-                        lastActivity: agora,
-                        obrigadoEnviado: true
-                    }
-                });
-            } else {
-                await sendBotMsg(rawJid, { text: `⚠️ CPF inválido. Por favor, digite apenas os 11 números do seu CPF para prosseguirmos.` });
-            }
-            return;
-        }
-
-        // NOVO FLUXO DE ENTRADA (Se não houver ticket ou se for antigo)
-        if (!ticket || (agora - (ticket.lastActivity || 0) > timeoutMenu)) {
+        // 4. CRIAÇÃO OU REABERTURA (Bloco Único)
+        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
             const ticketId = Math.floor(1000 + Math.random() * 9000);
             const textoLower = texto.toLowerCase();
             const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
 
             if (isLead) {
-                await sendBotMsg(rawJid, { text: `Olá! Para darmos continuidade ao seu atendimento, por favor, informe o seu *CPF*:` });
+                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
                 await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
                     $set: { 
-                        id: ticketId, 
-                        numeroReal: numeroRealExtraido,
-                        aguardandoCPF: true,
-                        aguardandoIA: false, 
-                        createdAt: agora,
-                        lastActivity: agora, 
-                        lastRawJid: rawJid
+                        id: ticketId, numeroReal: numeroRealExtraido,
+                        aguardandoOpcao: false, aguardandoIA: false, 
+                        obrigadoEnviado: true, paused: true, until: blockUntil,
+                        lastActivity: Date.now(), lastRawJid: rawJid
                     }
                 }, { upsert: true });
                 return;
             }
 
-            // Fluxo Padrão para quem manda "Oi"
             await sendBotMsg(rawJid, { 
                 text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
             });
@@ -249,8 +211,10 @@ sock.ev.on('messages.upsert', async m => {
                     id: ticketId, 
                     numeroReal: numeroRealExtraido, 
                     aguardandoIA: true, 
-                    createdAt: agora,
-                    lastActivity: agora, 
+                    aguardandoOpcao: false, 
+                    obrigadoEnviado: false, 
+                    tentouInsistir: false,
+                    lastActivity: Date.now(), 
                     paused: false,
                     lastRawJid: rawJid 
                 }
