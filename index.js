@@ -112,22 +112,20 @@ sock.ev.on('messages.upsert', async m => {
     // --- LÓGICA DE UNIFICAÇÃO (LID para NÚMERO REAL) ---
     // 1. Pegamos o JID normalizado (tira :1, :2 etc)
     const cleanJid = jidNormalizedUser(rawJid); 
-    
-    // 2. Extraímos o número. Se for @lid, tentamos pegar o 'participant' (que contém o número real)
-    let numeroRealExtraido;
+    let numeroRealExtraido = cleanJid.split('@')[0];
+
+    // Se o JID for um LID, precisamos extrair o número real do participant
     if (cleanJid.includes('@lid')) {
-        // Em mensagens de LID, o número real costuma vir em msg.key.participant ou msg.participant
+        // O número real costuma estar no participant (quem enviou a mensagem de fato)
         const sender = msg.key.participant || msg.participant || cleanJid;
+        // Extrai apenas os números antes do @ e do :
         numeroRealExtraido = (sender.split('@')[0]).split(':')[0];
-    } else {
-        numeroRealExtraido = cleanJid.split('@')[0];
     }
 
-    // Validação extra: se o numeroRealExtraido ainda tiver o formato de LID (geralmente começa com 1109...)
-    // e o JID original for diferente, fazemos um esforço final para limpar
-    if (numeroRealExtraido.startsWith('110') && msg.key.participant) {
+    // Caso o numeroRealExtraido ainda comece com 1109 (LID), mas temos o participant
+    if (numeroRealExtraido.startsWith('1109') && msg.key.participant) {
         numeroRealExtraido = (msg.key.participant.split('@')[0]).split(':')[0];
-    }
+}
 
     if (processing.has(msgId)) return;
     processing.add(msgId);
@@ -139,12 +137,7 @@ sock.ev.on('messages.upsert', async m => {
     try {
         // 1. BUSCA O TICKET SEMPRE PELO NÚMERO REAL
         // Agora o _id no banco SEMPRE será o número de telefone (5519...)
-        let ticket = await ticketsColl.findOne({
-            $or: [
-                { _id: numeroRealExtraido },
-                { numeroReal: numeroRealExtraido }
-            ]
-        });
+        let ticket = await ticketsColl.findOne({ _id: numeroRealExtraido });
 
         // 2. LOGICA DE INTERVENÇÃO HUMANA
         if (isMe) {
@@ -191,32 +184,36 @@ sock.ev.on('messages.upsert', async m => {
 
         // 4. CRIAÇÃO OU REABERTURA (Sempre usando o numeroRealExtraido como _id)
         if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-            const ticketId = Math.floor(1000 + Math.random() * 9000);
-            
-            // Aqui é onde evitamos a duplicidade: usamos numeroRealExtraido como a chave primária
-            await ticketsColl.updateOne(
-                { _id: numeroRealExtraido }, 
-                {
-                    $set: { 
-                        id: ticketId, 
-                        numeroReal: numeroRealExtraido, 
-                        aguardandoIA: true, 
-                        aguardandoOpcao: false, 
-                        obrigadoEnviado: false, 
-                        tentouInsistir: false,
-                        lastActivity: Date.now(), 
-                        paused: false,
-                        lastRawJid: rawJid 
-                    }
-                }, 
-                { upsert: true }
-            );
+        const ticketId = Math.floor(1000 + Math.random() * 9000);
 
-            await sendBotMsg(rawJid, { 
-                text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
-            });
-            return;
-        }
+        // USAMOS O numeroRealExtraido como _id. 
+        // Se o usuário alternar entre Web e Celular, o ID será o mesmo e ele fará UPDATE em vez de novo INSERT.
+        await ticketsColl.updateOne(
+            { _id: numeroRealExtraido }, 
+            {
+                $set: { 
+                    id: ticketId, 
+                    numeroReal: numeroRealExtraido, 
+                    aguardandoIA: true, 
+                    aguardandoOpcao: false, 
+                    obrigadoEnviado: false, 
+                    tentouInsistir: false,
+                    lastActivity: Date.now(), 
+                    paused: false,
+                    lastRawJid: rawJid // Aqui guardamos o JID da última mensagem (pode ser o LID ou o comum)
+                }
+            }, 
+            { upsert: true }
+        );
+        
+        // Atualiza a variável local para o código seguir processando
+        ticket = await ticketsColl.findOne({ _id: numeroRealExtraido });
+
+        await sendBotMsg(rawJid, { 
+            text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
+        });
+        return;
+    }
 
         // Se o ticket já existe mas o cleanNumber era um LID, limpamos o registro "sujo" se ele existir
         if (cleanJid.includes('@lid') && cleanJid.split('@')[0] !== ticket._id) {
