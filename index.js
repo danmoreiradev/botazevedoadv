@@ -103,26 +103,26 @@ async function startBot() {
 
 sock.ev.on('messages.upsert', async m => {
     const msg = m.messages[0];
-if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-const rawJid = msg.key.remoteJid;
-// jidNormalizedUser remove o ":1", ":2" etc, mantendo apenas o ID principal
-const cleanJid = jidNormalizedUser(rawJid); 
-const isMe = msg.key.fromMe;
-const msgId = msg.key.id;
+    const rawJid = msg.key.remoteJid;
+    const cleanJid = jidNormalizedUser(rawJid);
+    const msgId = msg.key.id; // Declaração que faltava
+    const isMe = msg.key.fromMe; // Declaração que faltava
 
-// --- NOVA LÓGICA DE IDENTIFICAÇÃO ROBUSTA ---
-let numeroRealExtraido = cleanJid.split('@')[0];
+    // --- UNIFICAÇÃO DE IDENTIDADE ---
+    // Começamos com o ID que veio no remetente
+    let uniqueId = cleanJid.split('@')[0]; 
 
-// Se for LID, tentamos pegar o número real via participant (se disponível)
-if (rawJid.includes('@lid')) {
-    const participant = msg.key.participant || msg.participant || rawJid;
-    const extraido = jidNormalizedUser(participant).split('@')[0];
-    // Se o que extraímos não parece um LID (LIDs costumam ser muito longos), atualizamos
-    if (extraido.length < 15) { 
-        numeroRealExtraido = extraido;
+    // Se vier de um dispositivo vinculado (LID), tentamos extrair o número real
+    const participant = msg.key.participant || msg.participant;
+    if (participant) {
+        const extracted = jidNormalizedUser(participant).split('@')[0];
+        // Se o extraído for menor que 15 dígitos, é o número de telefone (Unique ID real)
+        if (extracted.length < 15) {
+            uniqueId = extracted;
+        }
     }
-}
 
     if (processing.has(msgId)) return;
     processing.add(msgId);
@@ -132,22 +132,30 @@ if (rawJid.includes('@lid')) {
     const blockUntil = Date.now() + tresDiasEmMs;
 
     try {
-        // 1. BUSCA O TICKET (Unificada)
+        // 1. BUSCA O TICKET (Unificada por $or)
         let ticket = await ticketsColl.findOne({
-    $or: [
-        { _id: numeroRealExtraido },       // Procura pelo número real no ID principal
-        { numeroReal: numeroRealExtraido }, // Procura em campo secundário
-        { lastRawJid: cleanJid }           // Procura pelo LID/JID exato que enviou
-    ]
-});
+            $or: [
+                { _id: uniqueId },           
+                { lastRawJid: cleanJid },    
+                { numeroReal: uniqueId }     
+            ]
+        });
 
-        // 2. LOGICA DE INTERVENÇÃO HUMANA (VOCÊ RESPONDEU)
+        // 2. FUSÃO DE TICKETS (Se o Baileys finalmente entregou o número real)
+        if (ticket && ticket._id.includes('@lid') && uniqueId.length < 15) {
+            console.log(`[Fusão] Migrando ticket do LID ${ticket._id} para o número ${uniqueId}`);
+            await ticketsColl.deleteOne({ _id: ticket._id });
+            ticket._id = uniqueId;
+            ticket.numeroReal = uniqueId;
+            await ticketsColl.replaceOne({ _id: uniqueId }, ticket, { upsert: true });
+        }
+
+        // 3. LÓGICA DE INTERVENÇÃO (VOCÊ RESPONDEU)
         if (isMe) {
             if (msgId !== lastBotMessageId) {
-                console.log(`[Intervenção] Humano detectado para ${numeroRealExtraido}. Pausando bot.`);
+                console.log(`[Intervenção] Humano detectado para ${uniqueId}. Pausando bot.`);
                 
-                // Define o alvo: prioriza o ID do ticket encontrado, senão usa o número extraído
-                const targetId = ticket ? ticket._id : numeroRealExtraido;
+                const targetId = ticket ? ticket._id : uniqueId;
 
                 await ticketsColl.updateOne(
                     { _id: targetId }, 
@@ -158,13 +166,12 @@ if (rawJid.includes('@lid')) {
                             lastActivity: Date.now(),
                             aguardandoIA: false,
                             aguardandoOpcao: false,
-                            obrigadoEnviado: true, // Evita que o bot mande "Recebido" depois
-                            numeroReal: numeroRealExtraido
+                            obrigadoEnviado: true,
+                            numeroReal: uniqueId,
+                            lastRawJid: cleanJid
                         },
-                        // Se o ticket for novo (criado agora pelo advogado), gera o ID numérico
                         $setOnInsert: {
-                            id: Math.floor(1000 + Math.random() * 9000),
-                            lastRawJid: rawJid
+                            id: Math.floor(1000 + Math.random() * 9000)
                         }
                     }, 
                     { upsert: true }
