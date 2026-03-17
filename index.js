@@ -196,19 +196,20 @@ sock.ev.on('messages.upsert', async m => {
         const timeoutMenu = 2 * 60 * 60 * 1000; 
 
         // 4. CRIAÇÃO OU REABERTURA (Ajustado para unificar o ID)
+// 4. CRIAÇÃO OU REABERTURA (Ajustado para usar uniqueId)
 if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
     const ticketId = Math.floor(1000 + Math.random() * 9000);
     const textoLower = texto.toLowerCase();
     const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
 
-    // Decidimos o ID principal: Sempre priorize o número de telefone (curto) sobre o LID (longo)
-    const primaryId = (numeroRealExtraido.length > 15 && ticket?.numeroReal) ? ticket.numeroReal : numeroRealExtraido;
+    // Decidimos o ID principal: Sempre priorize o uniqueId (que agora contém o número real ou o LID)
+    const primaryId = uniqueId; 
 
     const updateData = {
         $set: { 
             id: ticketId,
-            numeroReal: primaryId, // Armazena o "5519..." aqui
-            lastRawJid: cleanJid,  // Armazena o LID ou JID atual
+            numeroReal: uniqueId,   // Aqui usamos o uniqueId corrigido
+            lastRawJid: cleanJid,  // Armazena o LID ou JID atual para resposta
             lastActivity: Date.now(),
             paused: isLead,
             until: isLead ? blockUntil : 0,
@@ -225,7 +226,7 @@ if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
         await sendBotMsg(rawJid, { text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` });
     }
 
-    // O segredo do sucesso: Upsert pelo primaryId (Número Real)
+    // O segredo do sucesso: Upsert pelo uniqueId
     await ticketsColl.updateOne({ _id: primaryId }, updateData, { upsert: true });
     return;
 }
