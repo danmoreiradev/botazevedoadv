@@ -101,22 +101,35 @@ async function startBot() {
 
         sock.ev.on('creds.update', saveCreds);
 
+function getRealNumber(msg) {
+    const remoteJid = msg.key.remoteJid;
+
+    let userJid = msg.key.participant || msg.participant || remoteJid;
+
+    userJid = jidNormalizedUser(userJid);
+
+    let number = userJid.split('@')[0];
+
+    if (number.includes(':')) {
+        number = number.split(':')[0];
+    }
+
+    return number;
+}
+
 sock.ev.on('messages.upsert', async m => {
     const msg = m.messages[0];
     if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
     const rawJid = msg.key.remoteJid;
-    const cleanJid = jidNormalizedUser(rawJid); 
-    const cleanNumber = cleanJid.split('@')[0];
+    const numeroRealExtraido = getRealNumber(msg);
+    const numeroFinal = (numeroRealExtraido && numeroRealExtraido.length >= 10) 
+        ? numeroRealExtraido 
+        : rawJid;
+
+    const cleanJid = jidNormalizedUser(rawJid); // mantém para envio
     const isMe = msg.key.fromMe;
     const msgId = msg.key.id;
-
-    // --- IDENTIFICAÇÃO DO NÚMERO (LID vs REAL) ---
-    let numeroRealExtraido = cleanNumber;
-    if (rawJid.includes('@lid')) {
-        const vnumber = msg.key.participant || msg.participant || rawJid;
-        numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
-    }
 
     if (processing.has(msgId)) return;
     processing.add(msgId);
@@ -127,14 +140,7 @@ sock.ev.on('messages.upsert', async m => {
 
     try {
         // 1. BUSCA O TICKET (Unificada)
-        let ticket = await ticketsColl.findOne({
-            $or: [
-                { _id: cleanNumber },
-                { numeroReal: cleanNumber },
-                { _id: numeroRealExtraido },
-                { numeroReal: numeroRealExtraido }
-            ]
-        });
+        let ticket = await ticketsColl.findOne({ _id: numeroFinal });
 
         // 2. LOGICA DE INTERVENÇÃO HUMANA (VOCÊ RESPONDEU)
         if (isMe) {
@@ -142,7 +148,7 @@ sock.ev.on('messages.upsert', async m => {
                 console.log(`[Intervenção] Humano detectado para ${numeroRealExtraido}. Pausando bot.`);
                 
                 // Define o alvo: prioriza o ID do ticket encontrado, senão usa o número extraído
-                const targetId = ticket ? ticket._id : numeroRealExtraido;
+                const targetId = ticket ? ticket._id : numeroFinal;
 
                 await ticketsColl.updateOne(
                     { _id: targetId }, 
@@ -191,9 +197,9 @@ sock.ev.on('messages.upsert', async m => {
 
             if (isLead) {
                 await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
-                await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+                await ticketsColl.updateOne({ _id: numeroFinal }, {
                     $set: { 
-                        id: ticketId, numeroReal: numeroRealExtraido,
+                        id: ticketId, numeroReal: numeroFinal,
                         aguardandoOpcao: false, aguardandoIA: false, 
                         obrigadoEnviado: true, paused: true, until: blockUntil,
                         lastActivity: Date.now(), lastRawJid: rawJid
@@ -206,7 +212,7 @@ sock.ev.on('messages.upsert', async m => {
                 text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
             });
 
-            await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+            await ticketsColl.updateOne({ _id: numeroFinal }, {
                 $set: { 
                     id: ticketId, 
                     numeroReal: numeroRealExtraido, 
@@ -224,12 +230,7 @@ sock.ev.on('messages.upsert', async m => {
 
         // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
-        
-        // Se a mensagem veio por um LID mas o ticket está no Número Real, apaga o registro do LID se ele existir solto
-        if (cleanNumber !== ticket._id && cleanNumber.length > 13) {
-             await ticketsColl.deleteOne({ _id: cleanNumber });
-        }
-
+                
         // --- NOVA LÓGICA DE INTELIGÊNCIA ARTIFICIAL ---
         if (ticket.aguardandoIA) {
             // Checagem de segurança para leads na segunda mensagem
