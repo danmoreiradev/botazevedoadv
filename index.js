@@ -65,6 +65,25 @@ async function sendBotMsg(jid, content) {
     }
 }
 
+function validarCPF(cpf) {
+    cpf = cpf.replace(/[^\d]+/g, ''); // Remove tudo que não for número
+    if (cpf === '' || cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+    
+    let add = 0, rev = 0;
+    for (let i = 0; i < 9; i++) add += parseInt(cpf.charAt(i)) * (10 - i);
+    rev = 11 - (add % 11);
+    if (rev === 10 || rev === 11) rev = 0;
+    if (rev !== parseInt(cpf.charAt(9))) return false;
+    
+    add = 0;
+    for (let i = 0; i < 10; i++) add += parseInt(cpf.charAt(i)) * (11 - i);
+    rev = 11 - (add % 11);
+    if (rev === 10 || rev === 11) rev = 0;
+    if (rev !== parseInt(cpf.charAt(10))) return false;
+    
+    return true;
+}
+
 async function startBot() {
     try {
         await client.connect();
@@ -183,44 +202,90 @@ sock.ev.on('messages.upsert', async m => {
         const texto = textoRaw.trim();
         const timeoutMenu = 2 * 60 * 60 * 1000; 
 
-        // 4. CRIAÇÃO OU REABERTURA (Bloco Único)
-        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-            const ticketId = Math.floor(1000 + Math.random() * 9000);
-            const textoLower = texto.toLowerCase();
-            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
+        // 4. CRIAÇÃO OU REABERTURA (Solicitando CPF no 1º contato)
+if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+    const ticketId = Math.floor(1000 + Math.random() * 9000);
+    const textoLower = texto.toLowerCase();
+    const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
 
-            if (isLead) {
-                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
-                await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
-                    $set: { 
-                        id: ticketId, numeroReal: numeroRealExtraido,
-                        aguardandoOpcao: false, aguardandoIA: false, 
-                        obrigadoEnviado: true, paused: true, until: blockUntil,
-                        lastActivity: Date.now(), lastRawJid: rawJid
-                    }
-                }, { upsert: true });
+    await sendBotMsg(rawJid, { 
+        text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. Para iniciar seu atendimento, por favor, digite seu *CPF* (apenas números):` 
+    });
+
+    await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+        $set: { 
+            id: ticketId, 
+            numeroReal: numeroRealExtraido, 
+            aguardandoIA: true, 
+            aguardandoOpcao: false, 
+            obrigadoEnviado: false, 
+            tentouInsistir: false,
+            lastActivity: Date.now(), 
+            paused: false,
+            lastRawJid: rawJid,
+            // Colunas novas para o fluxo de CPF
+            aguardandoCPF: true,
+            isLeadOriginal: isLead 
+        }
+    }, { upsert: true });
+    return;
+}
+
+        // 4.1. VALIDAÇÃO E UNIFICAÇÃO POR CPF
+        if (ticket.aguardandoCPF) {
+            const cpfLimpo = texto.replace(/[^\d]+/g, '');
+
+            // Validação simples de 11 dígitos (pode usar a função validarCPF enviada anteriormente)
+            if (cpfLimpo.length !== 11) {
+                await sendBotMsg(rawJid, { text: `⚠️ CPF inválido. Por favor, digite os 11 números do seu CPF para continuar:` });
                 return;
             }
 
-            await sendBotMsg(rawJid, { 
-                text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. O que podemos te ajudar hoje?` 
+            // Busca se existe ticket desse CPF nos últimos 3 dias (exceto o atual)
+            const ticketAnterior = await ticketsColl.findOne({
+                cpf: cpfLimpo,
+                _id: { $ne: ticket._id },
+                lastActivity: { $gte: Date.now() - tresDiasEmMs }
             });
 
-            await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
+            if (ticketAnterior) {
+                // Encontrou duplicado: Deleta o novo e atualiza o antigo com o novo JID/LID
+                await ticketsColl.deleteOne({ _id: ticket._id });
+                await ticketsColl.updateOne({ _id: ticketAnterior._id }, {
+                    $set: { 
+                        numeroReal: numeroRealExtraido,
+                        lastRawJid: rawJid,
+                        lastActivity: Date.now()
+                    }
+                });
+
+                await sendBotMsg(rawJid, { text: `✅ Localizamos seu atendimento em aberto. Continuando por aqui...` });
+                return; 
+            }
+
+            // Se é um CPF novo, libera o fluxo mantendo sua lógica de LEAD ou IA
+            await ticketsColl.updateOne({ _id: ticket._id }, {
                 $set: { 
-                    id: ticketId, 
-                    numeroReal: numeroRealExtraido, 
-                    aguardandoIA: true, 
-                    aguardandoOpcao: false, 
-                    obrigadoEnviado: false, 
-                    tentouInsistir: false,
-                    lastActivity: Date.now(), 
-                    paused: false,
-                    lastRawJid: rawJid 
+                    cpf: cpfLimpo, 
+                    aguardandoCPF: false 
                 }
-            }, { upsert: true });
+            });
+
+            if (ticket.isLeadOriginal) {
+                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                await ticketsColl.updateOne({ _id: ticket._id }, {
+                    $set: { 
+                        aguardandoIA: false, 
+                        obrigadoEnviado: true, 
+                        paused: true, 
+                        until: blockUntil 
+                    }
+                });
+            } else {
+                await sendBotMsg(rawJid, { text: `Obrigado! Como podemos te ajudar hoje?` });
+            }
             return;
-        }
+    }
 
         // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
@@ -281,7 +346,7 @@ Sua resposta:`;
                         console.log(`[Encerramento] Cliente ${ticket._id} solicitou fechar. Deletando ticket.`);
                         
                       
-                        await sendBotMsg(cleanJid, { text: `De nada! Ficamos à disposição. Se precisar de algo no futuro, é só chamar. Tenha um ótimo dia! 👋` });
+                        await sendBotMsg(cleanJid, { text: `Tudo bem! Ficamos à disposição. Se precisar de algo no futuro, é só chamar. Tenha um ótimo dia! 👋` });
                         
                         // Remove o ticket do banco de dados (Limpa do Mongo)
                         await ticketsColl.deleteOne({ _id: ticket._id });
