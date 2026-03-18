@@ -349,10 +349,23 @@ Sua resposta:`;
                     } 
 
                     if (iaResponse === 'ESCALAR_ATENDIMENTO') {
-                        await sendBotMsg(cleanJid, { text: `✅ Já encaminhei seu caso para um especialista, ele assumirá seu atendimento em breve.` });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
-                        return;
-                    } 
+                            console.log(`[Escalonamento] IA solicitou intervenção humana para ${ticket._id}. Enviando menu.`);
+                            
+                            // 1. Envia o menu de opções para o cliente escolher a área
+                            await sendBotMsg(cleanJid, {
+                                text: `Entendido. Para que eu possa te encaminhar ao especialista correto, por favor, escolha uma das opções abaixo digitando apenas o número:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
+                            });
+
+                            // 2. Atualiza o ticket: desativa IA e ativa o menu de opções (aguardandoOpcao)
+                            await ticketsColl.updateOne({ _id: ticket._id }, { 
+                                $set: { 
+                                    aguardandoIA: false, 
+                                    aguardandoOpcao: true,
+                                    errosMenu: 0 
+                                } 
+                            });
+                            return;
+                        }
                     
                     if (iaResponse === 'ENCERRAR_TICKET') {
                         console.log(`[Encerramento] Cliente ${ticket._id} solicitou fechar. Deletando ticket.`);
