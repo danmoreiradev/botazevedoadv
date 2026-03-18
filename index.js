@@ -326,7 +326,7 @@ ${contextText}
 Mensagem do cliente: "${texto}"
 
 Regras:
-1. Se o cliente pedir para falar com atendente, advogado, humano ou se o assunto não existir na base de conhecimento, responda APENAS com a palavra: ESCALAR_ATENDIMENTO
+1. Se o cliente agradecer ou não e pedir para falar com atendente, advogado, humano ou se o assunto não existir na base de conhecimento, responda APENAS com a palavra: ESCALAR_ATENDIMENTO
 2. Se a mensagem for claramente um lead automático de anúncios, responda APENAS com a palavra: LEAD_ANUNCIO
 3. Se a pergunta puder ser respondida usando a base de conhecimento, responda de forma natural e prestativa.
 4. Se o cliente agradecer e indicar que a dúvida foi resolvida (ex: "obrigado", "não", "não preciso mais", "pode encerrar", "era só isso"), responda APENAS com a palavra: ENCERRAR_TICKET
@@ -344,6 +344,12 @@ Sua resposta:`;
 
                     if (iaResponse === 'LEAD_ANUNCIO') {
                         await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele assumirá seu atendimento em breve.` });
+                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
+                        return;
+                    } 
+
+                    if (iaResponse === 'ESCALAR_ATENDIMENTO') {
+                        await sendBotMsg(cleanJid, { text: `✅ Já encaminhei seu caso para um especialista, ele assumirá seu atendimento em breve.` });
                         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
                         return;
                     } 
