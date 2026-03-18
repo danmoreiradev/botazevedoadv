@@ -231,61 +231,67 @@ if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
     return;
 }
 
-        // 4.1. VALIDAÇÃO E UNIFICAÇÃO POR CPF
-        if (ticket.aguardandoCPF) {
-            const cpfLimpo = texto.replace(/[^\d]+/g, '');
+            // 4.1. VALIDAÇÃO E UNIFICAÇÃO POR CPF
+            if (ticket.aguardandoCPF) {
+                const cpfLimpo = texto.replace(/[^\d]+/g, '');
 
-            // Validação simples de 11 dígitos (pode usar a função validarCPF enviada anteriormente)
-            if (cpfLimpo.length !== 11) {
-                await sendBotMsg(rawJid, { text: `⚠️ CPF inválido. Por favor, digite os 11 números do seu CPF para continuar:` });
-                return;
-            }
+                if (cpfLimpo.length !== 11) {
+                    await sendBotMsg(rawJid, { text: `⚠️ CPF inválido. Por favor, digite os 11 números do seu CPF para continuar:` });
+                    return;
+                }
 
-            // Busca se existe ticket desse CPF nos últimos 3 dias (exceto o atual)
-            const ticketAnterior = await ticketsColl.findOne({
-                cpf: cpfLimpo,
-                _id: { $ne: ticket._id },
-                lastActivity: { $gte: Date.now() - tresDiasEmMs }
-            });
-
-            if (ticketAnterior) {
-                // Encontrou duplicado: Deleta o novo e atualiza o antigo com o novo JID/LID
-                await ticketsColl.deleteOne({ _id: ticket._id });
-                await ticketsColl.updateOne({ _id: ticketAnterior._id }, {
-                    $set: { 
-                        numeroReal: numeroRealExtraido,
-                        lastRawJid: rawJid,
-                        lastActivity: Date.now()
-                    }
+                // Busca se existe ticket desse CPF nos últimos 3 dias (exceto o atual)
+                const ticketAnterior = await ticketsColl.findOne({
+                    cpf: cpfLimpo,
+                    _id: { $ne: ticket._id },
+                    lastActivity: { $gte: Date.now() - tresDiasEmMs }
                 });
 
-                await sendBotMsg(rawJid, { text: `✅ Localizamos seu atendimento em aberto. Continuando por aqui...` });
-                return; 
-            }
+                if (ticketAnterior) {
+                    // 1. Deleta o ticket novo (temporário)
+                    await ticketsColl.deleteOne({ _id: ticket._id });
 
-            // Se é um CPF novo, libera o fluxo mantendo sua lógica de LEAD ou IA
-            await ticketsColl.updateOne({ _id: ticket._id }, {
-                $set: { 
-                    cpf: cpfLimpo, 
-                    aguardandoCPF: false 
+                    // 2. Atualiza o ticket anterior com os novos dados de conexão e aplica a PAUSA
+                    await ticketsColl.updateOne({ _id: ticketAnterior._id }, {
+                        $set: { 
+                            numeroReal: numeroRealExtraido,
+                            lastRawJid: rawJid,
+                            lastActivity: Date.now(),
+                            paused: true,               // Pausa o bot
+                            until: blockUntil,          // Define os 3 dias
+                            aguardandoIA: false,        // Para de responder via IA
+                            obrigadoEnviado: true       // Marca como finalizado para o bot
+                        }
+                    });
+
+                    await sendBotMsg(rawJid, { text: `✅ Localizamos seu atendimento anterior, vou acionar o especialista o quanto antes.` });
+                    return; 
                 }
-            });
 
-            if (ticket.isLeadOriginal) {
-                await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                // --- SE FOR UM CPF NOVO ---
                 await ticketsColl.updateOne({ _id: ticket._id }, {
                     $set: { 
-                        aguardandoIA: false, 
-                        obrigadoEnviado: true, 
-                        paused: true, 
-                        until: blockUntil 
+                        cpf: cpfLimpo, 
+                        aguardandoCPF: false 
                     }
                 });
-            } else {
-                await sendBotMsg(rawJid, { text: `Obrigado! Como podemos te ajudar hoje?` });
+
+                if (ticket.isLeadOriginal) {
+                    await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
+                    await ticketsColl.updateOne({ _id: ticket._id }, {
+                        $set: { 
+                            aguardandoIA: false, 
+                            obrigadoEnviado: true, 
+                            paused: true, 
+                            until: blockUntil 
+                        }
+                    });
+                } else {
+                    // Se não for lead, pergunta o que ele deseja e o próximo loop cairá na IA (aguardandoIA já é true do passo 4)
+                    await sendBotMsg(rawJid, { text: `Obrigado! Como podemos te ajudar hoje?` });
+                }
+                return;
             }
-            return;
-    }
 
         // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
