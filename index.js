@@ -379,8 +379,8 @@ Sua resposta:`;
                     }
 
                     // Responde com o conhecimento da base e continua no fluxo da IA
-                    await sendBotMsg(cleanJid, { text: `${iaResponse}\n\nPodemos te ajudar em algo a mais?` });
-                    return; 
+                    await sendBotMsg(cleanJid, { text: iaResponse });
+                    return;
 
                 } catch (iaError) {
                     console.error("Erro na integração com o Gemini:", iaError);
