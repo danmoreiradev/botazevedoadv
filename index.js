@@ -353,7 +353,7 @@ Sua resposta:`;
                             
                             // 1. Envia o menu de opções para o cliente escolher a área
                             await sendBotMsg(cleanJid, {
-                                text: `Entendido. Para que eu possa te encaminhar ao especialista correto, por favor, escolha uma das opções abaixo digitando apenas o número:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
+                                text: `Entendido. Para que eu possa te encaminhar ao especialista correto, por favor, escolha uma das opções abaixo digitando apenas o número:\n\n1️⃣ Direito Digital (Desbloqueio de conta)\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
                             });
 
                             // 2. Atualiza o ticket: desativa IA e ativa o menu de opções (aguardandoOpcao)
