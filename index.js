@@ -51,7 +51,7 @@ let sock;
 let lastBotMessageId = null; 
 let processing = new Set(); 
 
-let ticketsColl, authColl, knowledgeColl, userLoginColl;
+let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl;
 
 async function sendBotMsg(jid, content) {
     try {
@@ -84,6 +84,127 @@ function validarCPF(cpf) {
     return true;
 }
 
+
+const MENU_ATENDIMENTO = `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio.
+
+Para iniciar seu atendimento, escolha uma das opções abaixo digitando apenas o número:
+
+1️⃣ Direito Digital (Desbloqueio de conta)
+2️⃣ Direito Cível
+3️⃣ Direito do Consumidor
+4️⃣ Direito Imobiliário
+5️⃣ Direito Trabalhista
+6️⃣ Direito Empresarial
+7️⃣ Outros Assuntos
+8️⃣ Processo em andamento`;
+
+const PERGUNTA_CADASTRO_CPF = `Antes de encerrarmos: deseja cadastrar seu *CPF* para facilitar a identificação em atendimentos futuros?
+
+1️⃣ Sim, desejo cadastrar
+2️⃣ Não, obrigado`;
+
+function normalizarTexto(texto = '') {
+    return texto
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim();
+}
+
+function respostaPositivaCPF(texto) {
+    const valor = normalizarTexto(texto);
+    return ['1', 'sim', 's', 'quero', 'desejo', 'pode cadastrar', 'sim quero', 'sim desejo'].includes(valor);
+}
+
+function respostaNegativaCPF(texto) {
+    const valor = normalizarTexto(texto);
+    return ['2', 'nao', 'n', 'nao obrigado', 'nao quero', 'prefiro nao', 'agora nao'].includes(valor);
+}
+
+function clienteQuerEncerrar(texto, permitirAgradecimentoIsolado = false) {
+    const valor = normalizarTexto(texto);
+
+    const frasesDeEncerramento = [
+        'pode encerrar',
+        'pode finalizar',
+        'quero encerrar',
+        'quero finalizar',
+        'era so isso',
+        'e so isso',
+        'nao preciso mais',
+        'nao preciso de mais nada',
+        'minha duvida foi resolvida',
+        'duvida resolvida',
+        'esta resolvido',
+        'ja resolveu',
+        'atendimento finalizado'
+    ];
+
+    if (frasesDeEncerramento.some(frase => valor.includes(frase))) return true;
+
+    // Quando já existe atendimento humano e o bot está pausado,
+    // um agradecimento curto costuma representar o encerramento.
+    if (permitirAgradecimentoIsolado) {
+        return ['obrigado', 'obrigada', 'muito obrigado', 'muito obrigada', 'valeu', 'agradeco'].includes(valor);
+    }
+
+    return false;
+}
+
+async function solicitarCadastroCPF(ticket, jid) {
+    await sendBotMsg(jid, { text: PERGUNTA_CADASTRO_CPF });
+
+    await ticketsColl.updateOne(
+        { _id: ticket._id },
+        {
+            $set: {
+                aguardandoDesejaCPF: true,
+                aguardandoCPF: false,
+                finalizandoCadastroCPF: true,
+                aguardandoIA: false,
+                aguardandoOpcao: false,
+                obrigadoEnviado: true,
+                paused: false,
+                lastActivity: Date.now()
+            }
+        }
+    );
+}
+
+async function encerrarELimparTicket(ticket, jid, mensagem = `Tudo bem! Atendimento encerrado. Ficamos à disposição. 👋`) {
+    await sendBotMsg(jid, { text: mensagem });
+    await ticketsColl.deleteOne({ _id: ticket._id });
+}
+
+async function salvarCPFClienteEEncerrar(ticket, jid, cpfLimpo, numeroRealExtraido, rawJid) {
+    const agora = Date.now();
+
+    // O CPF fica em uma coleção permanente, separada dos tickets temporários.
+    // Usar o próprio CPF como _id evita duplicidade de cadastro.
+    await clientsColl.updateOne(
+        { _id: cpfLimpo },
+        {
+            $set: {
+                cpf: cpfLimpo,
+                numeroReal: numeroRealExtraido,
+                lastRawJid: rawJid,
+                updatedAt: agora
+            },
+            $setOnInsert: {
+                createdAt: agora
+            }
+        },
+        { upsert: true }
+    );
+
+    await sendBotMsg(jid, {
+        text: `✅ CPF cadastrado com sucesso. Atendimento encerrado. Ficamos à disposição sempre que precisar. 👋`
+    });
+
+    // O cadastro permanece em client_registry; o ticket temporário é limpo.
+    await ticketsColl.deleteOne({ _id: ticket._id });
+}
+
 async function startBot() {
     try {
         await client.connect();
@@ -92,6 +213,7 @@ async function startBot() {
         ticketsColl = db.collection('active_tickets');
         knowledgeColl = db.collection('knowledge_base');
         userLoginColl = db.collection('user_login');
+        clientsColl = db.collection('client_registry');
         
         apiKeysColl = db.collection('api_keys');
         const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
@@ -187,111 +309,152 @@ sock.ev.on('messages.upsert', async m => {
             return; 
         }
 
-        // 3. VERIFICAÇÃO DE PAUSA ATIVA
-        if (ticket && ticket.paused) {
-            if (Date.now() < ticket.until) {
-                console.log(`[Bloqueio] Bot pausado para ${ticket._id} até ${new Date(ticket.until).toLocaleString()}`);
-                return;
-            } else {
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { paused: false } });
-                ticket.paused = false; // Atualiza a variável local para continuar o processamento
-            }
-        }
-
         const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const texto = textoRaw.trim();
-        const timeoutMenu = 2 * 60 * 60 * 1000; 
+        const timeoutMenu = 2 * 60 * 60 * 1000;
 
-        // 4. CRIAÇÃO OU REABERTURA (Solicitando CPF no 1º contato)
-if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-    const ticketId = Math.floor(1000 + Math.random() * 9000);
-    const textoLower = texto.toLowerCase();
-    const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
-
-    await sendBotMsg(rawJid, { 
-        text: `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio. Para iniciar seu atendimento, por favor, digite seu *CPF* (apenas números):` 
-    });
-
-    await ticketsColl.updateOne({ _id: numeroRealExtraido }, {
-        $set: { 
-            id: ticketId, 
-            numeroReal: numeroRealExtraido, 
-            aguardandoIA: true, 
-            aguardandoOpcao: false, 
-            obrigadoEnviado: false, 
-            tentouInsistir: false,
-            lastActivity: Date.now(), 
-            paused: false,
-            lastRawJid: rawJid,
-            // Colunas novas para o fluxo de CPF
-            aguardandoCPF: true,
-            isLeadOriginal: isLead 
-        }
-    }, { upsert: true });
-    return;
-}
-
-            // 4.1. VALIDAÇÃO E UNIFICAÇÃO POR CPF
-            if (ticket.aguardandoCPF) {
-                const cpfLimpo = texto.replace(/[^\d]+/g, '');
-
-                if (cpfLimpo.length !== 11) {
-                    await sendBotMsg(rawJid, { text: `⚠️ CPF inválido. Por favor, digite os 11 números do seu CPF para continuar:` });
-                    return;
-                }
-
-                // Busca se existe ticket desse CPF nos últimos 3 dias (exceto o atual)
-                const ticketAnterior = await ticketsColl.findOne({
-                    cpf: cpfLimpo,
-                    _id: { $ne: ticket._id },
-                    lastActivity: { $gte: Date.now() - tresDiasEmMs }
-                });
-
-                if (ticketAnterior) {
-                    // 1. Deleta o ticket novo (temporário)
-                    await ticketsColl.deleteOne({ _id: ticket._id });
-
-                    // 2. Atualiza o ticket anterior com os novos dados de conexão e aplica a PAUSA
-                    await ticketsColl.updateOne({ _id: ticketAnterior._id }, {
-                        $set: { 
-                            numeroReal: numeroRealExtraido,
-                            lastRawJid: rawJid,
-                            lastActivity: Date.now(),
-                            paused: true,               // Pausa o bot
-                            until: blockUntil,          // Define os 3 dias
-                            aguardandoIA: false,        // Para de responder via IA
-                            obrigadoEnviado: true       // Marca como finalizado para o bot
-                        }
-                    });
-
-                    await sendBotMsg(rawJid, { text: `✅ Localizamos seu atendimento anterior, vou acionar o especialista o quanto antes.` });
-                    return; 
-                }
-
-                // --- SE FOR UM CPF NOVO ---
-                await ticketsColl.updateOne({ _id: ticket._id }, {
-                    $set: { 
-                        cpf: cpfLimpo, 
-                        aguardandoCPF: false 
-                    }
-                });
-
-                if (ticket.isLeadOriginal) {
-                    await sendBotMsg(rawJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
-                    await ticketsColl.updateOne({ _id: ticket._id }, {
-                        $set: { 
-                            aguardandoIA: false, 
-                            obrigadoEnviado: true, 
-                            paused: true, 
-                            until: blockUntil 
-                        }
-                    });
+        // 3. VERIFICAÇÃO DE PAUSA ATIVA
+        // Enquanto um humano estiver atendendo, o bot continua silencioso.
+        // Exceção: se o próprio cliente disser claramente que quer encerrar,
+        // inicia-se o cadastro opcional de CPF.
+        if (ticket && ticket.paused) {
+            if (Date.now() < ticket.until) {
+                if (clienteQuerEncerrar(texto, true)) {
+                    console.log(`[Encerramento] Cliente ${ticket._id} sinalizou fim do atendimento.`);
+                    await solicitarCadastroCPF(ticket, rawJid);
                 } else {
-                    // Se não for lead, pergunta o que ele deseja e o próximo loop cairá na IA (aguardandoIA já é true do passo 4)
-                    await sendBotMsg(rawJid, { text: `Obrigado! Como podemos te ajudar hoje?` });
+                    console.log(`[Bloqueio] Bot pausado para ${ticket._id} até ${new Date(ticket.until).toLocaleString()}`);
                 }
                 return;
+            } else {
+                await ticketsColl.updateOne(
+                    { _id: ticket._id },
+                    { $set: { paused: false } }
+                );
+                ticket.paused = false;
             }
+        }
+
+        // 4. CRIAÇÃO OU REABERTURA
+        // REGRA NOVA: CPF não é mais solicitado no início.
+        // O primeiro passo é sempre apresentar o menu de atendimento.
+        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
+            const ticketId = Math.floor(1000 + Math.random() * 9000);
+            const targetId = ticket ? ticket._id : numeroRealExtraido;
+
+            await sendBotMsg(rawJid, { text: MENU_ATENDIMENTO });
+
+            await ticketsColl.updateOne(
+                { _id: targetId },
+                {
+                    $set: {
+                        id: ticketId,
+                        numeroReal: numeroRealExtraido,
+                        aguardandoIA: false,
+                        aguardandoOpcao: true,
+                        aguardandoDesejaCPF: false,
+                        aguardandoCPF: false,
+                        finalizandoCadastroCPF: false,
+                        obrigadoEnviado: false,
+                        tentouInsistir: false,
+                        errosMenu: 0,
+                        lastActivity: Date.now(),
+                        paused: false,
+                        lastRawJid: rawJid
+                    }
+                },
+                { upsert: true }
+            );
+            return;
+        }
+
+        // 4.1. CLIENTE ESTÁ DECIDINDO SE QUER CADASTRAR O CPF
+        if (ticket.aguardandoDesejaCPF) {
+            if (respostaPositivaCPF(texto)) {
+                await sendBotMsg(rawJid, {
+                    text: `Perfeito. Digite seu *CPF* com 11 números:`
+                });
+
+                await ticketsColl.updateOne(
+                    { _id: ticket._id },
+                    {
+                        $set: {
+                            aguardandoDesejaCPF: false,
+                            aguardandoCPF: true,
+                            finalizandoCadastroCPF: true,
+                            lastActivity: Date.now(),
+                            paused: false
+                        }
+                    }
+                );
+                return;
+            }
+
+            if (respostaNegativaCPF(texto)) {
+                await encerrarELimparTicket(
+                    ticket,
+                    rawJid,
+                    `Tudo bem! Não faremos o cadastro do CPF. Atendimento encerrado. Ficamos à disposição. 👋`
+                );
+                return;
+            }
+
+            await sendBotMsg(rawJid, {
+                text: `Por favor, responda apenas:\n\n1️⃣ Sim, desejo cadastrar\n2️⃣ Não, obrigado`
+            });
+            return;
+        }
+
+        // 4.2. CPF É SOLICITADO SOMENTE NESTE MOMENTO, APÓS O CLIENTE OPTAR PELO CADASTRO
+        if (ticket.aguardandoCPF && ticket.finalizandoCadastroCPF) {
+            const cpfLimpo = texto.replace(/[^\d]+/g, '');
+
+            if (!validarCPF(cpfLimpo)) {
+                await sendBotMsg(rawJid, {
+                    text: `⚠️ CPF inválido. Confira os números e digite novamente o CPF com 11 dígitos:`
+                });
+                return;
+            }
+
+            await salvarCPFClienteEEncerrar(
+                ticket,
+                rawJid,
+                cpfLimpo,
+                numeroRealExtraido,
+                rawJid
+            );
+            return;
+        }
+
+        // Compatibilidade com tickets que já estavam aguardando CPF na versão antiga.
+        // Eles deixam de ficar presos no fluxo antigo e passam para o menu.
+        if (ticket.aguardandoCPF && !ticket.finalizandoCadastroCPF) {
+            await ticketsColl.updateOne(
+                { _id: ticket._id },
+                {
+                    $set: {
+                        aguardandoCPF: false,
+                        aguardandoIA: false,
+                        aguardandoOpcao: true,
+                        aguardandoDesejaCPF: false,
+                        finalizandoCadastroCPF: false,
+                        errosMenu: 0,
+                        lastActivity: Date.now()
+                    }
+                }
+            );
+
+            await sendBotMsg(rawJid, { text: MENU_ATENDIMENTO });
+            return;
+        }
+
+        // Se o cliente encerrar espontaneamente durante o fluxo automatizado,
+        // pergunta sobre o cadastro de CPF antes de limpar o ticket.
+        if (clienteQuerEncerrar(texto)) {
+            console.log(`[Encerramento] Cliente ${ticket._id} solicitou finalizar.`);
+            await solicitarCadastroCPF(ticket, rawJid);
+            return;
+        }
 
         // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
         await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
@@ -368,13 +531,8 @@ Sua resposta:`;
                         }
                     
                     if (iaResponse === 'ENCERRAR_TICKET') {
-                        console.log(`[Encerramento] Cliente ${ticket._id} solicitou fechar. Deletando ticket.`);
-                        
-                      
-                        await sendBotMsg(cleanJid, { text: `Tudo bem! Ficamos à disposição. Se precisar de algo no futuro, é só chamar. Tenha um ótimo dia! 👋` });
-                        
-                        // Remove o ticket do banco de dados (Limpa do Mongo)
-                        await ticketsColl.deleteOne({ _id: ticket._id });
+                        console.log(`[Encerramento] Cliente ${ticket._id} solicitou fechar. Perguntando sobre CPF.`);
+                        await solicitarCadastroCPF(ticket, cleanJid);
                         return;
                     }
 
@@ -386,7 +544,7 @@ Sua resposta:`;
                     console.error("Erro na integração com o Gemini:", iaError);
                     // Fallback para o menu caso a IA falhe
                     await sendBotMsg(cleanJid, {
-                        text: `Tivemos uma instabilidade no assistente. Digite o número da opção desejada:\n\n1️⃣ Direito Digital\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
+                        text: `Tivemos uma instabilidade no assistente.\n\n${MENU_ATENDIMENTO}`
                     });
                     await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
                     return;
