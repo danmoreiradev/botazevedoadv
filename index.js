@@ -48,21 +48,28 @@ const client = new MongoClient(mongoUri);
 let lastQr = null;
 let currentUser = null;
 let sock;
-let lastBotMessageId = null; 
-let processing = new Set(); 
+const botMessageIds = new Set();
+const processing = new Set();
 
-let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl;
+let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl;
 
 async function sendBotMsg(jid, content) {
-    try {
-        // Envia exatamente para o JID que originou a mensagem (seja LID ou número)
-        const sent = await sock.sendMessage(jid, content);
-        lastBotMessageId = sent.key.id; 
-        return sent;
-    } catch (err) {
-        console.error("Erro ao enviar:", err);
-        return null;
-    }
+    try {
+        const sent = await sock.sendMessage(jid, content);
+        const id = sent?.key?.id;
+
+        // Mantém um conjunto de IDs enviados pelo próprio bot.
+        // Evita confundir mensagens simultâneas do bot com intervenção humana.
+        if (id) {
+            botMessageIds.add(id);
+            setTimeout(() => botMessageIds.delete(id), 60 * 1000);
+        }
+
+        return sent;
+    } catch (err) {
+        console.error('Erro ao enviar:', err);
+        return null;
+    }
 }
 
 function validarCPF(cpf) {
@@ -85,11 +92,7 @@ function validarCPF(cpf) {
 }
 
 
-const MENU_ATENDIMENTO = `Olá, sou o assistente do escritório de Advogados: Azevedo & Juvencio.
-
-Para iniciar seu atendimento, escolha uma das opções abaixo digitando apenas o número:
-
-1️⃣ Direito Digital (Desbloqueio de conta)
+const MENU_OPCOES = `1️⃣ Direito Digital (Desbloqueio de conta)
 2️⃣ Direito Cível
 3️⃣ Direito do Consumidor
 4️⃣ Direito Imobiliário
@@ -98,10 +101,88 @@ Para iniciar seu atendimento, escolha uma das opções abaixo digitando apenas o
 7️⃣ Outros Assuntos
 8️⃣ Processo em andamento`;
 
-const PERGUNTA_CADASTRO_CPF = `Antes de encerrarmos: deseja cadastrar seu *CPF* para facilitar a identificação em atendimentos futuros?
+const PERGUNTA_CADASTRO_CLIENTE = `Antes de finalizar a triagem, deseja se cadastrar como cliente para facilitar seus próximos atendimentos?
 
-1️⃣ Sim, desejo cadastrar
-2️⃣ Não, obrigado`;
+1️⃣ Sim
+2️⃣ Não`;
+
+const RESPOSTAS_AREAS = {
+    '1': `📱 *Direito Digital (Desbloqueio de Contas)*
+
+Para direcionarmos corretamente o atendimento, informe:
+
+📌 Qual é a plataforma? (Instagram, Facebook, WhatsApp, Mercado Livre, Uber etc.)
+📌 O que aconteceu com a conta?
+📸 Se possível, envie prints da mensagem de erro, bloqueio ou suspensão.
+
+Pode responder por texto, áudio ou enviar os documentos por aqui.`,
+
+    '2': `📄 *Direito Cível e Contratual*
+
+Para direcionarmos corretamente o atendimento, informe:
+
+📌 Qual é a situação ou dúvida principal?
+📝 Faça um breve resumo do caso.
+📎 Se houver contrato, notificação ou outro documento, pode enviar por aqui.
+
+Pode responder por texto ou áudio.`,
+
+    '3': `🛒 *Direito do Consumidor*
+
+Para direcionarmos corretamente o atendimento, informe:
+
+📌 Qual é o problema ocorrido?
+💰 Houve algum prejuízo financeiro? Se sim, qual o valor aproximado?
+📸 Se possível, envie notas, protocolos, e-mails ou prints relacionados ao caso.
+
+Pode responder por texto ou áudio.`,
+
+    '4': `🏠 *Direito Imobiliário*
+
+Para direcionarmos corretamente o atendimento, informe:
+
+📌 O assunto envolve compra e venda, locação, despejo, usucapião, escritura, condomínio ou outro tema?
+📝 Faça um breve resumo da situação.
+📎 Se houver contrato, matrícula ou notificação, pode enviar por aqui.
+
+Pode responder por texto ou áudio.`,
+
+    '5': `👷 *Direito Trabalhista*
+
+Para direcionarmos corretamente o atendimento, informe:
+
+📌 Você ainda trabalha na empresa ou já foi desligado?
+📌 Qual é o principal problema ou dúvida trabalhista?
+📝 Conte brevemente o que aconteceu.
+
+Pode responder por texto ou áudio.`,
+
+    '6': `🏢 *Direito Empresarial*
+
+Para direcionarmos corretamente o atendimento, informe:
+
+📌 Qual é a necessidade da empresa?
+🏷️ Se desejar, informe o nome ou segmento da empresa.
+📝 Faça um breve resumo da situação ou dúvida.
+
+Pode responder por texto ou áudio.`,
+
+    '7': `📝 *Outros Assuntos*
+
+Sem problemas. Descreva brevemente o assunto ou a dúvida para que possamos encaminhar ao profissional adequado.
+
+Pode responder por texto ou áudio.`,
+
+    '8': `📂 *Atendimento / Processo em Andamento*
+
+Para localizarmos o atendimento, informe:
+
+📌 Nome completo do titular.
+📌 Número do processo, caso tenha em mãos.
+📌 O que você precisa: andamento, envio de documento ou contato com o advogado responsável?
+
+Se precisar enviar algum documento, pode anexar por aqui.`
+};
 
 function normalizarTexto(texto = '') {
     return texto
@@ -111,20 +192,19 @@ function normalizarTexto(texto = '') {
         .trim();
 }
 
-function respostaPositivaCPF(texto) {
+function respostaPositiva(texto = '') {
     const valor = normalizarTexto(texto);
-    return ['1', 'sim', 's', 'quero', 'desejo', 'pode cadastrar', 'sim quero', 'sim desejo'].includes(valor);
+    return ['1', 'sim', 's', 'quero', 'desejo', 'pode', 'pode cadastrar'].includes(valor);
 }
 
-function respostaNegativaCPF(texto) {
+function respostaNegativa(texto = '') {
     const valor = normalizarTexto(texto);
-    return ['2', 'nao', 'n', 'nao obrigado', 'nao quero', 'prefiro nao', 'agora nao'].includes(valor);
+    return ['2', 'nao', 'n', 'nao obrigado', 'nao obrigada', 'nao quero', 'prefiro nao', 'agora nao'].includes(valor);
 }
 
-function clienteQuerEncerrar(texto, permitirAgradecimentoIsolado = false) {
+function clienteQuerEncerrar(texto = '') {
     const valor = normalizarTexto(texto);
-
-    const frasesDeEncerramento = [
+    const frases = [
         'pode encerrar',
         'pode finalizar',
         'quero encerrar',
@@ -132,77 +212,363 @@ function clienteQuerEncerrar(texto, permitirAgradecimentoIsolado = false) {
         'era so isso',
         'e so isso',
         'nao preciso mais',
-        'nao preciso de mais nada',
-        'minha duvida foi resolvida',
-        'duvida resolvida',
-        'esta resolvido',
-        'ja resolveu',
-        'atendimento finalizado'
+        'atendimento finalizado',
+        'duvida resolvida'
     ];
-
-    if (frasesDeEncerramento.some(frase => valor.includes(frase))) return true;
-
-    // Quando já existe atendimento humano e o bot está pausado,
-    // um agradecimento curto costuma representar o encerramento.
-    if (permitirAgradecimentoIsolado) {
-        return ['obrigado', 'obrigada', 'muito obrigado', 'muito obrigada', 'valeu', 'agradeco'].includes(valor);
-    }
-
-    return false;
+    return frases.some(frase => valor.includes(frase));
 }
 
-async function solicitarCadastroCPF(ticket, jid) {
-    await sendBotMsg(jid, { text: PERGUNTA_CADASTRO_CPF });
+function ehLeadAutomatico(texto = '') {
+    const valor = normalizarTexto(texto);
+    return valor.includes('gostaria de saber mais') ||
+        valor.includes('vi no facebook') ||
+        valor.includes('vi no instagram') ||
+        valor.includes('anuncio') ||
+        valor.includes('tenho interesse');
+}
+
+function primeiroNome(nome = '') {
+    return nome.trim().split(/\s+/)[0] || '';
+}
+
+function validarNomeESobrenome(texto = '') {
+    const partes = texto.trim().replace(/\s+/g, ' ').split(' ').filter(Boolean);
+    if (partes.length < 2) return null;
+    if (partes.some(parte => parte.length < 2)) return null;
+
+    return {
+        nome: partes[0],
+        sobrenome: partes.slice(1).join(' '),
+        nomeCompleto: partes.join(' ')
+    };
+}
+
+function normalizarJid(jid) {
+    if (!jid || typeof jid !== 'string') return null;
+    try {
+        return jidNormalizedUser(jid);
+    } catch (_) {
+        return jid;
+    }
+}
+
+function numeroDePnJid(jid) {
+    if (!jid || !jid.endsWith('@s.whatsapp.net')) return null;
+    return jid.split('@')[0].split(':')[0] || null;
+}
+
+async function obterIdentificadoresContato(msg, rawJid) {
+    const jids = new Set();
+    const numeros = new Set();
+
+    const adicionarJid = (jid) => {
+        const normalizado = normalizarJid(jid);
+        if (!normalizado) return;
+
+        jids.add(normalizado);
+        const numero = numeroDePnJid(normalizado);
+        if (numero) numeros.add(numero);
+    };
+
+    adicionarJid(rawJid);
+    adicionarJid(msg?.key?.remoteJidAlt);
+    adicionarJid(msg?.key?.participantPn);
+    adicionarJid(msg?.participantPn);
+
+    const jidNormalizado = normalizarJid(rawJid);
+
+    // Baileys atual mantém o mapeamento LID -> PN no signalRepository quando disponível.
+    if (jidNormalizado?.endsWith('@lid') && sock?.signalRepository?.lidMapping?.getPNForLID) {
+        try {
+            const pn = await sock.signalRepository.lidMapping.getPNForLID(jidNormalizado);
+            adicionarJid(pn);
+        } catch (err) {
+            console.warn(`[LID] Não foi possível resolver ${jidNormalizado}:`, err?.message || err);
+        }
+    }
+
+    // O número telefônico é um identificador adicional. Nunca tratamos o número interno do @lid como telefone.
+    for (const numero of numeros) {
+        jids.add(numero);
+    }
+
+    const identificadores = [...jids];
+    const whatsappNumbers = [...numeros];
+    const jidPreferencial = identificadores.find(id => id.endsWith('@s.whatsapp.net')) || jidNormalizado || rawJid;
+    const numeroPrincipal = whatsappNumbers[0] || null;
+    const chaveAtiva = numeroPrincipal || jidPreferencial;
+
+    return {
+        identificadores,
+        whatsappNumbers,
+        jidPreferencial,
+        numeroPrincipal,
+        chaveAtiva
+    };
+}
+
+async function buscarClientePorContato(contato) {
+    const filtros = [];
+
+    if (contato.identificadores.length) {
+        filtros.push({ identificadores: { $in: contato.identificadores } });
+        filtros.push({ lastRawJid: { $in: contato.identificadores } });
+    }
+
+    if (contato.whatsappNumbers.length) {
+        filtros.push({ whatsappNumbers: { $in: contato.whatsappNumbers } });
+        filtros.push({ numeroReal: { $in: contato.whatsappNumbers } });
+    }
+
+    if (!filtros.length) return null;
+
+    const cliente = await clientsColl.findOne({ $or: filtros });
+    if (!cliente) return null;
+
+    // Cadastros da versão anterior possuíam apenas CPF. Para a saudação nominal,
+    // consideramos cliente identificado apenas quando nome + sobrenome já existem.
+    if (!cliente.cpf || !cliente.nome || !cliente.sobrenome) return null;
+
+    return cliente;
+}
+
+async function buscarTicketAtivo(contato) {
+    const filtros = [];
+
+    if (contato.identificadores.length) {
+        filtros.push({ identificadores: { $in: contato.identificadores } });
+    }
+
+    if (contato.whatsappNumbers.length) {
+        filtros.push({ whatsappNumbers: { $in: contato.whatsappNumbers } });
+        filtros.push({ numeroReal: { $in: contato.whatsappNumbers } });
+    }
+
+    if (contato.chaveAtiva) filtros.push({ _id: contato.chaveAtiva });
+
+    if (!filtros.length) return null;
+    return ticketsColl.findOne({ $or: filtros });
+}
+
+async function gerarNumeroTicket() {
+    const resultado = await countersColl.findOneAndUpdate(
+        { _id: 'ticket_sequence' },
+        {
+            $inc: { seq: 1 },
+            $setOnInsert: { createdAt: Date.now() }
+        },
+        {
+            upsert: true,
+            returnDocument: 'after'
+        }
+    );
+
+    // Compatibilidade com versões do driver MongoDB que retornam ModifyResult.value.
+    const doc = resultado?.value || resultado;
+    const seq = doc?.seq;
+
+    if (!seq) {
+        throw new Error('Não foi possível gerar a sequência do ticket.');
+    }
+
+    return {
+        seq,
+        ticketNumber: `AJ-${String(seq).padStart(6, '0')}`
+    };
+}
+
+function mensagemRecepcao(cliente, ticketNumber) {
+    if (cliente?.nome) {
+        return `Olá, ${primeiroNome(cliente.nome)}! Seja bem-vindo de volta à *Azevedo & Juvencio Advogados*. 👋\n\nSeu novo atendimento é o ticket *${ticketNumber}*.\n\nSegue as opções. Digite apenas o número:\n\n${MENU_OPCOES}`;
+    }
+
+    return `Olá! Seja bem-vindo à *Azevedo & Juvencio Advogados*. 👋\n\nSeu atendimento é o ticket *${ticketNumber}*.\n\nPara começar, escolha uma opção digitando apenas o número:\n\n${MENU_OPCOES}`;
+}
+
+async function registrarTicketHistorico(ticket) {
+    await ticketHistoryColl.updateOne(
+        { _id: ticket.ticketNumber },
+        {
+            $set: {
+                ticketNumber: ticket.ticketNumber,
+                id: ticket.id,
+                status: ticket.status,
+                origem: ticket.origem,
+                clienteId: ticket.clienteId || null,
+                clienteNome: ticket.clienteNome || null,
+                cpf: ticket.cpf || null,
+                identificadores: ticket.identificadores || [],
+                whatsappNumbers: ticket.whatsappNumbers || [],
+                numeroReal: ticket.numeroReal || null,
+                lastRawJid: ticket.lastRawJid,
+                area: ticket.area || null,
+                createdAt: ticket.createdAt,
+                updatedAt: Date.now()
+            }
+        },
+        { upsert: true }
+    );
+}
+
+async function atualizarHistorico(ticketNumber, campos) {
+    if (!ticketNumber) return;
+    await ticketHistoryColl.updateOne(
+        { _id: ticketNumber },
+        { $set: { ...campos, updatedAt: Date.now() } }
+    );
+}
+
+async function fecharTicketAnterior(ticket, status = 'encerrado_timeout') {
+    if (!ticket) return;
+
+    await atualizarHistorico(ticket.ticketNumber, {
+        status,
+        closedAt: Date.now()
+    });
+
+    await ticketsColl.deleteOne({ _id: ticket._id });
+}
+
+async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, paused = false }) {
+    const { seq, ticketNumber } = await gerarNumeroTicket();
+    const agora = Date.now();
+    const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+
+    const ticket = {
+        _id: contato.chaveAtiva,
+        id: seq,
+        ticketNumber,
+        status: paused ? 'em_atendimento_humano' : 'aguardando_opcao',
+        origem: ehLeadAutomatico(textoInicial) ? 'lead_anuncio' : 'organico',
+        clienteId: cliente?._id || null,
+        clienteNome: cliente?.nomeCompleto || (cliente ? `${cliente.nome} ${cliente.sobrenome}`.trim() : null),
+        cpf: cliente?.cpf || null,
+        clienteCadastrado: !!cliente,
+        identificadores: contato.identificadores,
+        whatsappNumbers: contato.whatsappNumbers,
+        numeroReal: contato.numeroPrincipal,
+        lastRawJid: rawJid,
+        aguardandoOpcao: !paused,
+        aguardandoDetalhes: false,
+        aguardandoCadastroCliente: false,
+        aguardandoNomeCadastro: false,
+        aguardandoCPFCadastro: false,
+        nomeCadastroTemp: null,
+        paused,
+        until: paused ? agora + tresDiasEmMs : null,
+        lastActivity: agora,
+        createdAt: agora
+    };
+
+    await ticketsColl.replaceOne(
+        { _id: ticket._id },
+        ticket,
+        { upsert: true }
+    );
+
+    await registrarTicketHistorico(ticket);
+
+    if (cliente) {
+        await clientsColl.updateOne(
+            { _id: cliente._id },
+            {
+                $addToSet: {
+                    identificadores: { $each: contato.identificadores },
+                    whatsappNumbers: { $each: contato.whatsappNumbers },
+                    ticketNumbers: ticketNumber
+                },
+                $set: {
+                    numeroReal: contato.numeroPrincipal || cliente.numeroReal || null,
+                    lastRawJid: rawJid,
+                    lastSeenAt: agora,
+                    updatedAt: agora
+                }
+            }
+        );
+    }
+
+    return ticket;
+}
+
+async function encaminharParaEspecialista(ticket, jid, mensagem = null) {
+    const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+    const agora = Date.now();
+
+    if (mensagem) {
+        await sendBotMsg(jid, { text: mensagem });
+    }
 
     await ticketsColl.updateOne(
         { _id: ticket._id },
         {
             $set: {
-                aguardandoDesejaCPF: true,
-                aguardandoCPF: false,
-                finalizandoCadastroCPF: true,
-                aguardandoIA: false,
-                aguardandoOpcao: false,
-                obrigadoEnviado: true,
-                paused: false,
-                lastActivity: Date.now()
+                status: 'aguardando_especialista',
+                aguardandoCadastroCliente: false,
+                aguardandoNomeCadastro: false,
+                aguardandoCPFCadastro: false,
+                paused: true,
+                until: agora + tresDiasEmMs,
+                lastActivity: agora
             }
         }
     );
+
+    await atualizarHistorico(ticket.ticketNumber, {
+        status: 'aguardando_especialista'
+    });
 }
 
-async function encerrarELimparTicket(ticket, jid, mensagem = `Tudo bem! Atendimento encerrado. Ficamos à disposição. 👋`) {
-    await sendBotMsg(jid, { text: mensagem });
-    await ticketsColl.deleteOne({ _id: ticket._id });
-}
-
-async function salvarCPFClienteEEncerrar(ticket, jid, cpfLimpo, numeroRealExtraido, rawJid) {
+async function salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo) {
     const agora = Date.now();
 
-    // O CPF fica em uma coleção permanente, separada dos tickets temporários.
-    // Usar o próprio CPF como _id evita duplicidade de cadastro.
     await clientsColl.updateOne(
         { _id: cpfLimpo },
         {
             $set: {
                 cpf: cpfLimpo,
-                numeroReal: numeroRealExtraido,
+                nome: nomeInfo.nome,
+                sobrenome: nomeInfo.sobrenome,
+                nomeCompleto: nomeInfo.nomeCompleto,
+                numeroReal: contato.numeroPrincipal,
                 lastRawJid: rawJid,
-                updatedAt: agora
+                updatedAt: agora,
+                lastSeenAt: agora
             },
             $setOnInsert: {
                 createdAt: agora
+            },
+            $addToSet: {
+                identificadores: { $each: contato.identificadores },
+                whatsappNumbers: { $each: contato.whatsappNumbers },
+                ticketNumbers: ticket.ticketNumber
             }
         },
         { upsert: true }
     );
 
-    await sendBotMsg(jid, {
-        text: `✅ CPF cadastrado com sucesso. Atendimento encerrado. Ficamos à disposição sempre que precisar. 👋`
-    });
+    await ticketsColl.updateOne(
+        { _id: ticket._id },
+        {
+            $set: {
+                clienteId: cpfLimpo,
+                cpf: cpfLimpo,
+                clienteNome: nomeInfo.nomeCompleto,
+                clienteCadastrado: true,
+                nomeCadastroTemp: null,
+                aguardandoCadastroCliente: false,
+                aguardandoNomeCadastro: false,
+                aguardandoCPFCadastro: false,
+                lastActivity: agora
+            }
+        }
+    );
 
-    // O cadastro permanece em client_registry; o ticket temporário é limpo.
-    await ticketsColl.deleteOne({ _id: ticket._id });
+    await atualizarHistorico(ticket.ticketNumber, {
+        clienteId: cpfLimpo,
+        cpf: cpfLimpo,
+        clienteNome: nomeInfo.nomeCompleto,
+        cadastroRealizado: true
+    });
 }
 
 async function startBot() {
@@ -214,6 +580,18 @@ async function startBot() {
         knowledgeColl = db.collection('knowledge_base');
         userLoginColl = db.collection('user_login');
         clientsColl = db.collection('client_registry');
+        ticketHistoryColl = db.collection('ticket_history');
+        countersColl = db.collection('counters');
+
+        // Índices para manter CPF e número de ticket únicos e acelerar a identificação do cliente.
+        await Promise.all([
+            clientsColl.createIndex({ cpf: 1 }, { unique: true, sparse: true }),
+            clientsColl.createIndex({ identificadores: 1 }),
+            clientsColl.createIndex({ whatsappNumbers: 1 }),
+            ticketHistoryColl.createIndex({ ticketNumber: 1 }, { unique: true }),
+            ticketHistoryColl.createIndex({ identificadores: 1 }),
+            ticketsColl.createIndex({ ticketNumber: 1 }, { unique: true, sparse: true })
+        ]);
         
         apiKeysColl = db.collection('api_keys');
         const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
@@ -243,453 +621,429 @@ async function startBot() {
         sock.ev.on('creds.update', saveCreds);
 
 sock.ev.on('messages.upsert', async m => {
-    const msg = m.messages[0];
-    if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+    const msg = m.messages?.[0];
+    if (!msg?.message || msg.key.remoteJid === 'status@broadcast') return;
 
     const rawJid = msg.key.remoteJid;
-    const cleanJid = jidNormalizedUser(rawJid); 
-    const cleanNumber = cleanJid.split('@')[0];
-    const isMe = msg.key.fromMe;
+    if (!rawJid || rawJid.endsWith('@g.us') || rawJid.endsWith('@newsletter')) return;
+
     const msgId = msg.key.id;
+    if (!msgId || processing.has(msgId)) return;
 
-    // --- IDENTIFICAÇÃO DO NÚMERO (LID vs REAL) ---
-    let numeroRealExtraido = cleanNumber;
-    if (rawJid.includes('@lid')) {
-        const vnumber = msg.key.participant || msg.participant || rawJid;
-        numeroRealExtraido = (vnumber.split('@')[0]).split(':')[0];
-    }
-
-    if (processing.has(msgId)) return;
     processing.add(msgId);
-    setTimeout(() => processing.delete(msgId), 10000);
+    setTimeout(() => processing.delete(msgId), 10 * 1000);
 
+    const isMe = !!msg.key.fromMe;
+    const textoRaw =
+        msg.message.conversation ||
+        msg.message.extendedTextMessage?.text ||
+        msg.message.imageMessage?.caption ||
+        msg.message.videoMessage?.caption ||
+        msg.message.documentMessage?.caption ||
+        '';
+    const texto = textoRaw.trim();
+    const isMedia = !!(
+        msg.message.imageMessage ||
+        msg.message.videoMessage ||
+        msg.message.documentMessage ||
+        msg.message.audioMessage
+    );
+
+    const timeoutNovoAtendimento = 2 * 60 * 60 * 1000;
     const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
-    const blockUntil = Date.now() + tresDiasEmMs;
 
     try {
-        // 1. BUSCA O TICKET (Unificada)
-        let ticket = await ticketsColl.findOne({
-            $or: [
-                { _id: cleanNumber },
-                { numeroReal: cleanNumber },
-                { _id: numeroRealExtraido },
-                { numeroReal: numeroRealExtraido }
-            ]
-        });
+        const contato = await obterIdentificadoresContato(msg, rawJid);
+        let ticket = await buscarTicketAtivo(contato);
 
-        // 2. LOGICA DE INTERVENÇÃO HUMANA (VOCÊ RESPONDEU)
-        if (isMe) {
-            if (msgId !== lastBotMessageId) {
-                console.log(`[Intervenção] Humano detectado para ${numeroRealExtraido}. Pausando bot.`);
-                
-                // Define o alvo: prioriza o ID do ticket encontrado, senão usa o número extraído
-                const targetId = ticket ? ticket._id : numeroRealExtraido;
-
-                await ticketsColl.updateOne(
-                    { _id: targetId }, 
-                    { 
-                        $set: { 
-                            paused: true, 
-                            until: blockUntil, 
-                            lastActivity: Date.now(),
-                            aguardandoIA: false,
-                            aguardandoOpcao: false,
-                            obrigadoEnviado: true, // Evita que o bot mande "Recebido" depois
-                            numeroReal: numeroRealExtraido
-                        },
-                        // Se o ticket for novo (criado agora pelo advogado), gera o ID numérico
-                        $setOnInsert: {
-                            id: Math.floor(1000 + Math.random() * 9000),
-                            lastRawJid: rawJid
-                        }
-                    }, 
-                    { upsert: true }
-                );
-            }
-            return; 
+        // Tickets criados pelo fluxo antigo não possuem ticketNumber.
+        // Em vez de tentar reaproveitar estados incompatíveis, iniciamos o novo fluxo limpo.
+        if (ticket && !ticket.ticketNumber) {
+            await ticketsColl.deleteOne({ _id: ticket._id });
+            ticket = null;
         }
 
-        const textoRaw = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        const texto = textoRaw.trim();
-        const timeoutMenu = 2 * 60 * 60 * 1000;
+        // Mensagem enviada manualmente pelo escritório.
+        if (isMe) {
+            if (botMessageIds.has(msgId)) return;
 
-        // 3. VERIFICAÇÃO DE PAUSA ATIVA
-        // Enquanto um humano estiver atendendo, o bot continua silencioso.
-        // Exceção: se o próprio cliente disser claramente que quer encerrar,
-        // inicia-se o cadastro opcional de CPF.
-        if (ticket && ticket.paused) {
-            if (Date.now() < ticket.until) {
-                if (clienteQuerEncerrar(texto, true)) {
-                    console.log(`[Encerramento] Cliente ${ticket._id} sinalizou fim do atendimento.`);
-                    await solicitarCadastroCPF(ticket, rawJid);
-                } else {
-                    console.log(`[Bloqueio] Bot pausado para ${ticket._id} até ${new Date(ticket.until).toLocaleString()}`);
-                }
-                return;
+            let cliente = await buscarClientePorContato(contato);
+
+            if (!ticket) {
+                ticket = await criarNovoTicket({
+                    contato,
+                    rawJid,
+                    textoInicial: texto,
+                    cliente,
+                    paused: true
+                });
+                console.log(`[Ticket ${ticket.ticketNumber}] Atendimento iniciado manualmente.`);
             } else {
                 await ticketsColl.updateOne(
                     { _id: ticket._id },
-                    { $set: { paused: false } }
+                    {
+                        $set: {
+                            status: 'em_atendimento_humano',
+                            paused: true,
+                            until: Date.now() + tresDiasEmMs,
+                            lastActivity: Date.now()
+                        },
+                        $addToSet: {
+                            identificadores: { $each: contato.identificadores },
+                            whatsappNumbers: { $each: contato.whatsappNumbers }
+                        }
+                    }
                 );
-                ticket.paused = false;
+
+                await atualizarHistorico(ticket.ticketNumber, {
+                    status: 'em_atendimento_humano'
+                });
             }
+            return;
         }
 
-        // 4. CRIAÇÃO OU REABERTURA
-        // REGRA NOVA: CPF não é mais solicitado no início.
-        // O primeiro passo é sempre apresentar o menu de atendimento.
-        if (!ticket || (Date.now() - (ticket.lastActivity || 0) > timeoutMenu)) {
-            const ticketId = Math.floor(1000 + Math.random() * 9000);
-            const targetId = ticket ? ticket._id : numeroRealExtraido;
+        // Se o cliente explicitamente encerrar durante atendimento humano, fecha o ticket atual.
+        // O cadastro já foi oferecido ao fim da triagem automatizada.
+        if (ticket?.paused && clienteQuerEncerrar(texto)) {
+            await sendBotMsg(rawJid, {
+                text: `Atendimento *${ticket.ticketNumber}* encerrado. Obrigado pelo contato! Ficamos à disposição. 👋`
+            });
 
-            await sendBotMsg(rawJid, { text: MENU_ATENDIMENTO });
+            await atualizarHistorico(ticket.ticketNumber, {
+                status: 'encerrado',
+                closedAt: Date.now()
+            });
+
+            await ticketsColl.deleteOne({ _id: ticket._id });
+            return;
+        }
+
+        // Mesmo se um humano tiver intervido, respostas de cadastro em andamento continuam sendo processadas.
+        const emFluxoCadastro = !!(
+            ticket?.aguardandoCadastroCliente ||
+            ticket?.aguardandoNomeCadastro ||
+            ticket?.aguardandoCPFCadastro
+        );
+
+        if (ticket?.paused && !emFluxoCadastro) {
+            if (Date.now() < (ticket.until || 0)) {
+                console.log(`[Ticket ${ticket.ticketNumber}] Bot pausado durante atendimento humano.`);
+                return;
+            }
 
             await ticketsColl.updateOne(
-                { _id: targetId },
+                { _id: ticket._id },
+                { $set: { paused: false, until: null } }
+            );
+            ticket.paused = false;
+        }
+
+        // Novo atendimento: sempre gera novo ticket e envia as opções imediatamente, inclusive para LEAD.
+        const ticketExpirou = ticket && (Date.now() - (ticket.lastActivity || 0) > timeoutNovoAtendimento);
+
+        if (!ticket || ticketExpirou) {
+            if (ticketExpirou) {
+                await fecharTicketAnterior(ticket, 'encerrado_timeout');
+                ticket = null;
+            }
+
+            const cliente = await buscarClientePorContato(contato);
+            ticket = await criarNovoTicket({
+                contato,
+                rawJid,
+                textoInicial: texto,
+                cliente,
+                paused: false
+            });
+
+            await sendBotMsg(rawJid, {
+                text: mensagemRecepcao(cliente, ticket.ticketNumber)
+            });
+
+            console.log(`[Ticket ${ticket.ticketNumber}] Novo atendimento aberto${cliente ? ` para ${cliente.nome}` : ''}.`);
+            return;
+        }
+
+        // Atualiza os identificadores observados no ticket ativo. Isso ajuda a ligar PN e LID do mesmo contato.
+        await ticketsColl.updateOne(
+            { _id: ticket._id },
+            {
+                $set: {
+                    lastRawJid: rawJid,
+                    numeroReal: contato.numeroPrincipal || ticket.numeroReal || null,
+                    lastActivity: Date.now()
+                },
+                $addToSet: {
+                    identificadores: { $each: contato.identificadores },
+                    whatsappNumbers: { $each: contato.whatsappNumbers }
+                }
+            }
+        );
+
+        // 1) MENU PRINCIPAL
+        if (ticket.aguardandoOpcao) {
+            if (!RESPOSTAS_AREAS[texto]) {
+                await sendBotMsg(rawJid, {
+                    text: `Por favor, digite apenas o número da opção desejada:\n\n${MENU_OPCOES}`
+                });
+                return;
+            }
+
+            const area = {
+                '1': 'Direito Digital',
+                '2': 'Direito Cível',
+                '3': 'Direito do Consumidor',
+                '4': 'Direito Imobiliário',
+                '5': 'Direito Trabalhista',
+                '6': 'Direito Empresarial',
+                '7': 'Outros Assuntos',
+                '8': 'Processo em andamento'
+            }[texto];
+
+            await sendBotMsg(rawJid, { text: RESPOSTAS_AREAS[texto] });
+
+            await ticketsColl.updateOne(
+                { _id: ticket._id },
                 {
                     $set: {
-                        id: ticketId,
-                        numeroReal: numeroRealExtraido,
-                        aguardandoIA: false,
-                        aguardandoOpcao: true,
-                        aguardandoDesejaCPF: false,
-                        aguardandoCPF: false,
-                        finalizandoCadastroCPF: false,
-                        obrigadoEnviado: false,
-                        tentouInsistir: false,
-                        errosMenu: 0,
-                        lastActivity: Date.now(),
-                        paused: false,
-                        lastRawJid: rawJid
+                        area,
+                        status: 'aguardando_detalhes',
+                        aguardandoOpcao: false,
+                        aguardandoDetalhes: true,
+                        lastActivity: Date.now()
                     }
-                },
-                { upsert: true }
+                }
+            );
+
+            await atualizarHistorico(ticket.ticketNumber, {
+                area,
+                status: 'aguardando_detalhes'
+            });
+            return;
+        }
+
+        // 2) RECEBE OS DETALHES DO CASO
+        if (ticket.aguardandoDetalhes) {
+            if (!texto && !isMedia) {
+                await sendBotMsg(rawJid, {
+                    text: `Envie um breve resumo por texto ou áudio. Se houver documentos ou prints, pode anexá-los aqui.`
+                });
+                return;
+            }
+
+            await ticketsColl.updateOne(
+                { _id: ticket._id },
+                {
+                    $set: {
+                        aguardandoDetalhes: false,
+                        status: ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro',
+                        lastActivity: Date.now()
+                    }
+                }
+            );
+
+            if (ticket.clienteCadastrado) {
+                await encaminharParaEspecialista(
+                    ticket,
+                    rawJid,
+                    `✅ Recebido! Seu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
+                );
+                return;
+            }
+
+            await sendBotMsg(rawJid, {
+                text: `✅ Recebido! Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.\n\n${PERGUNTA_CADASTRO_CLIENTE}`
+            });
+
+            await ticketsColl.updateOne(
+                { _id: ticket._id },
+                {
+                    $set: {
+                        aguardandoCadastroCliente: true,
+                        status: 'aguardando_cadastro',
+                        lastActivity: Date.now()
+                    }
+                }
+            );
+
+            await atualizarHistorico(ticket.ticketNumber, {
+                status: 'aguardando_cadastro'
+            });
+            return;
+        }
+
+        // 3) CADASTRO OPCIONAL
+        if (ticket.aguardandoCadastroCliente) {
+            if (respostaNegativa(texto)) {
+                await atualizarHistorico(ticket.ticketNumber, { cadastroRecusado: true });
+                await encaminharParaEspecialista(
+                    ticket,
+                    rawJid,
+                    `Sem problemas! Seu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
+                );
+                return;
+            }
+
+            if (!respostaPositiva(texto)) {
+                await sendBotMsg(rawJid, {
+                    text: `Deseja se cadastrar como cliente?\n\n1️⃣ Sim\n2️⃣ Não`
+                });
+                return;
+            }
+
+            await sendBotMsg(rawJid, {
+                text: `Perfeito. Informe seu *nome e sobrenome*:`
+            });
+
+            await ticketsColl.updateOne(
+                { _id: ticket._id },
+                {
+                    $set: {
+                        aguardandoCadastroCliente: false,
+                        aguardandoNomeCadastro: true,
+                        lastActivity: Date.now()
+                    }
+                }
             );
             return;
         }
 
-        // 4.1. CLIENTE ESTÁ DECIDINDO SE QUER CADASTRAR O CPF
-        if (ticket.aguardandoDesejaCPF) {
-            if (respostaPositivaCPF(texto)) {
+        // 4) NOME + SOBRENOME
+        if (ticket.aguardandoNomeCadastro) {
+            const nomeInfo = validarNomeESobrenome(texto);
+
+            if (!nomeInfo) {
                 await sendBotMsg(rawJid, {
-                    text: `Perfeito. Digite seu *CPF* com 11 números:`
+                    text: `Por favor, informe pelo menos *nome e sobrenome*. Exemplo: Daniel Silva.`
+                });
+                return;
+            }
+
+            await sendBotMsg(rawJid, {
+                text: `Obrigado, ${nomeInfo.nome}. Agora digite seu *CPF* com 11 números:`
+            });
+
+            await ticketsColl.updateOne(
+                { _id: ticket._id },
+                {
+                    $set: {
+                        nomeCadastroTemp: nomeInfo,
+                        aguardandoNomeCadastro: false,
+                        aguardandoCPFCadastro: true,
+                        lastActivity: Date.now()
+                    }
+                }
+            );
+            return;
+        }
+
+        // 5) CPF E GRAVAÇÃO DO CLIENTE
+        if (ticket.aguardandoCPFCadastro) {
+            const cpfLimpo = texto.replace(/[^\d]+/g, '');
+
+            if (!validarCPF(cpfLimpo)) {
+                await sendBotMsg(rawJid, {
+                    text: `CPF inválido. Confira os números e digite novamente os 11 dígitos:`
+                });
+                return;
+            }
+
+            const nomeInfo = ticket.nomeCadastroTemp;
+            if (!nomeInfo?.nome || !nomeInfo?.sobrenome) {
+                await sendBotMsg(rawJid, {
+                    text: `Precisamos confirmar seu nome. Informe novamente seu *nome e sobrenome*:`
                 });
 
                 await ticketsColl.updateOne(
                     { _id: ticket._id },
                     {
                         $set: {
-                            aguardandoDesejaCPF: false,
-                            aguardandoCPF: true,
-                            finalizandoCadastroCPF: true,
-                            lastActivity: Date.now(),
-                            paused: false
+                            aguardandoNomeCadastro: true,
+                            aguardandoCPFCadastro: false,
+                            lastActivity: Date.now()
                         }
                     }
                 );
                 return;
             }
 
-            if (respostaNegativaCPF(texto)) {
-                await encerrarELimparTicket(
-                    ticket,
-                    rawJid,
-                    `Tudo bem! Não faremos o cadastro do CPF. Atendimento encerrado. Ficamos à disposição. 👋`
-                );
-                return;
-            }
+            await salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo);
 
             await sendBotMsg(rawJid, {
-                text: `Por favor, responda apenas:\n\n1️⃣ Sim, desejo cadastrar\n2️⃣ Não, obrigado`
+                text: `✅ Cadastro realizado, ${nomeInfo.nome}! Nos próximos atendimentos vamos reconhecer você automaticamente.\n\nSeu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
             });
+
+            // Atualiza a cópia local para o encaminhamento final.
+            ticket.clienteCadastrado = true;
+            ticket.clienteNome = nomeInfo.nomeCompleto;
+            ticket.cpf = cpfLimpo;
+
+            await encaminharParaEspecialista(ticket, rawJid);
             return;
         }
 
-        // 4.2. CPF É SOLICITADO SOMENTE NESTE MOMENTO, APÓS O CLIENTE OPTAR PELO CADASTRO
-        if (ticket.aguardandoCPF && ticket.finalizandoCadastroCPF) {
-            const cpfLimpo = texto.replace(/[^\d]+/g, '');
+        // Estado de segurança: se o ticket existir mas não estiver em nenhum passo válido,
+        // mantém a conversa simples e não cria um segundo ticket por engano.
+        console.warn(`[Ticket ${ticket.ticketNumber}] Estado não reconhecido. Reiniciando menu do mesmo ticket.`);
+        await sendBotMsg(rawJid, {
+            text: `Vamos continuar pelo ticket *${ticket.ticketNumber}*. Escolha uma opção:\n\n${MENU_OPCOES}`
+        });
+        await ticketsColl.updateOne(
+            { _id: ticket._id },
+            {
+                $set: {
+                    status: 'aguardando_opcao',
+                    aguardandoOpcao: true,
+                    aguardandoDetalhes: false,
+                    aguardandoCadastroCliente: false,
+                    aguardandoNomeCadastro: false,
+                    aguardandoCPFCadastro: false,
+                    lastActivity: Date.now()
+                }
+            }
+        );
+    } catch (err) {
+        console.error('Erro interno no atendimento:', err);
+    }
+});
 
-            if (!validarCPF(cpfLimpo)) {
-                await sendBotMsg(rawJid, {
-                    text: `⚠️ CPF inválido. Confira os números e digite novamente o CPF com 11 dígitos:`
+        // Atualiza o cadastro quando o Baileys informar um novo mapeamento LID <-> número.
+        // O fluxo principal não depende deste evento; ele é apenas uma camada extra de persistência.
+        sock.ev.on('lid-mapping.update', async ({ lid, pn }) => {
+            try {
+                const lidNormalizado = normalizarJid(lid);
+                const pnNormalizado = normalizarJid(pn);
+                const numero = numeroDePnJid(pnNormalizado);
+                const ids = [lidNormalizado, pnNormalizado, numero].filter(Boolean);
+
+                if (!ids.length || !clientsColl) return;
+
+                const cliente = await clientsColl.findOne({
+                    $or: [
+                        { identificadores: { $in: ids } },
+                        ...(numero ? [{ whatsappNumbers: numero }, { numeroReal: numero }] : [])
+                    ]
                 });
-                return;
-            }
 
-            await salvarCPFClienteEEncerrar(
-                ticket,
-                rawJid,
-                cpfLimpo,
-                numeroRealExtraido,
-                rawJid
-            );
-            return;
-        }
+                if (!cliente) return;
 
-        // Compatibilidade com tickets que já estavam aguardando CPF na versão antiga.
-        // Eles deixam de ficar presos no fluxo antigo e passam para o menu.
-        if (ticket.aguardandoCPF && !ticket.finalizandoCadastroCPF) {
-            await ticketsColl.updateOne(
-                { _id: ticket._id },
-                {
-                    $set: {
-                        aguardandoCPF: false,
-                        aguardandoIA: false,
-                        aguardandoOpcao: true,
-                        aguardandoDesejaCPF: false,
-                        finalizandoCadastroCPF: false,
-                        errosMenu: 0,
-                        lastActivity: Date.now()
-                    }
-                }
-            );
-
-            await sendBotMsg(rawJid, { text: MENU_ATENDIMENTO });
-            return;
-        }
-
-        // Se o cliente encerrar espontaneamente durante o fluxo automatizado,
-        // pergunta sobre o cadastro de CPF antes de limpar o ticket.
-        if (clienteQuerEncerrar(texto)) {
-            console.log(`[Encerramento] Cliente ${ticket._id} solicitou finalizar.`);
-            await solicitarCadastroCPF(ticket, rawJid);
-            return;
-        }
-
-        // 5. ATUALIZA ATIVIDADE E TRATA LID FANTASMA
-        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: Date.now() } });
-        
-        // Se a mensagem veio por um LID mas o ticket está no Número Real, apaga o registro do LID se ele existir solto
-        if (cleanNumber !== ticket._id && cleanNumber.length > 13) {
-             await ticketsColl.deleteOne({ _id: cleanNumber });
-        }
-
-        // --- NOVA LÓGICA DE INTELIGÊNCIA ARTIFICIAL ---
-        if (ticket.aguardandoIA) {
-            // Checagem de segurança para leads na segunda mensagem
-            const textoLower = texto.toLowerCase();
-            const isLead = textoLower.includes("gostaria de saber mais") || textoLower.includes("vi no facebook") || textoLower.includes("anúncio");
-
-            if (isLead) {
-                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista assumirá o seu caso em breve.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
-                return;
-            }
-
-            if (genAI) {
-                try {
-                    // Monta o contexto buscando a knowledge_base no MongoDB
-                    const knowledgeDocs = await knowledgeColl.find({}).toArray();
-                    const contextText = knowledgeDocs.map(k => `Pergunta: ${k.pergunta}\nResposta: ${k.resposta}`).join('\n\n');
-
-                    const prompt = `Você é um assistente virtual do escritório Azevedo & Juvencio Advogados.
-Base de conhecimento autorizada:
-${contextText}
-
-Mensagem do cliente: "${texto}"
-
-Regras:
-1. Se o cliente agradecer ou não e pedir para falar com atendente, advogado, humano ou se o assunto não existir na base de conhecimento, responda APENAS com a palavra: ESCALAR_ATENDIMENTO
-2. Se a mensagem for claramente um lead automático de anúncios, responda APENAS com a palavra: LEAD_ANUNCIO
-3. Se a pergunta puder ser respondida usando a base de conhecimento, responda de forma natural e prestativa.
-4. Se o cliente agradecer e indicar que a dúvida foi resolvida (ex: "obrigado", "não", "não preciso mais", "pode encerrar", "era só isso"), responda APENAS com a palavra: ENCERRAR_TICKET
-
-Sua resposta:`;
-
-                   const model = genAI.getGenerativeModel(
-                                { model: "gemini-3.1-flash-lite-preview" }, 
-                                { apiVersion: 'v1beta' } 
-                            );
-                    const result = await model.generateContent(prompt);
-                    const iaResponse = result.response.text().trim();
-
-                    console.log("Tentando integrar com Gemini usando o texto:", texto);
-
-                    if (iaResponse === 'LEAD_ANUNCIO') {
-                        await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele assumirá seu atendimento em breve.` });
-                        await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
-                        return;
-                    } 
-
-                    if (iaResponse === 'ESCALAR_ATENDIMENTO') {
-                            console.log(`[Escalonamento] IA solicitou intervenção humana para ${ticket._id}. Enviando menu.`);
-                            
-                            // 1. Envia o menu de opções para o cliente escolher a área
-                            await sendBotMsg(cleanJid, {
-                                text: `Entendido. Para que eu possa te encaminhar ao especialista correto, por favor, escolha uma das opções abaixo digitando apenas o número:\n\n1️⃣ Direito Digital (Desbloqueio de conta)\n2️⃣ Direito Cível\n3️⃣ Direito do Consumidor\n4️⃣ Direito Imobiliário\n5️⃣ Direito Trabalhista\n6️⃣ Direito Empresarial\n7️⃣ Outros Assuntos\n8️⃣ Processo em andamento`
-                            });
-
-                            // 2. Atualiza o ticket: desativa IA e ativa o menu de opções (aguardandoOpcao)
-                            await ticketsColl.updateOne({ _id: ticket._id }, { 
-                                $set: { 
-                                    aguardandoIA: false, 
-                                    aguardandoOpcao: true,
-                                    errosMenu: 0 
-                                } 
-                            });
-                            return;
+                await clientsColl.updateOne(
+                    { _id: cliente._id },
+                    {
+                        $addToSet: {
+                            identificadores: { $each: ids },
+                            ...(numero ? { whatsappNumbers: numero } : {})
+                        },
+                        $set: {
+                            ...(numero ? { numeroReal: numero } : {}),
+                            updatedAt: Date.now()
                         }
-                    
-                    if (iaResponse === 'ENCERRAR_TICKET') {
-                        console.log(`[Encerramento] Cliente ${ticket._id} solicitou fechar. Perguntando sobre CPF.`);
-                        await solicitarCadastroCPF(ticket, cleanJid);
-                        return;
                     }
-
-                    // Responde com o conhecimento da base e continua no fluxo da IA
-                    await sendBotMsg(cleanJid, { text: iaResponse });
-                    return;
-
-                } catch (iaError) {
-                    console.error("Erro na integração com o Gemini:", iaError);
-                    // Fallback para o menu caso a IA falhe
-                    await sendBotMsg(cleanJid, {
-                        text: `Tivemos uma instabilidade no assistente.\n\n${MENU_ATENDIMENTO}`
-                    });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoIA: false, aguardandoOpcao: true } });
-                    return;
-                }
+                );
+            } catch (err) {
+                console.warn('[LID] Falha ao persistir mapeamento:', err?.message || err);
             }
-        }
-        // --- FIM DA LÓGICA DE IA ---
-
-        const respostas = {
-      '1': `📱 *Direito Digital (Desbloqueio de Contas)*
-
-Entendido! Problemas com redes sociais e contas bloqueadas exigem agilidade.
-Para que possamos analisar a viabilidade da recuperação, por favor, nos envie:
-
-📌 Qual a plataforma? (Instagram, Facebook, WhatsApp, Mercado Livre, Uber, etc.)
-
-📌 O que aconteceu? A conta foi hackeada, banida por "violação de termos" ou você perdeu o acesso de outra forma? Detalhe os fatos de maneira fundamentada.
-
-📸 Prints são fundamentais: Envie documentos, como capturas de tela da mensagem de erro ou do aviso de suspensão que aparece para você.
-
-👨‍⚖️ Um especialista em Direito Digital analisará seu caso e entrará em contato em breve.`,
-
-      '2': `📄 *Direito Cível e Contratual*
-
-Perfeito. Para direcionarmos você ao especialista em contratos e questões cíveis, precisamos entender o cenário:
-
-📌 Tipo de demanda: Trata-se de uma análise/elaboração de contrato, uma cobrança, um problema imobiliário ou outra questão de responsabilidade civil?
-
-📝 Resumo do caso: Explique brevemente a situação (pode ser por texto ou áudio).
-
-📎 Documentação: Se houver um contrato, notificação ou documento assinado envolvido, por favor, anexe o arquivo ou foto aqui.
-
-⏳ Aguarde um momento, nossa equipe jurídica especializada em Direito Cível/Contratual já foi notificada e falará com você em instantes.`,
-
-      '3': `🛒 *Direito do Consumidor*
-
-Compreendido! Vamos ajudar você a garantir seus direitos. Por favor, forneça os detalhes abaixo:
-
-📌 Qual o problema? É uma cobrança/negativação indevida, produto com defeito, serviço não entregue ou problema com bancos/telefonia/planos de saúde?
-
-💰 Houve prejuízo financeiro? Se sim, informe o valor aproximado.
-
-📸 Provas: Envie fotos de notas fiscais, números de protocolo de atendimento, emails de reclamação ou prints de conversas.
-
-👨‍⚖️ Um de nossos advogados especialistas em Defesa do Consumidor entrará em contato para dar os próximos passos.`,
-
-      '4': `🏠 *Direito Imobiliário*
-
-Entendido! Questões imobiliárias exigem atenção aos detalhes. Para que possamos te orientar, por favor, nos envie:
-
-📌 Qual o objeto da consulta? É sobre compra e venda, aluguel, despejo, usucapião, regularização de escritura ou problemas com condomínio?
-
-📝 Resumo da situação: Conte-nos o que está acontecendo (pode ser por texto ou áudio).
-
-📎 Documentos: Se possível, envie fotos do contrato, matrícula do imóvel ou notificações recebidas.
-
-👨‍⚖️ Um especialista em Direito Imobiliário analisará seu caso e entrará em contato em breve.`,
-
-      '5': `👷 *Direito Trabalhista*
-
-Compreendido. Vamos analisar seus direitos trabalhistas. Por favor, nos forneça as seguintes informações:
-
-📌 Situação atual: Você ainda trabalha na empresa ou já foi desligado? Se saiu, qual foi a data de saída?
-
-📌 Principais reclamações: O problema é sobre horas extras, falta de registro, verbas rescisórias, assédio ou acidente de trabalho?
-
-📝 Detalhes: Explique brevemente os fatos (texto ou áudio).
-
-👨‍⚖️ Nossa equipe especializada em Direito do Trabalho entrará em contato em instantes para te orientar.`,
-
-      '6': `🏢 *Direito Empresarial*
-
-Perfeito. Para atendermos sua empresa com a agilidade necessária, por favor, informe:
-
-📌 Natureza da demanda: Trata-se de consultoria preventiva, defesa em processos, questões societárias, tributárias ou recuperação de crédito?
-
-🏷️ Dados da empresa: Se preferir, informe o nome da empresa ou o segmento de atuação.
-
-📝 Descrição: Descreva o cenário atual ou a dúvida específica que você possui.
-
-👨‍⚖️ Um de nossos advogados corporativos entrará em contato para agendar uma conversa ou dar continuidade ao atendimento.`,
-
-      '7': `📝 *Outros Assuntos*
-
-Sem problemas! Se o seu caso não se encaixa nas opções anteriores, queremos te ouvir da mesma forma.
-
-📌 Por favor, descreva brevemente o seu assunto ou dúvida.
-
-🎤 Sinta-se à vontade para enviar um áudio, se preferir explicar com mais detalhes.
-
-🔎 Sua mensagem será encaminhada para nossa triagem e o profissional mais adequado para o seu tema entrará em contato o mais rápido possível.`,
-
-      '8': `📂 *Atendimento/Processo em Andamento*
-
-Perfeito! Vamos localizar seu histórico para agilizar o suporte. Por favor, nos informe:
-
-📌 Nome completo do titular da ação/contrato.
-
-📌 Número do processo ou CPF (caso você tenha em mãos).
-
-📌 Qual a sua solicitação? Você deseja saber o andamento, enviar um documento novo ou falar com o advogado responsável?
-
-📎 Se precisar enviar algum documento novo, pode anexar aqui agora.
-
-⏳ Aguarde um momento. Nossa equipe de atendimento ao cliente irá acessar seu cadastro e te responderá em breve.`
-    };
-
-        // 5. Resposta às Opções
-        if (ticket.aguardandoOpcao) {
-            if (respostas[texto]) {
-                await sendBotMsg(cleanJid, { text: respostas[texto] });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, errosMenu: 0 } });
-            } else {
-                const novosErros = (ticket.errosMenu || 0) + 1;
-                if (novosErros >= 2) {
-                    await sendBotMsg(cleanJid, { text: `✅ Entendido. Já vamos encaminhar você para o especialista, aguarde um momento.` });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { aguardandoOpcao: false, obrigadoEnviado: true, paused: true, until: blockUntil } });
-                } else {
-                    await sendBotMsg(cleanJid, { text: `⚠️ Opção inválida. Por favor, digite apenas o número (1 a 8).` });
-                    await ticketsColl.updateOne({ _id: ticket._id }, { $set: { errosMenu: novosErros } });
-                }
-            }
-            return;
-        }
-
-        // 6. Lógica de Insistência (Detalhamento)
-        if (!ticket.aguardandoOpcao && !ticket.obrigadoEnviado) {
-            const isMedia = !!(msg.message.imageMessage || msg.message.documentMessage || msg.message.audioMessage);
-            if (texto.length >= 20 || isMedia) {
-                await sendBotMsg(cleanJid, { text: `✅ Recebido! Um especialista já vai atendê-lo, aguarde um momento.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
-            } else if (!ticket.tentouInsistir) {
-                await sendBotMsg(cleanJid, { text: `⚠️ Por favor, descreva a situação com um pouco mais de detalhes para facilitar a análise.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { tentouInsistir: true } });
-            } else {
-                await sendBotMsg(cleanJid, { text: `✅ Recebido! Já encaminhei seu caso para um especialista, ele já vai atendê-lo.` });
-                await ticketsColl.updateOne({ _id: ticket._id }, { $set: { obrigadoEnviado: true, paused: true, until: blockUntil } });
-            }
-        }
-
-    } catch (err) {
-        console.error("Erro interno:", err);
-    }
-    });
-
+        });
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             if (qr) { lastQr = qr; io.emit('qr', qr); }
@@ -831,11 +1185,40 @@ io.on('connection', (socket) => {
 });
 
 setInterval(async () => {
-    if (ticketsColl) {
-        const limiteInatividade = Date.now() - (24 * 60 * 60 * 1000); // 24 horas
-        const result = await ticketsColl.deleteMany({ lastActivity: { $lt: limiteInatividade } });
-        if (result.deletedCount > 0) console.log(`[Auto-Limpeza] ${result.deletedCount} tickets antigos removidos.`);
+    if (!ticketsColl || !ticketHistoryColl) return;
+
+    try {
+        const limiteInatividade = Date.now() - (24 * 60 * 60 * 1000);
+        const antigos = await ticketsColl.find(
+            { lastActivity: { $lt: limiteInatividade } },
+            { projection: { ticketNumber: 1 } }
+        ).toArray();
+
+        const ticketNumbers = antigos.map(t => t.ticketNumber).filter(Boolean);
+
+        if (ticketNumbers.length) {
+            await ticketHistoryColl.updateMany(
+                { _id: { $in: ticketNumbers } },
+                {
+                    $set: {
+                        status: 'encerrado_inatividade',
+                        closedAt: Date.now(),
+                        updatedAt: Date.now()
+                    }
+                }
+            );
+        }
+
+        const result = await ticketsColl.deleteMany({
+            lastActivity: { $lt: limiteInatividade }
+        });
+
+        if (result.deletedCount > 0) {
+            console.log(`[Auto-Limpeza] ${result.deletedCount} tickets inativos removidos da fila ativa.`);
+        }
+    } catch (err) {
+        console.error('[Auto-Limpeza] Erro:', err);
     }
-}, 60 * 60 * 1000); // Executa a cada 1 hora
+}, 60 * 60 * 1000);
 
 server.listen(port, () => startBot());
