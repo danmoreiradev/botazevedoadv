@@ -29,6 +29,11 @@ const KNOWLEDGE_MAX_CANDIDATES = 6;
 const KNOWLEDGE_SEMANTIC_FALLBACK_ITEMS = 20;
 let knowledgeCache = { items: [], loadedAt: 0 };
 
+// Cache das opções de atendimento. O MongoDB passa a ser a fonte de verdade do menu.
+const MENU_CACHE_TTL_MS = 30 * 1000;
+let menuOptionsCache = { items: [], loadedAt: 0 };
+
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -60,7 +65,7 @@ let sock;
 const botMessageIds = new Set();
 const processing = new Set();
 
-let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl;
+let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl;
 
 async function sendBotMsg(jid, content) {
     try {
@@ -101,22 +106,17 @@ function validarCPF(cpf) {
 }
 
 
-const MENU_OPCOES = `1️⃣ Direito Digital (Desbloqueio de conta)
-2️⃣ Direito Cível
-3️⃣ Direito do Consumidor
-4️⃣ Direito Imobiliário
-5️⃣ Direito Trabalhista
-6️⃣ Direito Empresarial
-7️⃣ Outros Assuntos
-8️⃣ Processo em andamento`;
-
-const PERGUNTA_CADASTRO_CLIENTE = `Antes de finalizar a triagem, deseja se cadastrar como cliente para facilitar seus próximos atendimentos?
-
-1️⃣ Sim
-2️⃣ Não`;
-
-const RESPOSTAS_AREAS = {
-    '1': `📱 *Direito Digital (Desbloqueio de Contas)*
+// Valores padrão usados somente para inicializar a coleção no MongoDB.
+// Depois da primeira execução, o menu utilizado pelo bot vem de `menu_options`.
+const DEFAULT_MENU_OPTIONS = [
+    {
+        _id: '1',
+        numero: '1',
+        ordem: 1,
+        titulo: 'Direito Digital (Desbloqueio de conta)',
+        area: 'Direito Digital',
+        ativo: true,
+        resposta: `📱 *Direito Digital (Desbloqueio de Contas)*
 
 Para direcionarmos corretamente o atendimento, informe:
 
@@ -124,9 +124,16 @@ Para direcionarmos corretamente o atendimento, informe:
 📌 O que aconteceu com a conta?
 📸 Se possível, envie prints da mensagem de erro, bloqueio ou suspensão.
 
-Pode responder por texto, áudio ou enviar os documentos por aqui.`,
-
-    '2': `📄 *Direito Cível e Contratual*
+Pode responder por texto, áudio ou enviar os documentos por aqui.`
+    },
+    {
+        _id: '2',
+        numero: '2',
+        ordem: 2,
+        titulo: 'Direito Cível',
+        area: 'Direito Cível',
+        ativo: true,
+        resposta: `📄 *Direito Cível e Contratual*
 
 Para direcionarmos corretamente o atendimento, informe:
 
@@ -134,9 +141,16 @@ Para direcionarmos corretamente o atendimento, informe:
 📝 Faça um breve resumo do caso.
 📎 Se houver contrato, notificação ou outro documento, pode enviar por aqui.
 
-Pode responder por texto ou áudio.`,
-
-    '3': `🛒 *Direito do Consumidor*
+Pode responder por texto ou áudio.`
+    },
+    {
+        _id: '3',
+        numero: '3',
+        ordem: 3,
+        titulo: 'Direito do Consumidor',
+        area: 'Direito do Consumidor',
+        ativo: true,
+        resposta: `🛒 *Direito do Consumidor*
 
 Para direcionarmos corretamente o atendimento, informe:
 
@@ -144,9 +158,16 @@ Para direcionarmos corretamente o atendimento, informe:
 💰 Houve algum prejuízo financeiro? Se sim, qual o valor aproximado?
 📸 Se possível, envie notas, protocolos, e-mails ou prints relacionados ao caso.
 
-Pode responder por texto ou áudio.`,
-
-    '4': `🏠 *Direito Imobiliário*
+Pode responder por texto ou áudio.`
+    },
+    {
+        _id: '4',
+        numero: '4',
+        ordem: 4,
+        titulo: 'Direito Imobiliário',
+        area: 'Direito Imobiliário',
+        ativo: true,
+        resposta: `🏠 *Direito Imobiliário*
 
 Para direcionarmos corretamente o atendimento, informe:
 
@@ -154,9 +175,16 @@ Para direcionarmos corretamente o atendimento, informe:
 📝 Faça um breve resumo da situação.
 📎 Se houver contrato, matrícula ou notificação, pode enviar por aqui.
 
-Pode responder por texto ou áudio.`,
-
-    '5': `👷 *Direito Trabalhista*
+Pode responder por texto ou áudio.`
+    },
+    {
+        _id: '5',
+        numero: '5',
+        ordem: 5,
+        titulo: 'Direito Trabalhista',
+        area: 'Direito Trabalhista',
+        ativo: true,
+        resposta: `👷 *Direito Trabalhista*
 
 Para direcionarmos corretamente o atendimento, informe:
 
@@ -164,9 +192,16 @@ Para direcionarmos corretamente o atendimento, informe:
 📌 Qual é o principal problema ou dúvida trabalhista?
 📝 Conte brevemente o que aconteceu.
 
-Pode responder por texto ou áudio.`,
-
-    '6': `🏢 *Direito Empresarial*
+Pode responder por texto ou áudio.`
+    },
+    {
+        _id: '6',
+        numero: '6',
+        ordem: 6,
+        titulo: 'Direito Empresarial',
+        area: 'Direito Empresarial',
+        ativo: true,
+        resposta: `🏢 *Direito Empresarial*
 
 Para direcionarmos corretamente o atendimento, informe:
 
@@ -174,15 +209,29 @@ Para direcionarmos corretamente o atendimento, informe:
 🏷️ Se desejar, informe o nome ou segmento da empresa.
 📝 Faça um breve resumo da situação ou dúvida.
 
-Pode responder por texto ou áudio.`,
-
-    '7': `📝 *Outros Assuntos*
+Pode responder por texto ou áudio.`
+    },
+    {
+        _id: '7',
+        numero: '7',
+        ordem: 7,
+        titulo: 'Outros Assuntos',
+        area: 'Outros Assuntos',
+        ativo: true,
+        resposta: `📝 *Outros Assuntos*
 
 Sem problemas. Descreva brevemente o assunto ou a dúvida para que possamos encaminhar ao profissional adequado.
 
-Pode responder por texto ou áudio.`,
-
-    '8': `📂 *Atendimento / Processo em Andamento*
+Pode responder por texto ou áudio.`
+    },
+    {
+        _id: '8',
+        numero: '8',
+        ordem: 8,
+        titulo: 'Processo em andamento',
+        area: 'Processo em andamento',
+        ativo: true,
+        resposta: `📂 *Atendimento / Processo em Andamento*
 
 Para localizarmos o atendimento, informe:
 
@@ -191,7 +240,97 @@ Para localizarmos o atendimento, informe:
 📌 O que você precisa: andamento, envio de documento ou contato com o advogado responsável?
 
 Se precisar enviar algum documento, pode anexar por aqui.`
-};
+    }
+];
+
+const PERGUNTA_CADASTRO_CLIENTE = `Antes de finalizar a triagem, deseja se cadastrar como cliente para facilitar seus próximos atendimentos?
+
+1️⃣ Sim
+2️⃣ Não`;
+
+function invalidarCacheMenu() {
+    menuOptionsCache = { items: [], loadedAt: 0 };
+}
+
+function numeroComEmoji(numero) {
+    const valor = String(numero ?? '').trim();
+    if (!valor) return '';
+    if (valor === '10') return '🔟';
+
+    const digitos = {
+        '0': '0️⃣', '1': '1️⃣', '2': '2️⃣', '3': '3️⃣', '4': '4️⃣',
+        '5': '5️⃣', '6': '6️⃣', '7': '7️⃣', '8': '8️⃣', '9': '9️⃣'
+    };
+
+    return valor.split('').map(digito => digitos[digito] || digito).join('');
+}
+
+async function garantirMenuPadrao() {
+    if (!menuOptionsColl) return;
+
+    // O menu padrão é criado apenas quando a coleção ainda está vazia.
+    // Assim, opções excluídas pelo painel não reaparecem após reiniciar o servidor.
+    const quantidade = await menuOptionsColl.countDocuments({});
+    if (quantidade === 0) {
+        const agora = Date.now();
+        await menuOptionsColl.insertMany(
+            DEFAULT_MENU_OPTIONS.map(item => ({
+                ...item,
+                emoji: item.emoji || '',
+                createdAt: agora,
+                updatedAt: agora
+            }))
+        );
+    }
+
+    invalidarCacheMenu();
+}
+
+async function carregarMenuOpcoes({ incluirInativas = false } = {}) {
+    if (!menuOptionsColl) {
+        return incluirInativas
+            ? DEFAULT_MENU_OPTIONS
+            : DEFAULT_MENU_OPTIONS.filter(item => item.ativo !== false);
+    }
+
+    const agora = Date.now();
+    if (!menuOptionsCache.loadedAt || (agora - menuOptionsCache.loadedAt) >= MENU_CACHE_TTL_MS) {
+        const items = await menuOptionsColl
+            .find({})
+            .sort({ ordem: 1, createdAt: 1, _id: 1 })
+            .toArray();
+
+        menuOptionsCache = { items, loadedAt: agora };
+    }
+
+    return incluirInativas
+        ? menuOptionsCache.items
+        : menuOptionsCache.items.filter(item => item.ativo !== false);
+}
+
+async function gerarMenuTexto() {
+    const opcoes = await carregarMenuOpcoes();
+    return opcoes
+        .map((item, index) => {
+            const emoji = String(item.emoji || '').trim();
+            const prefixoEmoji = emoji ? ` ${emoji}` : '';
+            return `${numeroComEmoji(index + 1)}${prefixoEmoji} ${item.titulo}`;
+        })
+        .join('\n');
+}
+
+async function buscarOpcaoMenu(numero) {
+    const valor = String(numero || '').trim();
+    if (!/^\d{1,3}$/.test(valor)) return null;
+
+    const indice = Number.parseInt(valor, 10) - 1;
+    if (!Number.isInteger(indice) || indice < 0) return null;
+
+    // O número digitado é a posição visual atual entre as opções ATIVAS.
+    // O _id permanece estável, então reordenações não quebram o histórico dos tickets.
+    const opcoesAtivas = await carregarMenuOpcoes();
+    return opcoesAtivas[indice] || null;
+}
 
 function normalizarTexto(texto = '') {
     return texto
@@ -347,7 +486,7 @@ function possuiSinalDePergunta(texto = '') {
 function entradaEstruturadaDoFluxo(ticket, texto = '') {
     const valor = normalizarTexto(texto);
 
-    if (ticket?.aguardandoOpcao && RESPOSTAS_AREAS[texto]) return true;
+    if (ticket?.aguardandoOpcao && /^\d{1,3}$/.test(String(texto).trim())) return true;
     if (ticket?.aguardandoCadastroCliente && (respostaPositiva(texto) || respostaNegativa(texto))) return true;
     if (ticket?.aguardandoCPFCadastro && /^\d{11}$/.test(texto.replace(/\D/g, ''))) return true;
 
@@ -384,11 +523,12 @@ function extrairJsonIA(raw = '') {
     }
 }
 
-function mensagemRetomadaFluxo(ticket) {
+async function mensagemRetomadaFluxo(ticket) {
     if (!ticket) return '';
 
     if (ticket.aguardandoOpcao) {
-        return `\n\nPara continuar o atendimento, escolha uma opção digitando apenas o número:\n\n${MENU_OPCOES}`;
+        const menuTexto = await gerarMenuTexto();
+        return `\n\nPara continuar o atendimento, escolha uma opção digitando apenas o número:\n\n${menuTexto}`;
     }
 
     if (ticket.aguardandoDetalhes) {
@@ -547,8 +687,9 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA) {
     }
 
     if (analiseIA.acao === 'RESPONDER_BASE') {
+        const retomada = await mensagemRetomadaFluxo(ticket);
         await sendBotMsg(jid, {
-            text: `${analiseIA.resposta}${mensagemRetomadaFluxo(ticket)}`
+            text: `${analiseIA.resposta}${retomada}`
         });
 
         await ticketsColl.updateOne(
@@ -748,12 +889,26 @@ async function gerarNumeroTicket() {
     };
 }
 
-function mensagemRecepcao(cliente, ticketNumber) {
+async function mensagemRecepcao(cliente, ticketNumber) {
+    const menuTexto = await gerarMenuTexto();
+
     if (cliente?.nome) {
-        return `Olá, ${primeiroNome(cliente.nome)}! Seja bem-vindo de volta à *Azevedo & Juvencio Advogados*. 👋\n\nSeu novo atendimento é o ticket *${ticketNumber}*.\n\nSegue as opções. Digite apenas o número:\n\n${MENU_OPCOES}`;
+        return `Olá, ${primeiroNome(cliente.nome)}! Seja bem-vindo de volta à *Azevedo & Juvencio Advogados*. 👋
+
+Seu novo atendimento é o ticket *${ticketNumber}*.
+
+Segue as opções. Digite apenas o número:
+
+${menuTexto}`;
     }
 
-    return `Olá! Seja bem-vindo à *Azevedo & Juvencio Advogados*. 👋\n\nSeu atendimento é o ticket *${ticketNumber}*.\n\nPara começar, escolha uma opção digitando apenas o número:\n\n${MENU_OPCOES}`;
+    return `Olá! Seja bem-vindo à *Azevedo & Juvencio Advogados*. 👋
+
+Seu atendimento é o ticket *${ticketNumber}*.
+
+Para começar, escolha uma opção digitando apenas o número:
+
+${menuTexto}`;
 }
 
 async function registrarTicketHistorico(ticket) {
@@ -953,6 +1108,10 @@ async function startBot() {
         clientsColl = db.collection('client_registry');
         ticketHistoryColl = db.collection('ticket_history');
         countersColl = db.collection('counters');
+        menuOptionsColl = db.collection('menu_options');
+
+        // Cria as opções atuais no MongoDB somente se ainda não existirem.
+        await garantirMenuPadrao();
 
         // Índices para manter CPF e número de ticket únicos e acelerar a identificação do cliente.
         await Promise.all([
@@ -961,7 +1120,8 @@ async function startBot() {
             clientsColl.createIndex({ whatsappNumbers: 1 }),
             ticketHistoryColl.createIndex({ ticketNumber: 1 }, { unique: true }),
             ticketHistoryColl.createIndex({ identificadores: 1 }),
-            ticketsColl.createIndex({ ticketNumber: 1 }, { unique: true, sparse: true })
+            ticketsColl.createIndex({ ticketNumber: 1 }, { unique: true, sparse: true }),
+            menuOptionsColl.createIndex({ ordem: 1 })
         ]);
         
         apiKeysColl = db.collection('api_keys');
@@ -1138,7 +1298,7 @@ sock.ev.on('messages.upsert', async m => {
             });
 
             await sendBotMsg(rawJid, {
-                text: mensagemRecepcao(cliente, ticket.ticketNumber)
+                text: await mensagemRecepcao(cliente, ticket.ticketNumber)
             });
 
             console.log(`[Ticket ${ticket.ticketNumber}] Novo atendimento aberto${cliente ? ` para ${cliente.nome}` : ''}.`);
@@ -1168,33 +1328,33 @@ sock.ev.on('messages.upsert', async m => {
             return;
         }
 
-        // 1) MENU PRINCIPAL
+        // 1) MENU PRINCIPAL - opções carregadas dinamicamente do MongoDB
         if (ticket.aguardandoOpcao) {
-            if (!RESPOSTAS_AREAS[texto]) {
+            const opcaoSelecionada = await buscarOpcaoMenu(texto);
+
+            if (!opcaoSelecionada) {
+                const menuTexto = await gerarMenuTexto();
                 await sendBotMsg(rawJid, {
-                    text: `Por favor, digite apenas o número da opção desejada:\n\n${MENU_OPCOES}`
+                    text: `Por favor, digite apenas o número da opção desejada:\n\n${menuTexto}`
                 });
                 return;
             }
 
-            const area = {
-                '1': 'Direito Digital',
-                '2': 'Direito Cível',
-                '3': 'Direito do Consumidor',
-                '4': 'Direito Imobiliário',
-                '5': 'Direito Trabalhista',
-                '6': 'Direito Empresarial',
-                '7': 'Outros Assuntos',
-                '8': 'Processo em andamento'
-            }[texto];
+            const area = String(opcaoSelecionada.area || opcaoSelecionada.titulo || 'Outros Assuntos').trim();
+            const respostaArea = String(opcaoSelecionada.resposta || '').trim();
 
-            await sendBotMsg(rawJid, { text: RESPOSTAS_AREAS[texto] });
+            if (respostaArea) {
+                await sendBotMsg(rawJid, { text: respostaArea });
+            }
 
             await ticketsColl.updateOne(
                 { _id: ticket._id },
                 {
                     $set: {
                         area,
+                        menuOptionId: opcaoSelecionada._id,
+                        menuOptionTitle: opcaoSelecionada.titulo,
+                        menuOptionEmoji: opcaoSelecionada.emoji || '',
                         status: 'aguardando_detalhes',
                         aguardandoOpcao: false,
                         aguardandoDetalhes: true,
@@ -1205,6 +1365,9 @@ sock.ev.on('messages.upsert', async m => {
 
             await atualizarHistorico(ticket.ticketNumber, {
                 area,
+                menuOptionId: opcaoSelecionada._id,
+                menuOptionTitle: opcaoSelecionada.titulo,
+                menuOptionEmoji: opcaoSelecionada.emoji || '',
                 status: 'aguardando_detalhes'
             });
             return;
@@ -1373,8 +1536,9 @@ sock.ev.on('messages.upsert', async m => {
         // Estado de segurança: se o ticket existir mas não estiver em nenhum passo válido,
         // mantém a conversa simples e não cria um segundo ticket por engano.
         console.warn(`[Ticket ${ticket.ticketNumber}] Estado não reconhecido. Reiniciando menu do mesmo ticket.`);
+        const menuTextoSeguranca = await gerarMenuTexto();
         await sendBotMsg(rawJid, {
-            text: `Vamos continuar pelo ticket *${ticket.ticketNumber}*. Escolha uma opção:\n\n${MENU_OPCOES}`
+            text: `Vamos continuar pelo ticket *${ticket.ticketNumber}*. Escolha uma opção:\n\n${menuTextoSeguranca}`
         });
         await ticketsColl.updateOne(
             { _id: ticket._id },
@@ -1524,6 +1688,198 @@ app.get('/logout-whatsapp', async (req, res) => {
         io.emit('disconnected');
         res.sendStatus(200);
     } catch (err) { res.status(500).send("Erro"); }
+});
+
+// Gestão das opções do atendimento. O painel edita a mesma coleção usada pelo WhatsApp.
+app.get('/api/menu-options', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+
+    try {
+        const data = await carregarMenuOpcoes({ incluirInativas: true });
+        res.json(data);
+    } catch (err) {
+        console.error('[Menu] Erro ao carregar opções:', err);
+        res.status(500).json({ erro: 'Não foi possível carregar as opções.' });
+    }
+});
+
+app.post('/api/menu-options', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+
+    try {
+        const { titulo, area, resposta, emoji, ativo } = req.body;
+        const tituloLimpo = String(titulo || '').trim();
+        const areaLimpa = String(area || '').trim();
+        const respostaLimpa = String(resposta || '').trim();
+        const emojiLimpo = String(emoji || '').trim();
+
+        if (!tituloLimpo || tituloLimpo.length > 120) {
+            return res.status(400).json({ erro: 'Informe um título válido com até 120 caracteres.' });
+        }
+        if (!areaLimpa || areaLimpa.length > 120) {
+            return res.status(400).json({ erro: 'Informe uma área interna válida com até 120 caracteres.' });
+        }
+        if (!respostaLimpa || respostaLimpa.length > 4000) {
+            return res.status(400).json({ erro: 'A mensagem deve possuir entre 1 e 4.000 caracteres.' });
+        }
+        if (emojiLimpo.length > 24) {
+            return res.status(400).json({ erro: 'O campo de emoji deve ter no máximo 24 caracteres.' });
+        }
+
+        const quantidade = await menuOptionsColl.countDocuments({});
+        if (quantidade >= 50) {
+            return res.status(400).json({ erro: 'O menu atingiu o limite de 50 opções.' });
+        }
+
+        const ultima = await menuOptionsColl.find({}).sort({ ordem: -1 }).limit(1).next();
+        const ordem = Number(ultima?.ordem || 0) + 1;
+        const agora = Date.now();
+        const id = new ObjectId().toString();
+
+        const novaOpcao = {
+            _id: id,
+            ordem,
+            titulo: tituloLimpo,
+            area: areaLimpa,
+            resposta: respostaLimpa,
+            emoji: emojiLimpo,
+            ativo: ativo !== false,
+            createdAt: agora,
+            updatedAt: agora
+        };
+
+        await menuOptionsColl.insertOne(novaOpcao);
+        invalidarCacheMenu();
+        res.status(201).json(novaOpcao);
+    } catch (err) {
+        console.error('[Menu] Erro ao criar opção:', err);
+        res.status(500).json({ erro: 'Não foi possível criar a opção.' });
+    }
+});
+
+app.put('/api/menu-options/:id', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+
+    try {
+        const id = String(req.params.id || '').trim();
+        const { titulo, area, resposta, emoji, ativo } = req.body;
+
+        const existente = await menuOptionsColl.findOne({ _id: id });
+        if (!existente) {
+            return res.status(404).json({ erro: 'Opção não encontrada.' });
+        }
+
+        const tituloLimpo = String(titulo || '').trim();
+        const areaLimpa = String(area || '').trim();
+        const respostaLimpa = String(resposta || '').trim();
+        const emojiLimpo = String(emoji || '').trim();
+
+        if (!tituloLimpo || tituloLimpo.length > 120) {
+            return res.status(400).json({ erro: 'Informe um título válido com até 120 caracteres.' });
+        }
+        if (!areaLimpa || areaLimpa.length > 120) {
+            return res.status(400).json({ erro: 'Informe uma área interna válida com até 120 caracteres.' });
+        }
+        if (!respostaLimpa || respostaLimpa.length > 4000) {
+            return res.status(400).json({ erro: 'A mensagem deve possuir entre 1 e 4.000 caracteres.' });
+        }
+        if (emojiLimpo.length > 24) {
+            return res.status(400).json({ erro: 'O campo de emoji deve ter no máximo 24 caracteres.' });
+        }
+
+        await menuOptionsColl.updateOne(
+            { _id: id },
+            {
+                $set: {
+                    titulo: tituloLimpo,
+                    area: areaLimpa,
+                    resposta: respostaLimpa,
+                    emoji: emojiLimpo,
+                    ativo: ativo !== false,
+                    updatedAt: Date.now()
+                }
+            }
+        );
+
+        invalidarCacheMenu();
+        const atualizado = await menuOptionsColl.findOne({ _id: id });
+        res.json(atualizado);
+    } catch (err) {
+        console.error('[Menu] Erro ao atualizar opção:', err);
+        res.status(500).json({ erro: 'Não foi possível salvar a opção.' });
+    }
+});
+
+app.post('/api/menu-options/reorder', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+
+    try {
+        const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(id => String(id)) : [];
+        const atuais = await menuOptionsColl.find({}, { projection: { _id: 1 } }).toArray();
+        const idsAtuais = atuais.map(item => String(item._id));
+
+        if (
+            ids.length !== idsAtuais.length ||
+            new Set(ids).size !== ids.length ||
+            idsAtuais.some(id => !ids.includes(id))
+        ) {
+            return res.status(400).json({ erro: 'A ordem enviada não corresponde às opções atuais.' });
+        }
+
+        const agora = Date.now();
+        await menuOptionsColl.bulkWrite(
+            ids.map((id, index) => ({
+                updateOne: {
+                    filter: { _id: id },
+                    update: { $set: { ordem: index + 1, updatedAt: agora } }
+                }
+            }))
+        );
+
+        invalidarCacheMenu();
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[Menu] Erro ao reordenar opções:', err);
+        res.status(500).json({ erro: 'Não foi possível alterar a ordem das opções.' });
+    }
+});
+
+app.delete('/api/menu-options/:id', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+
+    try {
+        const id = String(req.params.id || '').trim();
+        const quantidade = await menuOptionsColl.countDocuments({});
+        if (quantidade <= 1) {
+            return res.status(400).json({ erro: 'O atendimento precisa manter pelo menos uma opção cadastrada.' });
+        }
+
+        const existente = await menuOptionsColl.findOne({ _id: id });
+        if (!existente) return res.status(404).json({ erro: 'Opção não encontrada.' });
+
+        await menuOptionsColl.deleteOne({ _id: id });
+
+        // Normaliza apenas a ordem interna após a exclusão. Os números exibidos no
+        // WhatsApp são calculados dinamicamente entre as opções ativas.
+        const restantes = await menuOptionsColl.find({}).sort({ ordem: 1, createdAt: 1 }).toArray();
+        if (restantes.length) {
+            const agora = Date.now();
+            await menuOptionsColl.bulkWrite(
+                restantes.map((item, index) => ({
+                    updateOne: {
+                        filter: { _id: item._id },
+                        update: { $set: { ordem: index + 1, updatedAt: agora } }
+                    }
+                }))
+            );
+        }
+
+        invalidarCacheMenu();
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[Menu] Erro ao excluir opção:', err);
+        res.status(500).json({ erro: 'Não foi possível excluir a opção.' });
+    }
 });
 
 app.get('/api/knowledgeColl', async (req, res) => {

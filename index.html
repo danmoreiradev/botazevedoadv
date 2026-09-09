@@ -180,6 +180,93 @@
             transform: scale(1.1);
     }
             
+        /* Editor das opções do atendimento */
+        .menu-option-card {
+            border: 1px solid #e7ecef;
+            border-radius: 18px;
+            padding: 22px;
+            margin-bottom: 18px;
+            background: #fff;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.04);
+        }
+        .menu-option-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+        .menu-number-badge {
+            width: 42px;
+            height: 42px;
+            min-width: 42px;
+            border-radius: 12px;
+            background: var(--adv-blue);
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+        }
+        .menu-save-status {
+            min-height: 20px;
+            font-size: 0.82rem;
+            font-weight: 600;
+        }
+        .menu-preview {
+            white-space: pre-wrap;
+            background: #f8fafb;
+            border: 1px dashed #d9e1e5;
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 0.9rem;
+        }
+
+        .emoji-picker {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+            margin-top: 9px;
+        }
+        .emoji-choice {
+            border: 1px solid #dfe5e8;
+            background: #fff;
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            font-size: 1.15rem;
+            cursor: pointer;
+            transition: 0.15s ease;
+        }
+        .emoji-choice:hover {
+            border-color: var(--adv-gold);
+            transform: translateY(-1px);
+            background: #fffaf0;
+        }
+        .new-option-box {
+            border: 1px solid #dde6ea;
+            border-radius: 18px;
+            padding: 24px;
+            background: #f9fbfc;
+            margin-bottom: 24px;
+        }
+        .menu-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .btn-menu-icon {
+            border: 1px solid #d9e2e6;
+            background: white;
+            border-radius: 10px;
+            padding: 7px 11px;
+            cursor: pointer;
+        }
+        .btn-menu-icon:hover { background: #f5f7f8; }
+        .menu-number-badge.inactive {
+            background: #adb5bd;
+        }
+
         .hidden { display: none !important; }
 
         /* RESPONSIVIDADE MOBILE APRIMORADA */
@@ -213,6 +300,7 @@
         <div class="nav flex-column mt-md-2">
             <div class="nav-link active" onclick="switchTab('tab-chatbot', this)">🤖 Chatbot - Conexão</div>
             <div class="nav-link" onclick="switchTab('tab-ia', this)">🧠 Gestão IA</div>
+            <div class="nav-link" onclick="switchTab('tab-opcoes', this)">⚙️ Opções Atendimento</div>
         </div>
 
         <div class="mt-auto nav-link border-0 text-white-50" onclick="window.location.href='/logout-panel'" style="font-size: 0.85rem; background: rgba(0,0,0,0.2); cursor: pointer;">
@@ -276,6 +364,69 @@
                 </div>
             </div>
         </div>
+
+        <div id="tab-opcoes" class="content-section hidden">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                <div>
+                    <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Opções do Atendimento</h4>
+                    <p class="text-muted mb-0">Crie, edite, reorganize e desative as opções enviadas automaticamente no WhatsApp.</p>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="btn text-white fw-bold" style="background: var(--adv-blue)" onclick="alternarFormularioNovaOpcao(true)">＋ NOVA OPÇÃO</button>
+                    <button class="btn btn-outline-secondary" onclick="carregarOpcoesAtendimento(true)">↻ Atualizar</button>
+                </div>
+            </div>
+
+            <div class="card-custom text-start p-4" style="max-width: 1050px; width: 100%;">
+                <div class="alert alert-light border mb-4" role="alert">
+                    <strong>Menu dinâmico:</strong> a numeração do WhatsApp é gerada automaticamente conforme a ordem das opções ativas. Você pode usar emojis no campo próprio, no título e também na mensagem. Exemplo: <strong>⚖️ Direito Previdenciário</strong>.
+                </div>
+
+                <div id="nova-opcao-box" class="new-option-box hidden">
+                    <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
+                        <div>
+                            <h5 class="mb-1" style="color: var(--adv-blue)">Criar nova opção</h5>
+                            <small class="text-muted">A nova opção será adicionada ao final do menu e poderá ser reorganizada depois.</small>
+                        </div>
+                        <button type="button" class="btn-close" aria-label="Fechar" onclick="alternarFormularioNovaOpcao(false)"></button>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Emoji / Emoticon</label>
+                            <input type="text" id="nova-menu-emoji" class="form-control" maxlength="24" placeholder="Ex: ⚖️">
+                            <div id="nova-menu-emoji-picker" class="emoji-picker"></div>
+                            <div class="form-text">Escolha um abaixo ou cole qualquer emoji.</div>
+                        </div>
+                        <div class="col-md-9">
+                            <label class="form-label small fw-bold">Nome exibido no menu</label>
+                            <input type="text" id="nova-menu-titulo" class="form-control" maxlength="120" placeholder="Ex: Direito Previdenciário">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-bold">Área registrada internamente no ticket</label>
+                            <input type="text" id="nova-menu-area" class="form-control" maxlength="120" placeholder="Ex: Direito Previdenciário">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-bold">Mensagem enviada após o cliente escolher a opção</label>
+                            <textarea id="nova-menu-resposta" class="form-control" rows="7" maxlength="4000" placeholder="Ex: ⚖️ *Direito Previdenciário*&#10;&#10;Para direcionarmos corretamente o atendimento, informe..."></textarea>
+                        </div>
+                        <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="nova-menu-ativo" checked>
+                                <label class="form-check-label fw-bold" for="nova-menu-ativo">Criar como opção ativa</label>
+                            </div>
+                            <div class="d-flex align-items-center gap-3">
+                                <span id="nova-menu-status" class="menu-save-status text-muted"></span>
+                                <button id="btn-criar-menu" type="button" class="btn text-white fw-bold px-4" style="background: var(--adv-blue)" onclick="criarNovaOpcaoAtendimento()">CRIAR OPÇÃO</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="menu-options-loading" class="text-muted py-4 text-center">Carregando opções...</div>
+                <div id="menu-options-list"></div>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
@@ -290,6 +441,7 @@
             document.getElementById(tabId).classList.remove('hidden');
             el.classList.add('active');
             if(tabId === 'tab-ia') carregarConhecimento();
+            if(tabId === 'tab-opcoes') carregarOpcoesAtendimento();
         }
 
         socket.on('qr', (qr) => {
@@ -398,6 +550,385 @@ function renderizarLista(itens) {
                 }
             } catch (err) {
                 console.error("Erro:", err);
+            }
+        }
+
+        const EMOJIS_MENU = ['⚖️','📱','📄','🛒','🏠','👷','🏢','📝','📂','👨‍👩‍👧','🏦','🚗','💼','💰','🔐','📌','✅','❓','🤝','🏛️'];
+
+        function numeroComEmojiJS(numero) {
+            const valor = String(numero || '');
+            if (valor === '10') return '🔟';
+            const mapa = {'0':'0️⃣','1':'1️⃣','2':'2️⃣','3':'3️⃣','4':'4️⃣','5':'5️⃣','6':'6️⃣','7':'7️⃣','8':'8️⃣','9':'9️⃣'};
+            return valor.split('').map(n => mapa[n] || n).join('');
+        }
+
+        function criarCampoMenu(label, elemento) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'mb-3';
+
+            const lbl = document.createElement('label');
+            lbl.className = 'form-label small fw-bold';
+            lbl.textContent = label;
+
+            wrapper.appendChild(lbl);
+            wrapper.appendChild(elemento);
+            return wrapper;
+        }
+
+        function criarEmojiPicker(input) {
+            const picker = document.createElement('div');
+            picker.className = 'emoji-picker';
+
+            EMOJIS_MENU.forEach(emoji => {
+                const botao = document.createElement('button');
+                botao.type = 'button';
+                botao.className = 'emoji-choice';
+                botao.textContent = emoji;
+                botao.title = `Usar ${emoji}`;
+                botao.onclick = () => {
+                    input.value = emoji;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                };
+                picker.appendChild(botao);
+            });
+
+            return picker;
+        }
+
+        function inicializarEmojiNovaOpcao() {
+            const container = document.getElementById('nova-menu-emoji-picker');
+            const input = document.getElementById('nova-menu-emoji');
+            if (!container || !input || container.dataset.ready) return;
+            container.dataset.ready = '1';
+            const picker = criarEmojiPicker(input);
+            while (picker.firstChild) container.appendChild(picker.firstChild);
+        }
+
+        function alternarFormularioNovaOpcao(abrir) {
+            const box = document.getElementById('nova-opcao-box');
+            if (!box) return;
+            box.classList.toggle('hidden', !abrir);
+            if (abrir) {
+                inicializarEmojiNovaOpcao();
+                setTimeout(() => document.getElementById('nova-menu-titulo')?.focus(), 50);
+            }
+        }
+
+        function limparFormularioNovaOpcao() {
+            document.getElementById('nova-menu-emoji').value = '';
+            document.getElementById('nova-menu-titulo').value = '';
+            document.getElementById('nova-menu-area').value = '';
+            document.getElementById('nova-menu-resposta').value = '';
+            document.getElementById('nova-menu-ativo').checked = true;
+            document.getElementById('nova-menu-status').textContent = '';
+        }
+
+        async function criarNovaOpcaoAtendimento() {
+            const emoji = document.getElementById('nova-menu-emoji').value.trim();
+            const titulo = document.getElementById('nova-menu-titulo').value.trim();
+            const area = document.getElementById('nova-menu-area').value.trim();
+            const resposta = document.getElementById('nova-menu-resposta').value.trim();
+            const ativo = document.getElementById('nova-menu-ativo').checked;
+            const status = document.getElementById('nova-menu-status');
+            const btn = document.getElementById('btn-criar-menu');
+
+            if (!titulo || !area || !resposta) {
+                status.className = 'menu-save-status text-danger';
+                status.textContent = 'Preencha nome, área e mensagem.';
+                return;
+            }
+
+            btn.disabled = true;
+            const original = btn.textContent;
+            btn.textContent = 'CRIANDO...';
+            status.className = 'menu-save-status text-muted';
+            status.textContent = '';
+
+            try {
+                const res = await fetch('/api/menu-options', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ emoji, titulo, area, resposta, ativo })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível criar a opção.');
+
+                status.className = 'menu-save-status text-success';
+                status.textContent = '✓ Nova opção criada.';
+                limparFormularioNovaOpcao();
+                alternarFormularioNovaOpcao(false);
+                window.menuOptionsLoaded = false;
+                await carregarOpcoesAtendimento(true);
+            } catch (err) {
+                console.error(err);
+                status.className = 'menu-save-status text-danger';
+                status.textContent = err.message || 'Erro ao criar a opção.';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = original;
+            }
+        }
+
+        async function carregarOpcoesAtendimento(forcar = false) {
+            const container = document.getElementById('menu-options-list');
+            const loading = document.getElementById('menu-options-loading');
+
+            if (!container || !loading) return;
+            if (window.menuOptionsLoaded && !forcar) return;
+
+            loading.textContent = 'Carregando opções...';
+            loading.classList.remove('hidden');
+            container.innerHTML = '';
+
+            try {
+                const res = await fetch('/api/menu-options');
+                if (!res.ok) throw new Error('Falha ao carregar opções');
+
+                const opcoes = await res.json();
+                window.menuOptionsData = Array.isArray(opcoes) ? opcoes : [];
+                window.menuOptionsLoaded = true;
+                loading.classList.add('hidden');
+
+                if (!window.menuOptionsData.length) {
+                    container.innerHTML = '<p class="text-muted">Nenhuma opção encontrada.</p>';
+                    return;
+                }
+
+                let numeroAtivo = 0;
+                window.menuOptionsData.forEach((opcao, index) => {
+                    if (opcao.ativo !== false) numeroAtivo += 1;
+                    renderizarOpcaoAtendimento(container, opcao, index, opcao.ativo !== false ? numeroAtivo : null);
+                });
+            } catch (err) {
+                console.error(err);
+                loading.textContent = 'Não foi possível carregar as opções do atendimento.';
+            }
+        }
+
+        function renderizarOpcaoAtendimento(container, opcao, index, numeroWhatsApp) {
+            const id = String(opcao._id || '');
+
+            const card = document.createElement('div');
+            card.className = 'menu-option-card';
+            card.dataset.optionId = id;
+
+            const header = document.createElement('div');
+            header.className = 'menu-option-header';
+
+            const left = document.createElement('div');
+            left.className = 'd-flex align-items-center gap-3';
+
+            const badge = document.createElement('div');
+            badge.className = `menu-number-badge${numeroWhatsApp ? '' : ' inactive'}`;
+            badge.textContent = numeroWhatsApp ? numeroComEmojiJS(numeroWhatsApp) : '—';
+
+            const titleWrap = document.createElement('div');
+            const h5 = document.createElement('h5');
+            h5.className = 'mb-0';
+            h5.style.color = 'var(--adv-blue)';
+            h5.textContent = `${opcao.emoji ? opcao.emoji + ' ' : ''}${opcao.titulo || 'Sem título'}`;
+            const small = document.createElement('small');
+            small.className = 'text-muted';
+            small.textContent = numeroWhatsApp
+                ? `Número atual no WhatsApp: ${numeroWhatsApp} • Ordem no painel: ${index + 1}`
+                : `Opção inativa • Ordem no painel: ${index + 1}`;
+            titleWrap.append(h5, small);
+            left.append(badge, titleWrap);
+
+            const right = document.createElement('div');
+            right.className = 'd-flex align-items-center gap-3 flex-wrap justify-content-end';
+
+            const actions = document.createElement('div');
+            actions.className = 'menu-actions';
+
+            const up = document.createElement('button');
+            up.type = 'button';
+            up.className = 'btn-menu-icon';
+            up.textContent = '↑';
+            up.title = 'Mover para cima';
+            up.disabled = index === 0;
+            up.onclick = () => moverOpcaoAtendimento(id, -1);
+
+            const down = document.createElement('button');
+            down.type = 'button';
+            down.className = 'btn-menu-icon';
+            down.textContent = '↓';
+            down.title = 'Mover para baixo';
+            down.disabled = index === (window.menuOptionsData?.length || 1) - 1;
+            down.onclick = () => moverOpcaoAtendimento(id, 1);
+
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'btn-menu-icon text-danger';
+            del.textContent = '🗑️';
+            del.title = 'Excluir opção';
+            del.onclick = () => excluirOpcaoAtendimento(id, opcao.titulo || 'esta opção');
+
+            actions.append(up, down, del);
+
+            const switchWrap = document.createElement('div');
+            switchWrap.className = 'form-check form-switch mb-0';
+            const ativo = document.createElement('input');
+            ativo.className = 'form-check-input menu-ativo';
+            ativo.type = 'checkbox';
+            ativo.role = 'switch';
+            ativo.checked = opcao.ativo !== false;
+            ativo.id = `menu-ativo-${id}`;
+            const ativoLabel = document.createElement('label');
+            ativoLabel.className = 'form-check-label small fw-bold';
+            ativoLabel.htmlFor = ativo.id;
+            ativoLabel.textContent = 'Ativa';
+            switchWrap.append(ativo, ativoLabel);
+
+            right.append(actions, switchWrap);
+            header.append(left, right);
+            card.appendChild(header);
+
+            const emoji = document.createElement('input');
+            emoji.type = 'text';
+            emoji.className = 'form-control menu-emoji';
+            emoji.maxLength = 24;
+            emoji.placeholder = 'Ex: ⚖️';
+            emoji.value = opcao.emoji || '';
+            const emojiWrapper = criarCampoMenu('Emoji / Emoticon da opção (opcional)', emoji);
+            emojiWrapper.appendChild(criarEmojiPicker(emoji));
+            const emojiHelp = document.createElement('div');
+            emojiHelp.className = 'form-text';
+            emojiHelp.textContent = 'Você também pode colar qualquer emoji diretamente no campo.';
+            emojiWrapper.appendChild(emojiHelp);
+            card.appendChild(emojiWrapper);
+
+            const titulo = document.createElement('input');
+            titulo.type = 'text';
+            titulo.className = 'form-control menu-titulo';
+            titulo.maxLength = 120;
+            titulo.value = opcao.titulo || '';
+            card.appendChild(criarCampoMenu('Nome exibido no menu', titulo));
+
+            const area = document.createElement('input');
+            area.type = 'text';
+            area.className = 'form-control menu-area';
+            area.maxLength = 120;
+            area.value = opcao.area || '';
+            card.appendChild(criarCampoMenu('Área registrada internamente no ticket', area));
+
+            const resposta = document.createElement('textarea');
+            resposta.className = 'form-control menu-resposta';
+            resposta.rows = 7;
+            resposta.maxLength = 4000;
+            resposta.value = opcao.resposta || '';
+            card.appendChild(criarCampoMenu('Mensagem enviada após o cliente escolher esta opção', resposta));
+
+            const preview = document.createElement('div');
+            preview.className = 'menu-preview mb-3';
+            const atualizarPreview = () => {
+                const numero = numeroWhatsApp ? `${numeroComEmojiJS(numeroWhatsApp)} ` : '';
+                const emo = emoji.value.trim() ? `${emoji.value.trim()} ` : '';
+                preview.textContent = `Prévia no menu: ${numero}${emo}${titulo.value.trim() || 'Nome da opção'}`;
+                h5.textContent = `${emo}${titulo.value.trim() || 'Sem título'}`;
+            };
+            emoji.addEventListener('input', atualizarPreview);
+            titulo.addEventListener('input', atualizarPreview);
+            atualizarPreview();
+            card.appendChild(preview);
+
+            const footer = document.createElement('div');
+            footer.className = 'd-flex flex-wrap justify-content-between align-items-center gap-3';
+
+            const status = document.createElement('div');
+            status.className = 'menu-save-status text-muted';
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn text-white fw-bold px-4';
+            btn.style.background = 'var(--adv-blue)';
+            btn.textContent = 'SALVAR ALTERAÇÕES';
+            btn.onclick = () => salvarOpcaoAtendimento(id, card, btn, status);
+
+            footer.append(status, btn);
+            card.appendChild(footer);
+            container.appendChild(card);
+        }
+
+        async function salvarOpcaoAtendimento(id, card, btn, status) {
+            const emoji = card.querySelector('.menu-emoji').value.trim();
+            const titulo = card.querySelector('.menu-titulo').value.trim();
+            const area = card.querySelector('.menu-area').value.trim();
+            const resposta = card.querySelector('.menu-resposta').value.trim();
+            const ativo = card.querySelector('.menu-ativo').checked;
+
+            if (!titulo || !area || !resposta) {
+                status.className = 'menu-save-status text-danger';
+                status.textContent = 'Preencha todos os campos obrigatórios antes de salvar.';
+                return;
+            }
+
+            const textoOriginal = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'SALVANDO...';
+            status.className = 'menu-save-status text-muted';
+            status.textContent = '';
+
+            try {
+                const res = await fetch(`/api/menu-options/${encodeURIComponent(id)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ emoji, titulo, area, resposta, ativo })
+                });
+
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível salvar.');
+
+                status.className = 'menu-save-status text-success';
+                status.textContent = '✓ Alterações salvas. O próximo envio já usará este conteúdo.';
+                window.menuOptionsLoaded = false;
+                setTimeout(() => carregarOpcoesAtendimento(true), 350);
+            } catch (err) {
+                console.error(err);
+                status.className = 'menu-save-status text-danger';
+                status.textContent = err.message || 'Erro ao salvar a opção.';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = textoOriginal;
+            }
+        }
+
+        async function moverOpcaoAtendimento(id, direcao) {
+            const opcoes = Array.isArray(window.menuOptionsData) ? [...window.menuOptionsData] : [];
+            const atual = opcoes.findIndex(item => String(item._id) === String(id));
+            const destino = atual + direcao;
+            if (atual < 0 || destino < 0 || destino >= opcoes.length) return;
+
+            [opcoes[atual], opcoes[destino]] = [opcoes[destino], opcoes[atual]];
+
+            try {
+                const res = await fetch('/api/menu-options/reorder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: opcoes.map(item => String(item._id)) })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível alterar a ordem.');
+                window.menuOptionsLoaded = false;
+                await carregarOpcoesAtendimento(true);
+            } catch (err) {
+                console.error(err);
+                alert(err.message || 'Erro ao alterar a ordem.');
+            }
+        }
+
+        async function excluirOpcaoAtendimento(id, titulo) {
+            if (!confirm(`Deseja realmente excluir a opção “${titulo}”?\n\nO histórico dos tickets antigos será preservado.`)) return;
+
+            try {
+                const res = await fetch(`/api/menu-options/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível excluir a opção.');
+                window.menuOptionsLoaded = false;
+                await carregarOpcoesAtendimento(true);
+            } catch (err) {
+                console.error(err);
+                alert(err.message || 'Erro ao excluir a opção.');
             }
         }
 
