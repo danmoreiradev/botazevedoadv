@@ -17,8 +17,17 @@ const axios = require('axios');
 const session = require('express-session');
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-let genAI = null; // Apenas declare a variável, sem valor por enquanto.
+let genAI = null;
+let geminiModel = null;
 let apiKeysColl;
+
+// Cache curto da base de conhecimento para evitar leitura integral do MongoDB
+// a cada mensagem recebida. O cache é invalidado quando a base é alterada.
+const KNOWLEDGE_CACHE_TTL_MS = 60 * 1000;
+const KNOWLEDGE_MAX_ITEMS = 200;
+const KNOWLEDGE_MAX_CANDIDATES = 6;
+const KNOWLEDGE_SEMANTIC_FALLBACK_ITEMS = 20;
+let knowledgeCache = { items: [], loadedAt: 0 };
 
 const app = express();
 const server = http.createServer(app);
@@ -213,9 +222,371 @@ function clienteQuerEncerrar(texto = '') {
         'e so isso',
         'nao preciso mais',
         'atendimento finalizado',
-        'duvida resolvida'
+        'duvida resolvida',
+        'parar por aqui',
+        'podemos parar',
+        'deixa pra la',
+        'deixar pra depois',
+        'nao quero continuar',
+        'nao vou continuar',
+        'prefiro encerrar',
+        'vamos encerrar',
+        'pode fechar',
+        'nao tenho mais duvidas',
+        'sem mais duvidas',
+        'tchau',
+        'ate mais'
     ];
     return frases.some(frase => valor.includes(frase));
+}
+
+function invalidarCacheKnowledge() {
+    knowledgeCache = { items: [], loadedAt: 0 };
+}
+
+const STOPWORDS_IA = new Set([
+    'a', 'o', 'as', 'os', 'um', 'uma', 'uns', 'umas', 'de', 'da', 'do', 'das', 'dos',
+    'e', 'ou', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'sem', 'que', 'se',
+    'eu', 'me', 'meu', 'minha', 'voce', 'voces', 'isso', 'isto', 'essa', 'esse', 'como',
+    'qual', 'quais', 'quando', 'onde', 'porque', 'pra', 'pro', 'tem', 'ter', 'ser', 'esta'
+]);
+
+function tokensRelevantes(texto = '') {
+    return [...new Set(
+        normalizarTexto(texto)
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .filter(token => token.length >= 3 && !STOPWORDS_IA.has(token))
+    )];
+}
+
+function pontuarItemKnowledge(texto, item) {
+    const mensagem = normalizarTexto(texto);
+    const pergunta = normalizarTexto(item?.pergunta || '');
+    const resposta = normalizarTexto(item?.resposta || '');
+
+    if (!mensagem || !pergunta) return 0;
+    if (mensagem === pergunta) return 100;
+    if (mensagem.includes(pergunta) || pergunta.includes(mensagem)) return 40;
+
+    const tokensMensagem = new Set(tokensRelevantes(mensagem));
+    if (!tokensMensagem.size) return 0;
+
+    const tokensPergunta = new Set(tokensRelevantes(pergunta));
+    const tokensResposta = new Set(tokensRelevantes(resposta));
+
+    let score = 0;
+    for (const token of tokensMensagem) {
+        if (tokensPergunta.has(token)) score += 4;
+        else if (tokensResposta.has(token)) score += 1;
+    }
+
+    return score;
+}
+
+async function carregarKnowledgeBase() {
+    if (!knowledgeColl) return [];
+
+    const agora = Date.now();
+    if (knowledgeCache.loadedAt && (agora - knowledgeCache.loadedAt) < KNOWLEDGE_CACHE_TTL_MS) {
+        return knowledgeCache.items;
+    }
+
+    const items = await knowledgeColl
+        .find(
+            { pergunta: { $type: 'string' }, resposta: { $type: 'string' } },
+            { projection: { pergunta: 1, resposta: 1, updatedAt: 1 } }
+        )
+        .sort({ updatedAt: -1 })
+        .limit(KNOWLEDGE_MAX_ITEMS)
+        .toArray();
+
+    knowledgeCache = { items, loadedAt: agora };
+    return items;
+}
+
+async function obterCandidatosKnowledge(texto) {
+    const items = await carregarKnowledgeBase();
+    const ranqueados = items
+        .map(item => ({ ...item, score: pontuarItemKnowledge(texto, item) }))
+        .sort((a, b) => b.score - a.score);
+
+    const candidatosFortes = ranqueados
+        .filter(item => item.score >= 4)
+        .slice(0, KNOWLEDGE_MAX_CANDIDATES);
+
+    if (candidatosFortes.length) return candidatosFortes;
+
+    // Se a mensagem é claramente uma pergunta, permitimos uma pequena janela semântica
+    // com os itens mais recentes da base. O Gemini apenas seleciona um item existente;
+    // ele não recebe autorização para criar uma resposta fora da base.
+    if (possuiSinalDePergunta(texto)) {
+        return ranqueados.slice(0, KNOWLEDGE_SEMANTIC_FALLBACK_ITEMS);
+    }
+
+    return [];
+}
+
+function possuiSinalDeEncerramento(texto = '') {
+    const valor = normalizarTexto(texto);
+    return [
+        'encerr', 'finaliz', 'cancel', 'desist', 'parar por aqui', 'deixa pra la',
+        'deixar pra depois', 'nao quero continuar', 'nao vou continuar', 'podemos parar',
+        'obrigado era isso', 'obrigada era isso', 'valeu era isso'
+    ].some(sinal => valor.includes(sinal));
+}
+
+function possuiSinalDePergunta(texto = '') {
+    const valor = normalizarTexto(texto);
+    if (!valor) return false;
+    if (texto.includes('?')) return true;
+
+    return /^(como|qual|quais|quando|onde|por que|porque|posso|pode|preciso|existe|tem|quanto|gostaria de saber|queria saber|duvida|dúvida|saber)\b/.test(valor);
+}
+
+function entradaEstruturadaDoFluxo(ticket, texto = '') {
+    const valor = normalizarTexto(texto);
+
+    if (ticket?.aguardandoOpcao && RESPOSTAS_AREAS[texto]) return true;
+    if (ticket?.aguardandoCadastroCliente && (respostaPositiva(texto) || respostaNegativa(texto))) return true;
+    if (ticket?.aguardandoCPFCadastro && /^\d{11}$/.test(texto.replace(/\D/g, ''))) return true;
+
+    // Nome simples não deve acionar IA sem necessidade. Frases com sinais de pergunta/encerramento
+    // continuam passando pela IA antes da validação do nome.
+    if (
+        ticket?.aguardandoNomeCadastro &&
+        validarNomeESobrenome(texto) &&
+        !possuiSinalDePergunta(texto) &&
+        !possuiSinalDeEncerramento(texto)
+    ) {
+        return true;
+    }
+
+    return ['1', '2', 'sim', 'nao', 'não', 's', 'n'].includes(valor);
+}
+
+function extrairJsonIA(raw = '') {
+    const limpo = String(raw)
+        .trim()
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/```$/i, '')
+        .trim();
+
+    const inicio = limpo.indexOf('{');
+    const fim = limpo.lastIndexOf('}');
+    if (inicio === -1 || fim === -1 || fim <= inicio) return null;
+
+    try {
+        return JSON.parse(limpo.slice(inicio, fim + 1));
+    } catch (_) {
+        return null;
+    }
+}
+
+function mensagemRetomadaFluxo(ticket) {
+    if (!ticket) return '';
+
+    if (ticket.aguardandoOpcao) {
+        return `\n\nPara continuar o atendimento, escolha uma opção digitando apenas o número:\n\n${MENU_OPCOES}`;
+    }
+
+    if (ticket.aguardandoDetalhes) {
+        return `\n\nPara continuar o ticket *${ticket.ticketNumber}*, conte brevemente o que aconteceu no seu caso. Pode responder por texto ou áudio.`;
+    }
+
+    if (ticket.aguardandoCadastroCliente) {
+        return `\n\n${PERGUNTA_CADASTRO_CLIENTE}`;
+    }
+
+    if (ticket.aguardandoNomeCadastro) {
+        return `\n\nPara continuar o cadastro, informe seu *nome e sobrenome*.`;
+    }
+
+    if (ticket.aguardandoCPFCadastro) {
+        return `\n\nPara continuar o cadastro, informe seu *CPF* com 11 números.`;
+    }
+
+    if (ticket.paused || ['aguardando_especialista', 'em_atendimento_humano'].includes(ticket.status)) {
+        return `\n\nSeu ticket *${ticket.ticketNumber}* permanece em atendimento pela nossa equipe.`;
+    }
+
+    return '';
+}
+
+async function analisarMensagemComIA(texto, ticket) {
+    if (!texto || !ticket || entradaEstruturadaDoFluxo(ticket, texto)) return null;
+
+    // Encerramentos já inequívocos não precisam consumir chamada de IA.
+    if (clienteQuerEncerrar(texto)) {
+        return { acao: 'ENCERRAR', origem: 'regra' };
+    }
+
+    // Quando um atendente humano já assumiu a conversa, a IA não responde FAQs para não
+    // disputar o diálogo. Ainda permitimos a análise semântica de encerramento logo abaixo.
+    const atendimentoHumanoAtivo = ticket.status === 'em_atendimento_humano';
+    if (atendimentoHumanoAtivo && !possuiSinalDeEncerramento(texto)) {
+        return null;
+    }
+
+    let candidatos = [];
+    try {
+        candidatos = await obterCandidatosKnowledge(texto);
+    } catch (err) {
+        console.warn('[IA] Falha ao consultar base de conhecimento:', err?.message || err);
+    }
+
+    const sinalEncerramento = possuiSinalDeEncerramento(texto);
+    const sinalPergunta = possuiSinalDePergunta(texto);
+
+    // Sem indício de encerramento e sem qualquer proximidade com a base, a IA nem é acionada.
+    // Isso reduz custo e evita enviar resumos de casos jurídicos desnecessariamente ao modelo.
+    if (!sinalEncerramento && !candidatos.length) return null;
+
+    // Fallback resiliente: se o Gemini estiver indisponível, uma correspondência exata/forte
+    // ainda pode ser respondida diretamente com o conteúdo já aprovado da base.
+    if (!geminiModel) {
+        const melhor = candidatos[0];
+        if (sinalPergunta && melhor && melhor.score >= 40) {
+            return { acao: 'RESPONDER_BASE', resposta: melhor.resposta, origem: 'fallback_base' };
+        }
+        return null;
+    }
+
+    const baseContexto = candidatos.length
+        ? candidatos.map((item, index) => (
+            `[${index + 1}] PERGUNTA: ${item.pergunta}\nRESPOSTA: ${item.resposta}`
+        )).join('\n\n')
+        : '(nenhum item relevante localizado na base)';
+
+    const prompt = `Você é o roteador de atendimento da Azevedo & Juvencio Advogados.
+
+Sua tarefa é classificar APENAS a mensagem atual do cliente.
+
+ESTADO ATUAL DO TICKET: ${ticket.status || 'não informado'}
+MENSAGEM DO CLIENTE: ${JSON.stringify(texto)}
+
+BASE DE CONHECIMENTO CANDIDATA:
+${baseContexto}
+
+Responda SOMENTE em JSON válido, sem markdown, neste formato:
+{"acao":"ENCERRAR|RESPONDER_BASE|NENHUMA","indiceBase":null}
+
+REGRAS OBRIGATÓRIAS:
+1. Use ENCERRAR somente quando houver intenção clara de terminar, desistir, cancelar ou não prosseguir com o atendimento.
+2. Se o estado for aguardando_cadastro, respostas que se limitem a recusar o cadastro opcional, como "não", "não quero" ou "agora não", NÃO encerram o atendimento. Porém, se o cliente disser claramente que não quer continuar o atendimento, aí use ENCERRAR.
+3. Use RESPONDER_BASE somente quando a mensagem for uma pergunta ou pedido de informação e UM dos itens da base responder diretamente ao que foi perguntado.
+4. Ao usar RESPONDER_BASE, informe em indiceBase o número do item escolhido, começando em 1. Não escreva uma resposta nova.
+5. Nunca invente, complete, combine itens ou dê orientação jurídica além da base.
+6. Se a mensagem apenas narrar o caso, enviar dados, nome, CPF, documento, opção de menu ou não puder ser respondida com segurança pela base, use NENHUMA e indiceBase null.
+7. Em caso de dúvida, prefira NENHUMA.`;
+
+    try {
+        const result = await geminiModel.generateContent(prompt);
+        const response = await result.response;
+        const parsed = extrairJsonIA(response.text());
+
+        if (!parsed || !['ENCERRAR', 'RESPONDER_BASE', 'NENHUMA'].includes(parsed.acao)) {
+            console.warn('[IA] Resposta inválida do roteador.');
+            return null;
+        }
+
+        if (parsed.acao === 'RESPONDER_BASE') {
+            const indice = Number(parsed.indiceBase);
+            const itemSelecionado = Number.isInteger(indice) && indice >= 1
+                ? candidatos[indice - 1]
+                : null;
+
+            if (!itemSelecionado?.resposta) return null;
+
+            return {
+                acao: 'RESPONDER_BASE',
+                resposta: String(itemSelecionado.resposta).trim().slice(0, 3000),
+                origem: 'gemini'
+            };
+        }
+
+        if (parsed.acao === 'ENCERRAR') {
+            return { acao: 'ENCERRAR', origem: 'gemini' };
+        }
+
+        return null;
+    } catch (err) {
+        console.error('[IA] Erro ao analisar mensagem:', err?.message || err);
+
+        const melhor = candidatos[0];
+        if (sinalPergunta && melhor && melhor.score >= 40) {
+            return { acao: 'RESPONDER_BASE', resposta: melhor.resposta, origem: 'fallback_base' };
+        }
+        return null;
+    }
+}
+
+async function encerrarTicketPorCliente(ticket, jid) {
+    if (!ticket) return;
+
+    await sendBotMsg(jid, {
+        text: `Atendimento *${ticket.ticketNumber}* encerrado. Obrigado pelo contato! Ficamos à disposição. 👋`
+    });
+
+    await atualizarHistorico(ticket.ticketNumber, {
+        status: 'encerrado',
+        closedAt: Date.now(),
+        encerradoPeloCliente: true
+    });
+
+    await ticketsColl.deleteOne({ _id: ticket._id });
+}
+
+async function responderInterrupcaoIA(ticket, jid, analiseIA) {
+    if (!analiseIA) return false;
+
+    if (analiseIA.acao === 'ENCERRAR') {
+        await encerrarTicketPorCliente(ticket, jid);
+        return true;
+    }
+
+    if (analiseIA.acao === 'RESPONDER_BASE') {
+        await sendBotMsg(jid, {
+            text: `${analiseIA.resposta}${mensagemRetomadaFluxo(ticket)}`
+        });
+
+        await ticketsColl.updateOne(
+            { _id: ticket._id },
+            { $set: { lastActivity: Date.now() } }
+        );
+
+        await atualizarHistorico(ticket.ticketNumber, {
+            ultimaRespostaIAEm: Date.now()
+        });
+
+        console.log(`[Ticket ${ticket.ticketNumber}] IA respondeu com base na knowledge_base (${analiseIA.origem}).`);
+        return true;
+    }
+
+    return false;
+}
+
+async function confirmarMensagemAguardandoEspecialista(ticket, jid) {
+    if (!ticket || ticket.status !== 'aguardando_especialista') return;
+
+    const agora = Date.now();
+    const intervaloMinimo = 15 * 60 * 1000;
+    if (agora - (ticket.lastAutoAckAt || 0) < intervaloMinimo) return;
+
+    await sendBotMsg(jid, {
+        text: `📩 Recebemos sua mensagem e ela foi adicionada ao ticket *${ticket.ticketNumber}*. Nossa equipe dará continuidade ao atendimento.`
+    });
+
+    await ticketsColl.updateOne(
+        { _id: ticket._id },
+        {
+            $set: {
+                lastAutoAckAt: agora,
+                lastActivity: agora
+            }
+        }
+    );
 }
 
 function ehLeadAutomatico(texto = '') {
@@ -598,10 +969,9 @@ async function startBot() {
         
         if (geminiKeyDoc && geminiKeyDoc.chave) {
             genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
-            // Definimos o modelo GLOBALMENTE com a API v1 para evitar o erro 404
-            global.geminiModel = genAI.getGenerativeModel(
-            { model: "gemini-3.1-flash-lite-preview" }, 
-            { apiVersion: 'v1beta' } // MUDAR DE 'v1' PARA 'v1beta'
+            geminiModel = genAI.getGenerativeModel(
+                { model: "gemini-3.1-flash-lite-preview" },
+                { apiVersion: 'v1beta' }
             );
             console.log("✅ Sistema Gemini pronto e estável.");
         }
@@ -702,19 +1072,18 @@ sock.ev.on('messages.upsert', async m => {
             return;
         }
 
-        // Se o cliente explicitamente encerrar durante atendimento humano, fecha o ticket atual.
-        // O cadastro já foi oferecido ao fim da triagem automatizada.
-        if (ticket?.paused && clienteQuerEncerrar(texto)) {
-            await sendBotMsg(rawJid, {
-                text: `Atendimento *${ticket.ticketNumber}* encerrado. Obrigado pelo contato! Ficamos à disposição. 👋`
-            });
+        // A IA funciona como uma interrupção controlada do fluxo:
+        // - encerra o ticket quando o cliente claramente quiser parar;
+        // - responde dúvidas cobertas pela knowledge_base;
+        // - não consome respostas estruturadas de menu/cadastro/CPF.
+        // Fazemos a análise antes do "paused" para não deixar dúvidas da base sem resposta
+        // enquanto o ticket aguarda um especialista.
+        const analiseIAPrevia = ticket && texto
+            ? await analisarMensagemComIA(texto, ticket)
+            : null;
 
-            await atualizarHistorico(ticket.ticketNumber, {
-                status: 'encerrado',
-                closedAt: Date.now()
-            });
-
-            await ticketsColl.deleteOne({ _id: ticket._id });
+        if (analiseIAPrevia?.acao === 'ENCERRAR') {
+            await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia);
             return;
         }
 
@@ -727,7 +1096,19 @@ sock.ev.on('messages.upsert', async m => {
 
         if (ticket?.paused && !emFluxoCadastro) {
             if (Date.now() < (ticket.until || 0)) {
-                console.log(`[Ticket ${ticket.ticketNumber}] Bot pausado durante atendimento humano.`);
+                if (
+                    ticket.status !== 'em_atendimento_humano' &&
+                    analiseIAPrevia?.acao === 'RESPONDER_BASE'
+                ) {
+                    await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia);
+                    return;
+                }
+
+                // Se apenas está aguardando a equipe e a pergunta não existe na base,
+                // ao menos confirma o recebimento. Durante conversa humana ativa, fica silencioso.
+                await confirmarMensagemAguardandoEspecialista(ticket, rawJid);
+
+                console.log(`[Ticket ${ticket.ticketNumber}] Bot pausado (${ticket.status}).`);
                 return;
             }
 
@@ -779,6 +1160,13 @@ sock.ev.on('messages.upsert', async m => {
                 }
             }
         );
+
+        // Se a mensagem atual era uma dúvida respondível pela base, responde agora e mantém
+        // exatamente o mesmo passo do fluxo para a próxima mensagem do cliente.
+        if (analiseIAPrevia?.acao === 'RESPONDER_BASE') {
+            await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia);
+            return;
+        }
 
         // 1) MENU PRINCIPAL
         if (ticket.aguardandoOpcao) {
@@ -1149,6 +1537,7 @@ app.post('/api/knowledgeColl', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
     const { pergunta, resposta } = req.body;
     await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
+    invalidarCacheKnowledge();
     res.sendStatus(200);
 });
 
@@ -1161,6 +1550,7 @@ app.delete('/api/knowledgeColl/:id', async (req, res) => {
         const result = await knowledgeColl.deleteOne({ _id: new ObjectId(id) });
         
         if (result.deletedCount === 1) {
+            invalidarCacheKnowledge();
             res.sendStatus(200);
         } else {
             res.status(404).send("Item não encontrado");
