@@ -331,7 +331,6 @@ function formatarPerguntaParaEnvio(pergunta) {
     const aceitas = Array.isArray(pergunta.respostasAceitas) ? pergunta.respostasAceitas.filter(Boolean) : [];
     if (!aceitas.length) return pergunta.texto;
 
-    return `${pergunta.texto}\n\n*Responda com uma das opções:*\n${aceitas.map(item => `• ${item}`).join('\n')}`;
 }
 
 function validarRespostaDaPergunta(pergunta, texto = '', isMedia = false) {
