@@ -377,6 +377,7 @@
             <div class="nav-link active" onclick="switchTab('tab-chatbot', this)">🤖 Chatbot - Conexão</div>
             <div class="nav-link" onclick="switchTab('tab-ia', this)">🧠 Gestão IA</div>
             <div class="nav-link" onclick="switchTab('tab-opcoes', this)">⚙️ Opções Atendimento</div>
+            <div class="nav-link" onclick="switchTab('tab-horario', this)">🕒 Horário de funcionamento</div>
         </div>
 
         <div class="mt-auto nav-link border-0 text-white-50" onclick="window.location.href='/logout-panel'" style="font-size: 0.85rem; background: rgba(0,0,0,0.2); cursor: pointer;">
@@ -514,6 +515,68 @@
                 <div id="menu-options-list"></div>
             </div>
         </div>
+
+        <div id="tab-horario" class="content-section hidden">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                <div>
+                    <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Horário de funcionamento</h4>
+                    <p class="text-muted mb-0">Defina quando o chatbot pode iniciar a triagem automática.</p>
+                </div>
+                <button class="btn btn-outline-secondary" onclick="carregarHorarioFuncionamento(true)">↻ Atualizar</button>
+            </div>
+
+            <div class="card-custom text-start p-4" style="max-width: 900px; width: 100%;">
+                <div class="alert alert-light border mb-4" role="alert">
+                    <strong>Fluxo fora do horário:</strong> quando um cliente enviar mensagem fora dos dias ou horários definidos abaixo, o chatbot <strong>não enviará o menu nem continuará as perguntas da triagem</strong>. O ticket será colocado automaticamente em <strong>aguardando especialista</strong> e o cliente poderá enviar o relato e os documentos pelo WhatsApp.
+                </div>
+
+                <div class="form-check form-switch mb-4">
+                    <input class="form-check-input" type="checkbox" role="switch" id="business-hours-active" checked>
+                    <label class="form-check-label fw-bold" for="business-hours-active">Ativar controle de horário de funcionamento</label>
+                    <div class="form-text">Se desativado, o chatbot funcionará normalmente 24 horas por dia.</div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label small fw-bold">Dias de atendimento</label>
+                    <div class="d-flex flex-wrap gap-3 pt-1" id="business-days-container">
+                        <div class="form-check"><input class="form-check-input business-day" type="checkbox" value="1" id="day-1"><label class="form-check-label" for="day-1">Segunda</label></div>
+                        <div class="form-check"><input class="form-check-input business-day" type="checkbox" value="2" id="day-2"><label class="form-check-label" for="day-2">Terça</label></div>
+                        <div class="form-check"><input class="form-check-input business-day" type="checkbox" value="3" id="day-3"><label class="form-check-label" for="day-3">Quarta</label></div>
+                        <div class="form-check"><input class="form-check-input business-day" type="checkbox" value="4" id="day-4"><label class="form-check-label" for="day-4">Quinta</label></div>
+                        <div class="form-check"><input class="form-check-input business-day" type="checkbox" value="5" id="day-5"><label class="form-check-label" for="day-5">Sexta</label></div>
+                        <div class="form-check"><input class="form-check-input business-day" type="checkbox" value="6" id="day-6"><label class="form-check-label" for="day-6">Sábado</label></div>
+                        <div class="form-check"><input class="form-check-input business-day" type="checkbox" value="0" id="day-0"><label class="form-check-label" for="day-0">Domingo</label></div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <label class="form-label small fw-bold" for="business-hours-start">Início do atendimento</label>
+                        <input type="time" id="business-hours-start" class="form-control" value="08:30">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small fw-bold" for="business-hours-end">Término do atendimento</label>
+                        <input type="time" id="business-hours-end" class="form-control" value="18:00">
+                    </div>
+                    <div class="col-12">
+                        <div class="form-text">Fuso horário utilizado pelo sistema: <strong>São Paulo (America/Sao_Paulo)</strong>.</div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label small fw-bold" for="business-hours-message">Mensagem enviada fora do horário</label>
+                    <textarea id="business-hours-message" class="form-control" rows="6" maxlength="2000">Nosso horário de atendimento é das {{inicio}}h às {{fim}}h. Mas, para agilizar seu atendimento, conte-nos detalhadamente o seu caso e envie os documentos que você possui para que um advogado especialista possa analisar.</textarea>
+                    <div class="form-text">Use <code>{{inicio}}</code> e <code>{{fim}}</code> para inserir automaticamente os horários configurados acima.</div>
+                </div>
+
+                <div class="menu-preview mb-4" id="business-hours-preview"></div>
+
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+                    <span id="business-hours-status" class="menu-save-status text-muted"></span>
+                    <button id="business-hours-save" type="button" class="btn text-white fw-bold px-4 py-2" style="background: var(--adv-blue)" onclick="salvarHorarioFuncionamento()">SALVAR HORÁRIO</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
@@ -529,6 +592,7 @@
             el.classList.add('active');
             if(tabId === 'tab-ia') carregarConhecimento();
             if(tabId === 'tab-opcoes') carregarOpcoesAtendimento();
+            if(tabId === 'tab-horario') carregarHorarioFuncionamento();
         }
 
         socket.on('qr', (qr) => {
@@ -1299,6 +1363,147 @@ function renderizarLista(itens) {
             } catch (err) {
                 console.error(err);
                 alert(err.message || 'Erro ao excluir a opção.');
+            }
+        }
+
+        function diasSelecionadosHorario() {
+            return [...document.querySelectorAll('.business-day:checked')]
+                .map(el => Number(el.value))
+                .filter(n => Number.isInteger(n));
+        }
+
+        function formatarDiasHorario(dias = []) {
+            const nomes = {0:'Dom',1:'Seg',2:'Ter',3:'Qua',4:'Qui',5:'Sex',6:'Sáb'};
+            return dias.map(dia => nomes[dia]).filter(Boolean).join(', ');
+        }
+
+        function atualizarPreviewHorarioFuncionamento() {
+            const preview = document.getElementById('business-hours-preview');
+            if (!preview) return;
+
+            const inicio = document.getElementById('business-hours-start')?.value || '08:30';
+            const fim = document.getElementById('business-hours-end')?.value || '18:00';
+            const mensagem = document.getElementById('business-hours-message')?.value || '';
+            const dias = diasSelecionadosHorario();
+            const ativo = document.getElementById('business-hours-active')?.checked !== false;
+            const mensagemRenderizada = mensagem
+                .replace(/\{\{inicio\}\}/g, inicio)
+                .replace(/\{\{fim\}\}/g, fim);
+
+            preview.textContent = ativo
+                ? `Atendimento automático: ${formatarDiasHorario(dias) || 'nenhum dia'} • ${inicio} às ${fim}\n\nPrévia da mensagem fora do horário:\n${mensagemRenderizada}`
+                : `Controle de horário desativado. O chatbot funcionará 24 horas por dia.`;
+        }
+
+        function inicializarEventosHorarioFuncionamento() {
+            if (window.businessHoursEventsReady) return;
+            window.businessHoursEventsReady = true;
+
+            ['business-hours-active', 'business-hours-start', 'business-hours-end', 'business-hours-message']
+                .forEach(id => document.getElementById(id)?.addEventListener('input', atualizarPreviewHorarioFuncionamento));
+            document.querySelectorAll('.business-day').forEach(el => el.addEventListener('change', atualizarPreviewHorarioFuncionamento));
+        }
+
+        async function carregarHorarioFuncionamento(forcar = false) {
+            if (window.businessHoursLoaded && !forcar) {
+                atualizarPreviewHorarioFuncionamento();
+                return;
+            }
+
+            const status = document.getElementById('business-hours-status');
+            if (status) {
+                status.className = 'menu-save-status text-muted';
+                status.textContent = 'Carregando configuração...';
+            }
+
+            try {
+                const res = await fetch('/api/business-hours');
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar o horário.');
+
+                document.getElementById('business-hours-active').checked = data.ativo !== false;
+                document.getElementById('business-hours-start').value = data.inicio || '08:30';
+                document.getElementById('business-hours-end').value = data.fim || '18:00';
+                document.getElementById('business-hours-message').value = data.mensagemForaHorario || '';
+
+                const dias = new Set((Array.isArray(data.diasAtendimento) ? data.diasAtendimento : []).map(Number));
+                document.querySelectorAll('.business-day').forEach(el => {
+                    el.checked = dias.has(Number(el.value));
+                });
+
+                inicializarEventosHorarioFuncionamento();
+                atualizarPreviewHorarioFuncionamento();
+                window.businessHoursLoaded = true;
+
+                if (status) status.textContent = '';
+            } catch (err) {
+                console.error(err);
+                if (status) {
+                    status.className = 'menu-save-status text-danger';
+                    status.textContent = err.message || 'Erro ao carregar horário.';
+                }
+            }
+        }
+
+        async function salvarHorarioFuncionamento() {
+            const ativo = document.getElementById('business-hours-active').checked;
+            const inicio = document.getElementById('business-hours-start').value;
+            const fim = document.getElementById('business-hours-end').value;
+            const mensagemForaHorario = document.getElementById('business-hours-message').value.trim();
+            const diasAtendimento = diasSelecionadosHorario();
+            const status = document.getElementById('business-hours-status');
+            const btn = document.getElementById('business-hours-save');
+
+            if (!inicio || !fim) {
+                status.className = 'menu-save-status text-danger';
+                status.textContent = 'Informe o horário de início e término.';
+                return;
+            }
+
+            if (fim <= inicio) {
+                status.className = 'menu-save-status text-danger';
+                status.textContent = 'O horário de término deve ser posterior ao início.';
+                return;
+            }
+
+            if (!diasAtendimento.length) {
+                status.className = 'menu-save-status text-danger';
+                status.textContent = 'Selecione pelo menos um dia de atendimento.';
+                return;
+            }
+
+            if (!mensagemForaHorario) {
+                status.className = 'menu-save-status text-danger';
+                status.textContent = 'Informe a mensagem que será enviada fora do horário.';
+                return;
+            }
+
+            const textoOriginal = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'SALVANDO...';
+            status.className = 'menu-save-status text-muted';
+            status.textContent = '';
+
+            try {
+                const res = await fetch('/api/business-hours', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ativo, inicio, fim, diasAtendimento, mensagemForaHorario })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível salvar o horário.');
+
+                window.businessHoursLoaded = false;
+                status.className = 'menu-save-status text-success';
+                status.textContent = '✓ Horário salvo. A próxima mensagem já respeitará esta configuração.';
+                atualizarPreviewHorarioFuncionamento();
+            } catch (err) {
+                console.error(err);
+                status.className = 'menu-save-status text-danger';
+                status.textContent = err.message || 'Erro ao salvar horário.';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = textoOriginal;
             }
         }
 

@@ -33,6 +33,22 @@ let knowledgeCache = { items: [], loadedAt: 0 };
 const MENU_CACHE_TTL_MS = 30 * 1000;
 let menuOptionsCache = { items: [], loadedAt: 0 };
 
+// Configuração de horário de funcionamento editável pelo painel.
+// O servidor da hospedagem pode estar em UTC, por isso a verificação sempre usa
+// explicitamente o fuso de São Paulo em vez do relógio local do processo Node.js.
+const BUSINESS_HOURS_CACHE_TTL_MS = 30 * 1000;
+const BUSINESS_HOURS_TIMEZONE = 'America/Sao_Paulo';
+const DEFAULT_BUSINESS_HOURS = {
+    _id: 'business_hours',
+    ativo: true,
+    inicio: '08:30',
+    fim: '18:00',
+    diasAtendimento: [1, 2, 3, 4, 5], // 0=domingo, 1=segunda ... 6=sábado
+    timezone: BUSINESS_HOURS_TIMEZONE,
+    mensagemForaHorario: 'Nosso horário de atendimento é das {{inicio}}h às {{fim}}h. Mas, para agilizar seu atendimento, conte-nos detalhadamente o seu caso e envie os documentos que você possui para que um advogado especialista possa analisar.'
+};
+let businessHoursCache = { value: null, loadedAt: 0 };
+
 
 const app = express();
 const server = http.createServer(app);
@@ -65,7 +81,7 @@ let sock;
 const botMessageIds = new Set();
 const processing = new Set();
 
-let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl;
+let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl;
 
 async function sendBotMsg(jid, content) {
     try {
@@ -525,6 +541,170 @@ async function buscarOpcaoMenu(numero) {
     // O _id permanece estável, então reordenações não quebram o histórico dos tickets.
     const opcoesAtivas = await carregarMenuOpcoes();
     return opcoesAtivas[indice] || null;
+}
+
+function invalidarCacheHorarioFuncionamento() {
+    businessHoursCache = { value: null, loadedAt: 0 };
+}
+
+function horarioHHMMValido(valor = '') {
+    return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(valor || '').trim());
+}
+
+function horaParaMinutos(valor = '') {
+    if (!horarioHHMMValido(valor)) return null;
+    const [hora, minuto] = String(valor).split(':').map(Number);
+    return (hora * 60) + minuto;
+}
+
+function normalizarDiasAtendimento(dias) {
+    if (!Array.isArray(dias)) return [];
+    return [...new Set(
+        dias
+            .map(Number)
+            .filter(dia => Number.isInteger(dia) && dia >= 0 && dia <= 6)
+    )].sort((a, b) => a - b);
+}
+
+async function garantirHorarioFuncionamentoPadrao() {
+    if (!settingsColl) return;
+
+    await settingsColl.updateOne(
+        { _id: DEFAULT_BUSINESS_HOURS._id },
+        {
+            $setOnInsert: {
+                ...DEFAULT_BUSINESS_HOURS,
+                createdAt: Date.now(),
+                updatedAt: Date.now()
+            }
+        },
+        { upsert: true }
+    );
+
+    invalidarCacheHorarioFuncionamento();
+}
+
+async function carregarHorarioFuncionamento() {
+    if (!settingsColl) return { ...DEFAULT_BUSINESS_HOURS };
+
+    const agora = Date.now();
+    if (
+        businessHoursCache.value &&
+        businessHoursCache.loadedAt &&
+        (agora - businessHoursCache.loadedAt) < BUSINESS_HOURS_CACHE_TTL_MS
+    ) {
+        return businessHoursCache.value;
+    }
+
+    const salvo = await settingsColl.findOne({ _id: DEFAULT_BUSINESS_HOURS._id });
+    const config = {
+        ...DEFAULT_BUSINESS_HOURS,
+        ...(salvo || {}),
+        diasAtendimento: normalizarDiasAtendimento(salvo?.diasAtendimento || DEFAULT_BUSINESS_HOURS.diasAtendimento),
+        timezone: BUSINESS_HOURS_TIMEZONE
+    };
+
+    businessHoursCache = { value: config, loadedAt: agora };
+    return config;
+}
+
+function obterRelogioNoFuso(data = new Date(), timezone = BUSINESS_HOURS_TIMEZONE) {
+    const partes = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23'
+    }).formatToParts(data);
+
+    const mapa = Object.fromEntries(partes.map(parte => [parte.type, parte.value]));
+    const mapaDias = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+    return {
+        diaSemana: mapaDias[mapa.weekday],
+        hora: Number(mapa.hour),
+        minuto: Number(mapa.minute),
+        minutosDoDia: (Number(mapa.hour) * 60) + Number(mapa.minute)
+    };
+}
+
+async function verificarHorarioFuncionamento(data = new Date()) {
+    const config = await carregarHorarioFuncionamento();
+
+    // Se o controle estiver desativado pelo advogado, o robô funciona 24h.
+    if (config.ativo === false) {
+        return { aberto: true, config, motivo: 'controle_desativado' };
+    }
+
+    const relogio = obterRelogioNoFuso(data, config.timezone || BUSINESS_HOURS_TIMEZONE);
+    const inicio = horaParaMinutos(config.inicio);
+    const fim = horaParaMinutos(config.fim);
+    const diaAtivo = normalizarDiasAtendimento(config.diasAtendimento).includes(relogio.diaSemana);
+    const dentroDaFaixa = inicio !== null && fim !== null && relogio.minutosDoDia >= inicio && relogio.minutosDoDia < fim;
+
+    return {
+        aberto: diaAtivo && dentroDaFaixa,
+        config,
+        relogio,
+        motivo: !diaAtivo ? 'dia_fora_atendimento' : (dentroDaFaixa ? 'aberto' : 'fora_da_faixa')
+    };
+}
+
+function montarMensagemForaHorario(config = DEFAULT_BUSINESS_HOURS) {
+    const inicio = horarioHHMMValido(config.inicio) ? config.inicio : DEFAULT_BUSINESS_HOURS.inicio;
+    const fim = horarioHHMMValido(config.fim) ? config.fim : DEFAULT_BUSINESS_HOURS.fim;
+    const modelo = String(config.mensagemForaHorario || DEFAULT_BUSINESS_HOURS.mensagemForaHorario).trim();
+
+    return modelo
+        .replace(/\{\{inicio\}\}/g, inicio)
+        .replace(/\{\{fim\}\}/g, fim);
+}
+
+async function encaminharAutomaticamenteForaDoHorario(ticket, jid, { texto = '', isMedia = false, config } = {}) {
+    if (!ticket) return;
+
+    const agora = Date.now();
+    const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+
+    await ticketsColl.updateOne(
+        { _id: ticket._id },
+        {
+            $set: {
+                status: 'aguardando_especialista',
+                aguardandoOpcao: false,
+                aguardandoDetalhes: false,
+                aguardandoPerguntaFluxo: false,
+                aguardandoCadastroCliente: false,
+                aguardandoNomeCadastro: false,
+                aguardandoCPFCadastro: false,
+                paused: true,
+                until: agora + tresDiasEmMs,
+                foraHorario: true,
+                encaminhadoForaHorarioEm: agora,
+                lastActivity: agora
+            }
+        }
+    );
+
+    await atualizarHistorico(ticket.ticketNumber, {
+        status: 'aguardando_especialista',
+        foraHorario: true,
+        encaminhadoForaHorarioEm: agora,
+        mensagemRecebidaForaHorario: String(texto || '').trim().slice(0, 5000) || null,
+        mensagemRecebidaForaHorarioPossuiMidia: !!isMedia,
+        horarioFuncionamentoAplicado: {
+            inicio: config?.inicio || DEFAULT_BUSINESS_HOURS.inicio,
+            fim: config?.fim || DEFAULT_BUSINESS_HOURS.fim,
+            diasAtendimento: normalizarDiasAtendimento(config?.diasAtendimento || DEFAULT_BUSINESS_HOURS.diasAtendimento),
+            timezone: BUSINESS_HOURS_TIMEZONE
+        }
+    });
+
+    await sendBotMsg(jid, {
+        text: montarMensagemForaHorario(config || DEFAULT_BUSINESS_HOURS)
+    });
+
+    console.log(`[Ticket ${ticket.ticketNumber}] Encaminhado automaticamente para especialista por mensagem fora do horário.`);
 }
 
 function normalizarTexto(texto = '') {
@@ -1369,9 +1549,11 @@ async function startBot() {
         ticketHistoryColl = db.collection('ticket_history');
         countersColl = db.collection('counters');
         menuOptionsColl = db.collection('menu_options');
+        settingsColl = db.collection('settings');
 
-        // Cria as opções atuais no MongoDB somente se ainda não existirem.
+        // Cria as opções atuais e o horário padrão somente se ainda não existirem.
         await garantirMenuPadrao();
+        await garantirHorarioFuncionamentoPadrao();
 
         // Índices para manter CPF e número de ticket únicos e acelerar a identificação do cliente.
         await Promise.all([
@@ -1489,6 +1671,45 @@ sock.ev.on('messages.upsert', async m => {
                     status: 'em_atendimento_humano'
                 });
             }
+            return;
+        }
+
+        // Antes de iniciar/continuar menu, triagem ou cadastro, verifica o horário do escritório.
+        // Fora do horário não enviamos opções nem novas perguntas: o ticket vai diretamente
+        // para "aguardando_especialista" e o cliente pode enviar relato e documentos livremente.
+        // Conversas já assumidas manualmente por um advogado não são interrompidas por esta regra.
+        const ticketExpirouAntesDoHorario = !!(
+            ticket &&
+            !ticket.paused &&
+            (Date.now() - (ticket.lastActivity || 0) > timeoutNovoAtendimento)
+        );
+
+        if (ticketExpirouAntesDoHorario) {
+            await fecharTicketAnterior(ticket, 'encerrado_timeout');
+            ticket = null;
+        }
+
+        const situacaoHorario = await verificarHorarioFuncionamento();
+        const atendimentoHumanoJaAtivo = ticket?.status === 'em_atendimento_humano';
+        const jaAguardandoEspecialista = ticket?.status === 'aguardando_especialista';
+
+        if (!situacaoHorario.aberto && !atendimentoHumanoJaAtivo && !jaAguardandoEspecialista) {
+            if (!ticket) {
+                const cliente = await buscarClientePorContato(contato);
+                ticket = await criarNovoTicket({
+                    contato,
+                    rawJid,
+                    textoInicial: texto,
+                    cliente,
+                    paused: false
+                });
+            }
+
+            await encaminharAutomaticamenteForaDoHorario(ticket, rawJid, {
+                texto,
+                isMedia,
+                config: situacaoHorario.config
+            });
             return;
         }
 
@@ -2119,6 +2340,87 @@ app.get('/logout-whatsapp', async (req, res) => {
         io.emit('disconnected');
         res.sendStatus(200);
     } catch (err) { res.status(500).send("Erro"); }
+});
+
+// Horário de funcionamento configurável pelo advogado no painel.
+app.get('/api/business-hours', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+
+    try {
+        const config = await carregarHorarioFuncionamento();
+        res.json({
+            ativo: config.ativo !== false,
+            inicio: config.inicio,
+            fim: config.fim,
+            diasAtendimento: normalizarDiasAtendimento(config.diasAtendimento),
+            timezone: BUSINESS_HOURS_TIMEZONE,
+            mensagemForaHorario: config.mensagemForaHorario
+        });
+    } catch (err) {
+        console.error('[Horário] Erro ao carregar configuração:', err);
+        res.status(500).json({ erro: 'Não foi possível carregar o horário de funcionamento.' });
+    }
+});
+
+app.put('/api/business-hours', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!settingsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
+
+    try {
+        const ativo = req.body?.ativo !== false;
+        const inicio = String(req.body?.inicio || '').trim();
+        const fim = String(req.body?.fim || '').trim();
+        const diasAtendimento = normalizarDiasAtendimento(req.body?.diasAtendimento);
+        const mensagemForaHorario = String(req.body?.mensagemForaHorario || '').trim();
+
+        if (!horarioHHMMValido(inicio) || !horarioHHMMValido(fim)) {
+            return res.status(400).json({ erro: 'Informe os horários de início e término no formato HH:MM.' });
+        }
+
+        if (horaParaMinutos(fim) <= horaParaMinutos(inicio)) {
+            return res.status(400).json({ erro: 'O horário de término deve ser posterior ao horário de início.' });
+        }
+
+        if (!diasAtendimento.length) {
+            return res.status(400).json({ erro: 'Selecione pelo menos um dia de atendimento.' });
+        }
+
+        if (!mensagemForaHorario || mensagemForaHorario.length > 2000) {
+            return res.status(400).json({ erro: 'A mensagem fora do horário deve possuir entre 1 e 2.000 caracteres.' });
+        }
+
+        const agora = Date.now();
+        await settingsColl.updateOne(
+            { _id: DEFAULT_BUSINESS_HOURS._id },
+            {
+                $set: {
+                    ativo,
+                    inicio,
+                    fim,
+                    diasAtendimento,
+                    timezone: BUSINESS_HOURS_TIMEZONE,
+                    mensagemForaHorario,
+                    updatedAt: agora
+                },
+                $setOnInsert: { createdAt: agora }
+            },
+            { upsert: true }
+        );
+
+        invalidarCacheHorarioFuncionamento();
+        const atualizado = await carregarHorarioFuncionamento();
+        res.json({
+            ativo: atualizado.ativo !== false,
+            inicio: atualizado.inicio,
+            fim: atualizado.fim,
+            diasAtendimento: atualizado.diasAtendimento,
+            timezone: BUSINESS_HOURS_TIMEZONE,
+            mensagemForaHorario: atualizado.mensagemForaHorario
+        });
+    } catch (err) {
+        console.error('[Horário] Erro ao salvar configuração:', err);
+        res.status(500).json({ erro: 'Não foi possível salvar o horário de funcionamento.' });
+    }
 });
 
 // Sugestão assistida por IA para respostas aceitas de uma pergunta da triagem.
