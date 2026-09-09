@@ -39,24 +39,26 @@
             z-index: 1001;
         }
         
-        .sidebar-brand { 
-            padding: 45px 15px; /* Espaçamento interno generoso */
-            border-bottom: 1px solid rgba(255,255,255,0.1); 
-            text-align: center; 
-            background: rgba(0,0,0,0.1);
+        .sidebar-brand {
+            height: 225px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background: var(--adv-blue);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
         }
 
-        /* AJUSTE DO LOGO - VISIBILIDADE MÁXIMA */
         .logo-img {
-            width: 95%; /* Ocupa quase toda a largura da sidebar */
+            width: 100%;
             height: auto;
-            max-height: 140px; /* Aumentado drasticamente para visibilidade total */
+            max-width: none;
             object-fit: contain;
-            /* Sombra para destacar letras brancas no fundo azul */
-            filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.4)); 
-            transition: transform 0.3s ease;
+            transform: scale(2.5);
+            filter: brightness(0) invert(1);
         }
-        
+                
         .logo-img:hover {
             transform: scale(1.02); /* Leve efeito ao passar o mouse */
         }
@@ -244,7 +246,7 @@
         }
         .emoji-choice:hover {
             border-color: var(--adv-gold);
-            transform: translateY(-1px);
+            transform: translateY(-5px) scale(2.5);
             background: #fffaf0;
         }
         .new-option-box {
