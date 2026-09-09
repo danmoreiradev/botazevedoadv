@@ -267,6 +267,45 @@
             background: #adb5bd;
         }
 
+        .questions-editor {
+            border: 1px solid #e1e8ec;
+            border-radius: 14px;
+            padding: 16px;
+            background: #fbfcfd;
+        }
+        .question-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            padding: 12px;
+            border: 1px solid #e4eaed;
+            border-radius: 12px;
+            background: #fff;
+            margin-bottom: 10px;
+        }
+        .question-order {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            border-radius: 9px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #eef3f5;
+            color: var(--adv-blue);
+            font-weight: 800;
+        }
+        .question-controls {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        .question-empty {
+            color: #7a8790;
+            font-size: 0.9rem;
+            padding: 10px 2px;
+        }
+
         .hidden { display: none !important; }
 
         /* RESPONSIVIDADE MOBILE APRIMORADA */
@@ -407,8 +446,19 @@
                             <input type="text" id="nova-menu-area" class="form-control" maxlength="120" placeholder="Ex: Direito Previdenciário">
                         </div>
                         <div class="col-12">
-                            <label class="form-label small fw-bold">Mensagem enviada após o cliente escolher a opção</label>
-                            <textarea id="nova-menu-resposta" class="form-control" rows="7" maxlength="4000" placeholder="Ex: ⚖️ *Direito Previdenciário*&#10;&#10;Para direcionarmos corretamente o atendimento, informe..."></textarea>
+                            <label class="form-label small fw-bold">Mensagem introdutória após escolher a opção <span class="text-muted">(opcional)</span></label>
+                            <textarea id="nova-menu-resposta" class="form-control" rows="4" maxlength="4000" placeholder="Ex: Perfeito. Vou fazer algumas perguntas rápidas para entender melhor o seu caso."></textarea>
+                            <div class="form-text">Se houver perguntas abaixo, esta mensagem é apenas uma introdução. Se não houver perguntas, ela continuará funcionando como a solicitação única de detalhes do fluxo antigo.</div>
+                        </div>
+                        <div class="col-12">
+                            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                                <div>
+                                    <label class="form-label small fw-bold mb-0">Perguntas sequenciais da triagem</label>
+                                    <div class="form-text mt-0">O WhatsApp enviará uma pergunta por vez e aguardará a resposta antes de seguir.</div>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="adicionarPerguntaAoEditor('nova-menu-perguntas-list')">＋ ADICIONAR PERGUNTA</button>
+                            </div>
+                            <div id="nova-menu-perguntas-list" class="questions-editor"></div>
                         </div>
                         <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3">
                             <div class="form-check form-switch">
@@ -595,6 +645,121 @@ function renderizarLista(itens) {
             return picker;
         }
 
+        function atualizarNumeracaoPerguntas(container) {
+            const linhas = [...container.querySelectorAll('.question-row')];
+            linhas.forEach((linha, index) => {
+                const ordem = linha.querySelector('.question-order');
+                if (ordem) ordem.textContent = index + 1;
+
+                const botoes = linha.querySelectorAll('.question-move');
+                if (botoes[0]) botoes[0].disabled = index === 0;
+                if (botoes[1]) botoes[1].disabled = index === linhas.length - 1;
+            });
+
+            const vazio = container.querySelector('.question-empty');
+            if (!linhas.length && !vazio) {
+                const msg = document.createElement('div');
+                msg.className = 'question-empty';
+                msg.textContent = 'Nenhuma pergunta cadastrada. Adicione perguntas para ativar o novo fluxo sequencial.';
+                container.appendChild(msg);
+            } else if (linhas.length && vazio) {
+                vazio.remove();
+            }
+        }
+
+        function criarLinhaPergunta(container, pergunta = {}, focar = false) {
+            const vazio = container.querySelector('.question-empty');
+            if (vazio) vazio.remove();
+
+            const linha = document.createElement('div');
+            linha.className = 'question-row';
+            linha.dataset.questionId = String(pergunta.id || '');
+
+            const ordem = document.createElement('div');
+            ordem.className = 'question-order';
+
+            const corpo = document.createElement('div');
+            corpo.style.flex = '1';
+
+            const textarea = document.createElement('textarea');
+            textarea.className = 'form-control menu-pergunta-texto';
+            textarea.rows = 2;
+            textarea.maxLength = 1200;
+            textarea.placeholder = 'Ex: Qual conta ou plataforma foi bloqueada?';
+            textarea.value = pergunta.texto || '';
+            corpo.appendChild(textarea);
+
+            const controles = document.createElement('div');
+            controles.className = 'question-controls';
+
+            const cima = document.createElement('button');
+            cima.type = 'button';
+            cima.className = 'btn-menu-icon question-move';
+            cima.textContent = '↑';
+            cima.title = 'Mover pergunta para cima';
+            cima.onclick = () => {
+                const anterior = linha.previousElementSibling;
+                if (anterior?.classList.contains('question-row')) container.insertBefore(linha, anterior);
+                atualizarNumeracaoPerguntas(container);
+            };
+
+            const baixo = document.createElement('button');
+            baixo.type = 'button';
+            baixo.className = 'btn-menu-icon question-move';
+            baixo.textContent = '↓';
+            baixo.title = 'Mover pergunta para baixo';
+            baixo.onclick = () => {
+                const proxima = linha.nextElementSibling;
+                if (proxima?.classList.contains('question-row')) container.insertBefore(proxima, linha);
+                atualizarNumeracaoPerguntas(container);
+            };
+
+            const excluir = document.createElement('button');
+            excluir.type = 'button';
+            excluir.className = 'btn-menu-icon text-danger';
+            excluir.textContent = '🗑️';
+            excluir.title = 'Excluir pergunta';
+            excluir.onclick = () => {
+                linha.remove();
+                atualizarNumeracaoPerguntas(container);
+            };
+
+            controles.append(cima, baixo, excluir);
+            linha.append(ordem, corpo, controles);
+            container.appendChild(linha);
+            atualizarNumeracaoPerguntas(container);
+            if (focar) textarea.focus();
+        }
+
+        function adicionarPerguntaAoEditor(containerOuId, pergunta = {}) {
+            const container = typeof containerOuId === 'string'
+                ? document.getElementById(containerOuId)
+                : containerOuId;
+            if (!container) return;
+            criarLinhaPergunta(container, pergunta, true);
+        }
+
+        function renderizarPerguntasNoEditor(container, perguntas = []) {
+            container.innerHTML = '';
+            const ordenadas = Array.isArray(perguntas)
+                ? [...perguntas].sort((a, b) => Number(a.ordem || 0) - Number(b.ordem || 0))
+                : [];
+            ordenadas.forEach(pergunta => criarLinhaPergunta(container, pergunta, false));
+            atualizarNumeracaoPerguntas(container);
+        }
+
+        function coletarPerguntasDoEditor(container) {
+            if (!container) return [];
+            return [...container.querySelectorAll('.question-row')]
+                .map((linha, index) => ({
+                    id: linha.dataset.questionId || undefined,
+                    texto: linha.querySelector('.menu-pergunta-texto')?.value.trim() || '',
+                    ordem: index + 1,
+                    ativo: true
+                }))
+                .filter(pergunta => pergunta.texto);
+        }
+
         function inicializarEmojiNovaOpcao() {
             const container = document.getElementById('nova-menu-emoji-picker');
             const input = document.getElementById('nova-menu-emoji');
@@ -610,6 +775,11 @@ function renderizarLista(itens) {
             box.classList.toggle('hidden', !abrir);
             if (abrir) {
                 inicializarEmojiNovaOpcao();
+                const perguntasContainer = document.getElementById('nova-menu-perguntas-list');
+                if (perguntasContainer && !perguntasContainer.dataset.ready) {
+                    perguntasContainer.dataset.ready = '1';
+                    renderizarPerguntasNoEditor(perguntasContainer, []);
+                }
                 setTimeout(() => document.getElementById('nova-menu-titulo')?.focus(), 50);
             }
         }
@@ -619,6 +789,8 @@ function renderizarLista(itens) {
             document.getElementById('nova-menu-titulo').value = '';
             document.getElementById('nova-menu-area').value = '';
             document.getElementById('nova-menu-resposta').value = '';
+            const perguntasContainer = document.getElementById('nova-menu-perguntas-list');
+            if (perguntasContainer) renderizarPerguntasNoEditor(perguntasContainer, []);
             document.getElementById('nova-menu-ativo').checked = true;
             document.getElementById('nova-menu-status').textContent = '';
         }
@@ -628,13 +800,14 @@ function renderizarLista(itens) {
             const titulo = document.getElementById('nova-menu-titulo').value.trim();
             const area = document.getElementById('nova-menu-area').value.trim();
             const resposta = document.getElementById('nova-menu-resposta').value.trim();
+            const perguntas = coletarPerguntasDoEditor(document.getElementById('nova-menu-perguntas-list'));
             const ativo = document.getElementById('nova-menu-ativo').checked;
             const status = document.getElementById('nova-menu-status');
             const btn = document.getElementById('btn-criar-menu');
 
-            if (!titulo || !area || !resposta) {
+            if (!titulo || !area || (!resposta && !perguntas.length)) {
                 status.className = 'menu-save-status text-danger';
-                status.textContent = 'Preencha nome, área e mensagem.';
+                status.textContent = 'Preencha nome e área e cadastre ao menos uma pergunta ou uma mensagem de detalhes.';
                 return;
             }
 
@@ -648,7 +821,7 @@ function renderizarLista(itens) {
                 const res = await fetch('/api/menu-options', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ emoji, titulo, area, resposta, ativo })
+                    body: JSON.stringify({ emoji, titulo, area, resposta, perguntas, ativo })
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.erro || 'Não foi possível criar a opção.');
@@ -814,10 +987,33 @@ function renderizarLista(itens) {
 
             const resposta = document.createElement('textarea');
             resposta.className = 'form-control menu-resposta';
-            resposta.rows = 7;
+            resposta.rows = 4;
             resposta.maxLength = 4000;
             resposta.value = opcao.resposta || '';
-            card.appendChild(criarCampoMenu('Mensagem enviada após o cliente escolher esta opção', resposta));
+            const respostaWrapper = criarCampoMenu('Mensagem introdutória após o cliente escolher a opção (opcional)', resposta);
+            const respostaHelp = document.createElement('div');
+            respostaHelp.className = 'form-text';
+            respostaHelp.textContent = 'Com perguntas cadastradas, esta mensagem é apenas uma introdução. Sem perguntas, permanece como o fluxo antigo de detalhes em uma única etapa.';
+            respostaWrapper.appendChild(respostaHelp);
+            card.appendChild(respostaWrapper);
+
+            const perguntasWrapper = document.createElement('div');
+            perguntasWrapper.className = 'mb-3';
+            const perguntasHeader = document.createElement('div');
+            perguntasHeader.className = 'd-flex flex-wrap justify-content-between align-items-center gap-2 mb-2';
+            const perguntasTitulo = document.createElement('div');
+            perguntasTitulo.innerHTML = '<div class="small fw-bold">Perguntas sequenciais da triagem</div><div class="form-text mt-0">O cliente recebe uma pergunta por vez, na ordem abaixo.</div>';
+            const addPergunta = document.createElement('button');
+            addPergunta.type = 'button';
+            addPergunta.className = 'btn btn-sm btn-outline-secondary';
+            addPergunta.textContent = '＋ ADICIONAR PERGUNTA';
+            const perguntasContainer = document.createElement('div');
+            perguntasContainer.className = 'questions-editor menu-perguntas-list';
+            addPergunta.onclick = () => adicionarPerguntaAoEditor(perguntasContainer);
+            perguntasHeader.append(perguntasTitulo, addPergunta);
+            perguntasWrapper.append(perguntasHeader, perguntasContainer);
+            card.appendChild(perguntasWrapper);
+            renderizarPerguntasNoEditor(perguntasContainer, opcao.perguntas || []);
 
             const preview = document.createElement('div');
             preview.className = 'menu-preview mb-3';
@@ -855,11 +1051,12 @@ function renderizarLista(itens) {
             const titulo = card.querySelector('.menu-titulo').value.trim();
             const area = card.querySelector('.menu-area').value.trim();
             const resposta = card.querySelector('.menu-resposta').value.trim();
+            const perguntas = coletarPerguntasDoEditor(card.querySelector('.menu-perguntas-list'));
             const ativo = card.querySelector('.menu-ativo').checked;
 
-            if (!titulo || !area || !resposta) {
+            if (!titulo || !area || (!resposta && !perguntas.length)) {
                 status.className = 'menu-save-status text-danger';
-                status.textContent = 'Preencha todos os campos obrigatórios antes de salvar.';
+                status.textContent = 'Informe nome e área e mantenha ao menos uma pergunta ou uma mensagem de detalhes.';
                 return;
             }
 
@@ -873,14 +1070,14 @@ function renderizarLista(itens) {
                 const res = await fetch(`/api/menu-options/${encodeURIComponent(id)}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ emoji, titulo, area, resposta, ativo })
+                    body: JSON.stringify({ emoji, titulo, area, resposta, perguntas, ativo })
                 });
 
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.erro || 'Não foi possível salvar.');
 
                 status.className = 'menu-save-status text-success';
-                status.textContent = '✓ Alterações salvas. O próximo envio já usará este conteúdo.';
+                status.textContent = '✓ Alterações salvas. Novos atendimentos já usarão este fluxo.';
                 window.menuOptionsLoaded = false;
                 setTimeout(() => carregarOpcoesAtendimento(true), 350);
             } catch (err) {

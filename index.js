@@ -252,6 +252,46 @@ function invalidarCacheMenu() {
     menuOptionsCache = { items: [], loadedAt: 0 };
 }
 
+const MAX_PERGUNTAS_TRIAGEM = 30;
+const MAX_CARACTERES_PERGUNTA = 1200;
+
+function normalizarPerguntasTriagem(perguntas = []) {
+    if (!Array.isArray(perguntas)) return [];
+    if (perguntas.length > MAX_PERGUNTAS_TRIAGEM) {
+        throw new Error(`Cada opção pode possuir no máximo ${MAX_PERGUNTAS_TRIAGEM} perguntas.`);
+    }
+
+    return perguntas
+        .map((item, index) => {
+            const objeto = typeof item === 'string' ? { texto: item } : (item || {});
+            const texto = String(objeto.texto || '').trim();
+            if (!texto) return null;
+            if (texto.length > MAX_CARACTERES_PERGUNTA) {
+                throw new Error(`A pergunta ${index + 1} ultrapassa ${MAX_CARACTERES_PERGUNTA} caracteres.`);
+            }
+
+            return {
+                id: String(objeto.id || new ObjectId().toString()),
+                texto,
+                ordem: index + 1,
+                ativo: objeto.ativo !== false
+            };
+        })
+        .filter(Boolean);
+}
+
+function perguntasAtivasDaOpcao(opcao = {}) {
+    return normalizarPerguntasTriagem(opcao.perguntas || [])
+        .filter(pergunta => pergunta.ativo !== false)
+        .sort((a, b) => a.ordem - b.ordem);
+}
+
+function perguntaAtualDoTicket(ticket) {
+    const perguntas = Array.isArray(ticket?.perguntasFluxo) ? ticket.perguntasFluxo : [];
+    const indice = Number.isInteger(ticket?.indicePerguntaFluxo) ? ticket.indicePerguntaFluxo : 0;
+    return perguntas[indice] || null;
+}
+
 function numeroComEmoji(numero) {
     const valor = String(numero ?? '').trim();
     if (!valor) return '';
@@ -277,6 +317,7 @@ async function garantirMenuPadrao() {
             DEFAULT_MENU_OPTIONS.map(item => ({
                 ...item,
                 emoji: item.emoji || '',
+                perguntas: Array.isArray(item.perguntas) ? item.perguntas : [],
                 createdAt: agora,
                 updatedAt: agora
             }))
@@ -487,6 +528,10 @@ function entradaEstruturadaDoFluxo(ticket, texto = '') {
     const valor = normalizarTexto(texto);
 
     if (ticket?.aguardandoOpcao && /^\d{1,3}$/.test(String(texto).trim())) return true;
+    // Durante a triagem, respostas comuns seguem direto para o fluxo. Se o cliente
+    // fizer uma pergunta explícita, a knowledge_base ainda pode respondê-la e depois
+    // repetir a pergunta atual da triagem.
+    if (ticket?.aguardandoPerguntaFluxo && !possuiSinalDePergunta(texto)) return true;
     if (ticket?.aguardandoCadastroCliente && (respostaPositiva(texto) || respostaNegativa(texto))) return true;
     if (ticket?.aguardandoCPFCadastro && /^\d{11}$/.test(texto.replace(/\D/g, ''))) return true;
 
@@ -531,6 +576,13 @@ async function mensagemRetomadaFluxo(ticket) {
         return `\n\nPara continuar o atendimento, escolha uma opção digitando apenas o número:\n\n${menuTexto}`;
     }
 
+    if (ticket.aguardandoPerguntaFluxo) {
+        const perguntaAtual = perguntaAtualDoTicket(ticket);
+        if (perguntaAtual?.texto) {
+            return `\n\nPara continuar o ticket *${ticket.ticketNumber}*:\n\n${perguntaAtual.texto}`;
+        }
+    }
+
     if (ticket.aguardandoDetalhes) {
         return `\n\nPara continuar o ticket *${ticket.ticketNumber}*, conte brevemente o que aconteceu no seu caso. Pode responder por texto ou áudio.`;
     }
@@ -555,12 +607,15 @@ async function mensagemRetomadaFluxo(ticket) {
 }
 
 async function analisarMensagemComIA(texto, ticket) {
-    if (!texto || !ticket || entradaEstruturadaDoFluxo(ticket, texto)) return null;
+    if (!texto || !ticket) return null;
 
-    // Encerramentos já inequívocos não precisam consumir chamada de IA.
+    // Encerramentos inequívocos continuam funcionando inclusive durante a triagem sequencial.
     if (clienteQuerEncerrar(texto)) {
         return { acao: 'ENCERRAR', origem: 'regra' };
     }
+
+    // Respostas das perguntas sequenciais são dados do caso e não devem ser consumidas pela IA.
+    if (entradaEstruturadaDoFluxo(ticket, texto)) return null;
 
     // Quando um atendente humano já assumiu a conversa, a IA não responde FAQs para não
     // disputar o diálogo. Ainda permitimos a análise semântica de encerramento logo abaixo.
@@ -976,6 +1031,10 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
         lastRawJid: rawJid,
         aguardandoOpcao: !paused,
         aguardandoDetalhes: false,
+        aguardandoPerguntaFluxo: false,
+        perguntasFluxo: [],
+        indicePerguntaFluxo: 0,
+        respostasFluxo: [],
         aguardandoCadastroCliente: false,
         aguardandoNomeCadastro: false,
         aguardandoCPFCadastro: false,
@@ -1029,6 +1088,7 @@ async function encaminharParaEspecialista(ticket, jid, mensagem = null) {
         {
             $set: {
                 status: 'aguardando_especialista',
+                aguardandoPerguntaFluxo: false,
                 aguardandoCadastroCliente: false,
                 aguardandoNomeCadastro: false,
                 aguardandoCPFCadastro: false,
@@ -1041,6 +1101,51 @@ async function encaminharParaEspecialista(ticket, jid, mensagem = null) {
 
     await atualizarHistorico(ticket.ticketNumber, {
         status: 'aguardando_especialista'
+    });
+}
+
+async function concluirTriagemEAvancar(ticket, jid) {
+    const agora = Date.now();
+
+    await ticketsColl.updateOne(
+        { _id: ticket._id },
+        {
+            $set: {
+                aguardandoPerguntaFluxo: false,
+                indicePerguntaFluxo: Array.isArray(ticket.perguntasFluxo) ? ticket.perguntasFluxo.length : 0,
+                status: ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro',
+                lastActivity: agora
+            }
+        }
+    );
+
+    if (ticket.clienteCadastrado) {
+        await encaminharParaEspecialista(
+            ticket,
+            jid,
+            `✅ Obrigado pelas informações. Seu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
+        );
+        return;
+    }
+
+    await sendBotMsg(jid, {
+        text: `✅ Obrigado pelas informações. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.\n\n${PERGUNTA_CADASTRO_CLIENTE}`
+    });
+
+    await ticketsColl.updateOne(
+        { _id: ticket._id },
+        {
+            $set: {
+                aguardandoCadastroCliente: true,
+                status: 'aguardando_cadastro',
+                lastActivity: agora
+            }
+        }
+    );
+
+    await atualizarHistorico(ticket.ticketNumber, {
+        status: 'aguardando_cadastro',
+        triagemConcluidaEm: agora
     });
 }
 
@@ -1342,9 +1447,58 @@ sock.ev.on('messages.upsert', async m => {
 
             const area = String(opcaoSelecionada.area || opcaoSelecionada.titulo || 'Outros Assuntos').trim();
             const respostaArea = String(opcaoSelecionada.resposta || '').trim();
+            const perguntasFluxo = perguntasAtivasDaOpcao(opcaoSelecionada);
+            const agora = Date.now();
 
+            // Nova lógica: quando a opção possui perguntas, criamos um snapshot no ticket.
+            // Assim, editar a opção no painel não altera uma triagem que já está em andamento.
+            if (perguntasFluxo.length) {
+                await ticketsColl.updateOne(
+                    { _id: ticket._id },
+                    {
+                        $set: {
+                            area,
+                            menuOptionId: opcaoSelecionada._id,
+                            menuOptionTitle: opcaoSelecionada.titulo,
+                            menuOptionEmoji: opcaoSelecionada.emoji || '',
+                            status: 'aguardando_pergunta_fluxo',
+                            aguardandoOpcao: false,
+                            aguardandoDetalhes: false,
+                            aguardandoPerguntaFluxo: true,
+                            perguntasFluxo,
+                            indicePerguntaFluxo: 0,
+                            respostasFluxo: [],
+                            lastActivity: agora
+                        }
+                    }
+                );
+
+                await atualizarHistorico(ticket.ticketNumber, {
+                    area,
+                    menuOptionId: opcaoSelecionada._id,
+                    menuOptionTitle: opcaoSelecionada.titulo,
+                    menuOptionEmoji: opcaoSelecionada.emoji || '',
+                    status: 'aguardando_pergunta_fluxo',
+                    perguntasTriagem: perguntasFluxo.map(({ id, texto, ordem }) => ({ id, texto, ordem })),
+                    respostasTriagem: []
+                });
+
+                if (respostaArea) {
+                    await sendBotMsg(rawJid, { text: respostaArea });
+                }
+
+                await sendBotMsg(rawJid, { text: perguntasFluxo[0].texto });
+                return;
+            }
+
+            // Compatibilidade: opções antigas, sem perguntas configuradas, continuam usando
+            // a mensagem única de detalhes exatamente como antes.
             if (respostaArea) {
                 await sendBotMsg(rawJid, { text: respostaArea });
+            } else {
+                await sendBotMsg(rawJid, {
+                    text: `Conte brevemente o que aconteceu no seu caso. Pode responder por texto ou áudio.`
+                });
             }
 
             await ticketsColl.updateOne(
@@ -1358,7 +1512,8 @@ sock.ev.on('messages.upsert', async m => {
                         status: 'aguardando_detalhes',
                         aguardandoOpcao: false,
                         aguardandoDetalhes: true,
-                        lastActivity: Date.now()
+                        aguardandoPerguntaFluxo: false,
+                        lastActivity: agora
                     }
                 }
             );
@@ -1373,7 +1528,80 @@ sock.ev.on('messages.upsert', async m => {
             return;
         }
 
-        // 2) RECEBE OS DETALHES DO CASO
+        // 2) TRIAGEM SEQUENCIAL - uma pergunta por vez
+        if (ticket.aguardandoPerguntaFluxo) {
+            const perguntas = Array.isArray(ticket.perguntasFluxo) ? ticket.perguntasFluxo : [];
+            const indiceAtual = Number.isInteger(ticket.indicePerguntaFluxo) ? ticket.indicePerguntaFluxo : 0;
+            const perguntaAtual = perguntas[indiceAtual];
+
+            // Proteção contra tickets inconsistentes.
+            if (!perguntaAtual) {
+                await concluirTriagemEAvancar(ticket, rawJid);
+                return;
+            }
+
+            if (!texto && !isMedia) {
+                await sendBotMsg(rawJid, {
+                    text: `Para continuar, responda à pergunta abaixo:\n\n${perguntaAtual.texto}`
+                });
+                return;
+            }
+
+            let tipoResposta = 'texto';
+            if (msg.message.audioMessage) tipoResposta = 'audio';
+            else if (msg.message.imageMessage) tipoResposta = 'imagem';
+            else if (msg.message.videoMessage) tipoResposta = 'video';
+            else if (msg.message.documentMessage) tipoResposta = 'documento';
+
+            const respostaRegistrada = {
+                perguntaId: perguntaAtual.id,
+                pergunta: perguntaAtual.texto,
+                resposta: texto || `[${tipoResposta} recebido]`,
+                tipo: tipoResposta,
+                respondidaEm: Date.now()
+            };
+
+            const respostasAtualizadas = [
+                ...(Array.isArray(ticket.respostasFluxo) ? ticket.respostasFluxo : []),
+                respostaRegistrada
+            ];
+            const proximoIndice = indiceAtual + 1;
+            const temProximaPergunta = proximoIndice < perguntas.length;
+
+            await ticketsColl.updateOne(
+                { _id: ticket._id },
+                {
+                    $set: {
+                        respostasFluxo: respostasAtualizadas,
+                        indicePerguntaFluxo: proximoIndice,
+                        aguardandoPerguntaFluxo: temProximaPergunta,
+                        status: temProximaPergunta ? 'aguardando_pergunta_fluxo' : (ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro'),
+                        lastActivity: Date.now()
+                    }
+                }
+            );
+
+            await atualizarHistorico(ticket.ticketNumber, {
+                respostasTriagem: respostasAtualizadas,
+                triagemPerguntaAtual: proximoIndice,
+                triagemTotalPerguntas: perguntas.length,
+                ...(temProximaPergunta ? {} : { triagemConcluidaEm: Date.now() })
+            });
+
+            if (temProximaPergunta) {
+                await sendBotMsg(rawJid, { text: perguntas[proximoIndice].texto });
+                return;
+            }
+
+            // Atualiza a cópia local antes de reutilizar a função de finalização.
+            ticket.respostasFluxo = respostasAtualizadas;
+            ticket.indicePerguntaFluxo = proximoIndice;
+            ticket.aguardandoPerguntaFluxo = false;
+            await concluirTriagemEAvancar(ticket, rawJid);
+            return;
+        }
+
+        // 2.1) FLUXO ANTIGO - recebe um único bloco de detalhes quando não há perguntas cadastradas
         if (ticket.aguardandoDetalhes) {
             if (!texto && !isMedia) {
                 await sendBotMsg(rawJid, {
@@ -1547,6 +1775,10 @@ sock.ev.on('messages.upsert', async m => {
                     status: 'aguardando_opcao',
                     aguardandoOpcao: true,
                     aguardandoDetalhes: false,
+                    aguardandoPerguntaFluxo: false,
+                    perguntasFluxo: [],
+                    indicePerguntaFluxo: 0,
+                    respostasFluxo: [],
                     aguardandoCadastroCliente: false,
                     aguardandoNomeCadastro: false,
                     aguardandoCPFCadastro: false,
@@ -1707,11 +1939,17 @@ app.post('/api/menu-options', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
 
     try {
-        const { titulo, area, resposta, emoji, ativo } = req.body;
+        const { titulo, area, resposta, emoji, ativo, perguntas } = req.body;
         const tituloLimpo = String(titulo || '').trim();
         const areaLimpa = String(area || '').trim();
         const respostaLimpa = String(resposta || '').trim();
         const emojiLimpo = String(emoji || '').trim();
+        let perguntasLimpas;
+        try {
+            perguntasLimpas = normalizarPerguntasTriagem(perguntas);
+        } catch (err) {
+            return res.status(400).json({ erro: err.message });
+        }
 
         if (!tituloLimpo || tituloLimpo.length > 120) {
             return res.status(400).json({ erro: 'Informe um título válido com até 120 caracteres.' });
@@ -1719,8 +1957,11 @@ app.post('/api/menu-options', async (req, res) => {
         if (!areaLimpa || areaLimpa.length > 120) {
             return res.status(400).json({ erro: 'Informe uma área interna válida com até 120 caracteres.' });
         }
-        if (!respostaLimpa || respostaLimpa.length > 4000) {
-            return res.status(400).json({ erro: 'A mensagem deve possuir entre 1 e 4.000 caracteres.' });
+        if (respostaLimpa.length > 4000) {
+            return res.status(400).json({ erro: 'A mensagem introdutória deve possuir no máximo 4.000 caracteres.' });
+        }
+        if (!respostaLimpa && !perguntasLimpas.some(pergunta => pergunta.ativo !== false)) {
+            return res.status(400).json({ erro: 'Cadastre pelo menos uma pergunta ou informe uma mensagem de detalhes.' });
         }
         if (emojiLimpo.length > 24) {
             return res.status(400).json({ erro: 'O campo de emoji deve ter no máximo 24 caracteres.' });
@@ -1742,6 +1983,7 @@ app.post('/api/menu-options', async (req, res) => {
             titulo: tituloLimpo,
             area: areaLimpa,
             resposta: respostaLimpa,
+            perguntas: perguntasLimpas,
             emoji: emojiLimpo,
             ativo: ativo !== false,
             createdAt: agora,
@@ -1762,7 +2004,7 @@ app.put('/api/menu-options/:id', async (req, res) => {
 
     try {
         const id = String(req.params.id || '').trim();
-        const { titulo, area, resposta, emoji, ativo } = req.body;
+        const { titulo, area, resposta, emoji, ativo, perguntas } = req.body;
 
         const existente = await menuOptionsColl.findOne({ _id: id });
         if (!existente) {
@@ -1773,6 +2015,12 @@ app.put('/api/menu-options/:id', async (req, res) => {
         const areaLimpa = String(area || '').trim();
         const respostaLimpa = String(resposta || '').trim();
         const emojiLimpo = String(emoji || '').trim();
+        let perguntasLimpas;
+        try {
+            perguntasLimpas = normalizarPerguntasTriagem(perguntas);
+        } catch (err) {
+            return res.status(400).json({ erro: err.message });
+        }
 
         if (!tituloLimpo || tituloLimpo.length > 120) {
             return res.status(400).json({ erro: 'Informe um título válido com até 120 caracteres.' });
@@ -1780,8 +2028,11 @@ app.put('/api/menu-options/:id', async (req, res) => {
         if (!areaLimpa || areaLimpa.length > 120) {
             return res.status(400).json({ erro: 'Informe uma área interna válida com até 120 caracteres.' });
         }
-        if (!respostaLimpa || respostaLimpa.length > 4000) {
-            return res.status(400).json({ erro: 'A mensagem deve possuir entre 1 e 4.000 caracteres.' });
+        if (respostaLimpa.length > 4000) {
+            return res.status(400).json({ erro: 'A mensagem introdutória deve possuir no máximo 4.000 caracteres.' });
+        }
+        if (!respostaLimpa && !perguntasLimpas.some(pergunta => pergunta.ativo !== false)) {
+            return res.status(400).json({ erro: 'Cadastre pelo menos uma pergunta ou informe uma mensagem de detalhes.' });
         }
         if (emojiLimpo.length > 24) {
             return res.status(400).json({ erro: 'O campo de emoji deve ter no máximo 24 caracteres.' });
@@ -1794,6 +2045,7 @@ app.put('/api/menu-options/:id', async (req, res) => {
                     titulo: tituloLimpo,
                     area: areaLimpa,
                     resposta: respostaLimpa,
+                    perguntas: perguntasLimpas,
                     emoji: emojiLimpo,
                     ativo: ativo !== false,
                     updatedAt: Date.now()
