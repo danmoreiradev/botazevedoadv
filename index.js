@@ -326,15 +326,24 @@ function normalizarRespostaParaValidacao(texto = '') {
         .trim();
 }
 
-function formatarPerguntaParaEnvio(pergunta) {
-    if (!pergunta?.texto) return '';
-    const aceitas = Array.isArray(pergunta.respostasAceitas) ? pergunta.respostasAceitas.filter(Boolean) : [];
-    if (!aceitas.length) return pergunta.texto;
+// As respostas aceitas ficam ocultas inicialmente.
+// Com valor 3, a lista aparece apenas após a 3ª resposta inválida.
+// Para exibir só após a 4ª resposta inválida, altere este valor para 4.
+const EXIBIR_OPCOES_APOS_TENTATIVAS_INVALIDAS = 3;
 
-    return `${pergunta.texto}\n\n*Responda com uma das opções:*\n${aceitas.map(item => `• ${item}`).join('\n')}`;
+function formatarPerguntaParaEnvio(pergunta, { mostrarOpcoes = false } = {}) {
+    if (!pergunta?.texto) return '';
+
+    const aceitas = Array.isArray(pergunta.respostasAceitas)
+        ? pergunta.respostasAceitas.filter(Boolean)
+        : [];
+
+    if (!mostrarOpcoes || !aceitas.length) return pergunta.texto;
+
+    return `${pergunta.texto}\n\n*Para ajudar, seguem algumas respostas aceitas:*\n${aceitas.map(item => `• ${item}`).join('\n')}`;
 }
 
-function validarRespostaDaPergunta(pergunta, texto = '', isMedia = false) {
+function validarRespostaDaPergunta(pergunta, texto = '', isMedia = false, { mostrarOpcoes = false } = {}) {
     const aceitas = Array.isArray(pergunta?.respostasAceitas)
         ? pergunta.respostasAceitas.filter(Boolean)
         : [];
@@ -342,11 +351,15 @@ function validarRespostaDaPergunta(pergunta, texto = '', isMedia = false) {
     // Sem respostas pré-definidas, a pergunta continua livre como antes.
     if (!aceitas.length) return { valida: true };
 
+    const perguntaFormatada = formatarPerguntaParaEnvio(pergunta, { mostrarOpcoes });
+
     // Perguntas validadas precisam de uma resposta textual. Uma legenda também conta como texto.
     if (!String(texto || '').trim()) {
         return {
             valida: false,
-            mensagem: `Para esta pergunta, preciso que a resposta seja enviada por *texto*.\n\n${formatarPerguntaParaEnvio(pergunta)}`
+            mensagem: mostrarOpcoes
+                ? `Para esta pergunta, preciso que a resposta seja enviada por *texto*.\n\n${perguntaFormatada}`
+                : `Para esta pergunta, preciso que a resposta seja enviada por *texto*.\n\n${pergunta.texto}`
         };
     }
 
@@ -357,10 +370,11 @@ function validarRespostaDaPergunta(pergunta, texto = '', isMedia = false) {
 
     return {
         valida: false,
-        mensagem: `Não consegui validar essa resposta para esta pergunta. Por favor, responda novamente de forma objetiva.\n\n${formatarPerguntaParaEnvio(pergunta)}`
+        mensagem: mostrarOpcoes
+            ? `Ainda não consegui validar sua resposta. Para facilitar:\n\n${perguntaFormatada}`
+            : `Não consegui validar essa resposta. Por favor, responda novamente de forma objetiva.\n\n${pergunta.texto}`
     };
 }
-
 
 async function gerarSugestoesRespostasAceitasIA(pergunta, contexto = {}) {
     const perguntaLimpa = String(pergunta || '').trim();
@@ -1175,6 +1189,7 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
         perguntasFluxo: [],
         indicePerguntaFluxo: 0,
         respostasFluxo: [],
+        tentativasInvalidasPerguntaFluxo: 0,
         aguardandoCadastroCliente: false,
         aguardandoNomeCadastro: false,
         aguardandoCPFCadastro: false,
@@ -1608,6 +1623,7 @@ sock.ev.on('messages.upsert', async m => {
                             perguntasFluxo,
                             indicePerguntaFluxo: 0,
                             respostasFluxo: [],
+                            tentativasInvalidasPerguntaFluxo: 0,
                             lastActivity: agora
                         }
                     }
@@ -1687,13 +1703,44 @@ sock.ev.on('messages.upsert', async m => {
                 return;
             }
 
-            const validacaoResposta = validarRespostaDaPergunta(perguntaAtual, texto, isMedia);
+            const tentativasInvalidasAtuais = Number.isInteger(ticket.tentativasInvalidasPerguntaFluxo)
+                ? ticket.tentativasInvalidasPerguntaFluxo
+                : 0;
+
+            // Primeiro valida sem revelar as respostas aceitas.
+            let validacaoResposta = validarRespostaDaPergunta(
+                perguntaAtual,
+                texto,
+                isMedia,
+                { mostrarOpcoes: false }
+            );
+
             if (!validacaoResposta.valida) {
+                const novaTentativaInvalida = tentativasInvalidasAtuais + 1;
+                const mostrarOpcoes = novaTentativaInvalida >= EXIBIR_OPCOES_APOS_TENTATIVAS_INVALIDAS;
+
+                // A lista só é exibida quando o cliente já errou o número configurado de vezes.
+                if (mostrarOpcoes) {
+                    validacaoResposta = validarRespostaDaPergunta(
+                        perguntaAtual,
+                        texto,
+                        isMedia,
+                        { mostrarOpcoes: true }
+                    );
+                }
+
                 await sendBotMsg(rawJid, { text: validacaoResposta.mensagem });
                 await ticketsColl.updateOne(
                     { _id: ticket._id },
-                    { $set: { lastActivity: Date.now() } }
+                    {
+                        $set: {
+                            tentativasInvalidasPerguntaFluxo: novaTentativaInvalida,
+                            lastActivity: Date.now()
+                        }
+                    }
                 );
+
+                ticket.tentativasInvalidasPerguntaFluxo = novaTentativaInvalida;
                 return;
             }
 
@@ -1747,6 +1794,7 @@ sock.ev.on('messages.upsert', async m => {
             // Atualiza a cópia local antes de reutilizar a função de finalização.
             ticket.respostasFluxo = respostasAtualizadas;
             ticket.indicePerguntaFluxo = proximoIndice;
+            ticket.tentativasInvalidasPerguntaFluxo = 0;
             ticket.aguardandoPerguntaFluxo = false;
             await concluirTriagemEAvancar(ticket, rawJid);
             return;
