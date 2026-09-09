@@ -305,6 +305,43 @@
             font-size: 0.9rem;
             padding: 10px 2px;
         }
+        .question-validation-box {
+            margin-top: 10px;
+            padding: 12px;
+            border-radius: 10px;
+            background: #f7fafb;
+            border: 1px solid #e2e8ec;
+        }
+        .question-validation-box .form-text {
+            margin-top: 5px;
+        }
+        .question-validation-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+        .question-ai-status {
+            min-height: 18px;
+            margin-top: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .btn-ai-suggest {
+            border: 1px solid rgba(9, 67, 96, 0.25);
+            color: var(--adv-blue);
+            background: #fff;
+            border-radius: 9px;
+            padding: 6px 10px;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+        .btn-ai-suggest:hover {
+            background: #eef5f8;
+            border-color: var(--adv-blue);
+        }
 
         .hidden { display: none !important; }
 
@@ -454,7 +491,7 @@
                             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
                                 <div>
                                     <label class="form-label small fw-bold mb-0">Perguntas sequenciais da triagem</label>
-                                    <div class="form-text mt-0">O WhatsApp enviará uma pergunta por vez e aguardará a resposta antes de seguir.</div>
+                                    <div class="form-text mt-0">O WhatsApp enviará uma pergunta por vez e aguardará a resposta antes de seguir. Em cada pergunta você pode limitar quais respostas serão aceitas.</div>
                                 </div>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" onclick="adicionarPerguntaAoEditor('nova-menu-perguntas-list')">＋ ADICIONAR PERGUNTA</button>
                             </div>
@@ -645,6 +682,99 @@ function renderizarLista(itens) {
             return picker;
         }
 
+        function contextoDaPerguntaNoEditor(linha) {
+            const card = linha.closest('.menu-option-card');
+            if (card) {
+                return {
+                    titulo: card.querySelector('.menu-titulo')?.value.trim() || '',
+                    area: card.querySelector('.menu-area')?.value.trim() || ''
+                };
+            }
+
+            return {
+                titulo: document.getElementById('nova-menu-titulo')?.value.trim() || '',
+                area: document.getElementById('nova-menu-area')?.value.trim() || ''
+            };
+        }
+
+        function listaRespostasDoTextarea(textarea) {
+            return String(textarea?.value || '')
+                .split(/\r?\n|;/)
+                .map(item => item.trim())
+                .filter(Boolean);
+        }
+
+        function mesclarRespostasAceitas(existentes = [], novas = []) {
+            const mapa = new Map();
+            [...existentes, ...novas].forEach(item => {
+                const texto = String(item || '').trim();
+                if (!texto) return;
+                const chave = texto
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[^a-z0-9\s]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                if (chave && !mapa.has(chave)) mapa.set(chave, texto);
+            });
+            return [...mapa.values()];
+        }
+
+        async function gerarSugestoesRespostasAceitasIA(linha, perguntaInput, respostasInput, btn, status) {
+            const pergunta = perguntaInput?.value.trim() || '';
+            if (!pergunta) {
+                status.className = 'question-ai-status text-danger';
+                status.textContent = 'Escreva a pergunta primeiro.';
+                perguntaInput?.focus();
+                return;
+            }
+
+            const contexto = contextoDaPerguntaNoEditor(linha);
+            const textoOriginal = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '✨ GERANDO...';
+            status.className = 'question-ai-status text-muted';
+            status.textContent = 'Analisando a pergunta...';
+
+            try {
+                const res = await fetch('/api/triage/suggest-answers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        pergunta,
+                        titulo: contexto.titulo,
+                        area: contexto.area
+                    })
+                });
+
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível gerar as sugestões.');
+
+                if (!data.adequada) {
+                    status.className = 'question-ai-status text-warning';
+                    status.textContent = data.motivo || 'A IA recomenda manter esta pergunta como resposta livre.';
+                    return;
+                }
+
+                const atuais = listaRespostasDoTextarea(respostasInput);
+                const sugeridas = Array.isArray(data.respostas) ? data.respostas : [];
+                const mescladas = mesclarRespostasAceitas(atuais, sugeridas);
+                respostasInput.value = mescladas.join('\n');
+                respostasInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+                status.className = 'question-ai-status text-success';
+                status.textContent = `✓ ${sugeridas.length} sugestão(ões) gerada(s). Revise e edite antes de salvar.`;
+            } catch (err) {
+                console.error(err);
+                status.className = 'question-ai-status text-danger';
+                status.textContent = err.message || 'Erro ao gerar sugestões.';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = textoOriginal;
+            }
+        }
+
         function atualizarNumeracaoPerguntas(container) {
             const linhas = [...container.querySelectorAll('.question-row')];
             linhas.forEach((linha, index) => {
@@ -688,6 +818,45 @@ function renderizarLista(itens) {
             textarea.placeholder = 'Ex: Qual conta ou plataforma foi bloqueada?';
             textarea.value = pergunta.texto || '';
             corpo.appendChild(textarea);
+
+            const validacaoBox = document.createElement('div');
+            validacaoBox.className = 'question-validation-box';
+
+            const validacaoHeader = document.createElement('div');
+            validacaoHeader.className = 'question-validation-header';
+
+            const validacaoLabel = document.createElement('label');
+            validacaoLabel.className = 'form-label small fw-bold mb-0';
+            validacaoLabel.textContent = 'Respostas aceitas (opcional)';
+
+            const btnGerarIA = document.createElement('button');
+            btnGerarIA.type = 'button';
+            btnGerarIA.className = 'btn-ai-suggest';
+            btnGerarIA.textContent = '✨ GERAR COM IA';
+            btnGerarIA.title = 'Gerar sugestões de respostas aceitas a partir da pergunta';
+
+            validacaoHeader.append(validacaoLabel, btnGerarIA);
+
+            const respostasAceitas = document.createElement('textarea');
+            respostasAceitas.className = 'form-control menu-pergunta-respostas-aceitas';
+            respostasAceitas.rows = 3;
+            respostasAceitas.maxLength = 5000;
+            respostasAceitas.placeholder = 'Uma por linha. Ex:\nInstagram\nFacebook\nTikTok\nWhatsApp';
+            respostasAceitas.value = Array.isArray(pergunta.respostasAceitas)
+                ? pergunta.respostasAceitas.join('\n')
+                : '';
+
+            const validacaoHelp = document.createElement('div');
+            validacaoHelp.className = 'form-text';
+            validacaoHelp.textContent = 'Se vazio, qualquer resposta será aceita. Se preenchido, o bot só avança quando o cliente responder exatamente uma das opções, ignorando maiúsculas, minúsculas e acentos. A IA apenas sugere; você pode editar tudo antes de salvar.';
+
+            const aiStatus = document.createElement('div');
+            aiStatus.className = 'question-ai-status text-muted';
+
+            btnGerarIA.onclick = () => gerarSugestoesRespostasAceitasIA(linha, textarea, respostasAceitas, btnGerarIA, aiStatus);
+
+            validacaoBox.append(validacaoHeader, respostasAceitas, validacaoHelp, aiStatus);
+            corpo.appendChild(validacaoBox);
 
             const controles = document.createElement('div');
             controles.className = 'question-controls';
@@ -754,6 +923,10 @@ function renderizarLista(itens) {
                 .map((linha, index) => ({
                     id: linha.dataset.questionId || undefined,
                     texto: linha.querySelector('.menu-pergunta-texto')?.value.trim() || '',
+                    respostasAceitas: (linha.querySelector('.menu-pergunta-respostas-aceitas')?.value || '')
+                        .split(/\r?\n|;/)
+                        .map(item => item.trim())
+                        .filter(Boolean),
                     ordem: index + 1,
                     ativo: true
                 }))
@@ -1002,7 +1175,7 @@ function renderizarLista(itens) {
             const perguntasHeader = document.createElement('div');
             perguntasHeader.className = 'd-flex flex-wrap justify-content-between align-items-center gap-2 mb-2';
             const perguntasTitulo = document.createElement('div');
-            perguntasTitulo.innerHTML = '<div class="small fw-bold">Perguntas sequenciais da triagem</div><div class="form-text mt-0">O cliente recebe uma pergunta por vez, na ordem abaixo.</div>';
+            perguntasTitulo.innerHTML = '<div class="small fw-bold">Perguntas sequenciais da triagem</div><div class="form-text mt-0">O cliente recebe uma pergunta por vez, na ordem abaixo. Você também pode definir respostas aceitas para validar cada etapa.</div>';
             const addPergunta = document.createElement('button');
             addPergunta.type = 'button';
             addPergunta.className = 'btn btn-sm btn-outline-secondary';

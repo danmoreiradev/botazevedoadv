@@ -254,6 +254,32 @@ function invalidarCacheMenu() {
 
 const MAX_PERGUNTAS_TRIAGEM = 30;
 const MAX_CARACTERES_PERGUNTA = 1200;
+const MAX_RESPOSTAS_ACEITAS_POR_PERGUNTA = 50;
+const MAX_CARACTERES_RESPOSTA_ACEITA = 200;
+
+function normalizarRespostasAceitas(respostas = [], numeroPergunta = 0) {
+    if (typeof respostas === 'string') {
+        respostas = respostas.split(/\r?\n|;/);
+    }
+
+    if (!Array.isArray(respostas)) return [];
+    if (respostas.length > MAX_RESPOSTAS_ACEITAS_POR_PERGUNTA) {
+        throw new Error(`A pergunta ${numeroPergunta || ''} pode possuir no máximo ${MAX_RESPOSTAS_ACEITAS_POR_PERGUNTA} respostas aceitas.`.trim());
+    }
+
+    const unicas = new Map();
+    for (const resposta of respostas) {
+        const texto = String(resposta || '').trim();
+        if (!texto) continue;
+        if (texto.length > MAX_CARACTERES_RESPOSTA_ACEITA) {
+            throw new Error(`Uma resposta aceita da pergunta ${numeroPergunta || ''} ultrapassa ${MAX_CARACTERES_RESPOSTA_ACEITA} caracteres.`.trim());
+        }
+        const chave = normalizarTexto(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (chave && !unicas.has(chave)) unicas.set(chave, texto);
+    }
+
+    return [...unicas.values()];
+}
 
 function normalizarPerguntasTriagem(perguntas = []) {
     if (!Array.isArray(perguntas)) return [];
@@ -273,6 +299,7 @@ function normalizarPerguntasTriagem(perguntas = []) {
             return {
                 id: String(objeto.id || new ObjectId().toString()),
                 texto,
+                respostasAceitas: normalizarRespostasAceitas(objeto.respostasAceitas || [], index + 1),
                 ordem: index + 1,
                 ativo: objeto.ativo !== false
             };
@@ -290,6 +317,119 @@ function perguntaAtualDoTicket(ticket) {
     const perguntas = Array.isArray(ticket?.perguntasFluxo) ? ticket.perguntasFluxo : [];
     const indice = Number.isInteger(ticket?.indicePerguntaFluxo) ? ticket.indicePerguntaFluxo : 0;
     return perguntas[indice] || null;
+}
+
+function normalizarRespostaParaValidacao(texto = '') {
+    return normalizarTexto(String(texto || ''))
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function formatarPerguntaParaEnvio(pergunta) {
+    if (!pergunta?.texto) return '';
+    const aceitas = Array.isArray(pergunta.respostasAceitas) ? pergunta.respostasAceitas.filter(Boolean) : [];
+    if (!aceitas.length) return pergunta.texto;
+
+    return `${pergunta.texto}\n\n*Responda com uma das opções:*\n${aceitas.map(item => `• ${item}`).join('\n')}`;
+}
+
+function validarRespostaDaPergunta(pergunta, texto = '', isMedia = false) {
+    const aceitas = Array.isArray(pergunta?.respostasAceitas)
+        ? pergunta.respostasAceitas.filter(Boolean)
+        : [];
+
+    // Sem respostas pré-definidas, a pergunta continua livre como antes.
+    if (!aceitas.length) return { valida: true };
+
+    // Perguntas validadas precisam de uma resposta textual. Uma legenda também conta como texto.
+    if (!String(texto || '').trim()) {
+        return {
+            valida: false,
+            mensagem: `Para esta pergunta, preciso que a resposta seja enviada por *texto*.\n\n${formatarPerguntaParaEnvio(pergunta)}`
+        };
+    }
+
+    const recebida = normalizarRespostaParaValidacao(texto);
+    const encontrou = aceitas.some(item => normalizarRespostaParaValidacao(item) === recebida);
+
+    if (encontrou) return { valida: true };
+
+    return {
+        valida: false,
+        mensagem: `Não consegui identificar essa resposta como uma das opções válidas.\n\n${formatarPerguntaParaEnvio(pergunta)}`
+    };
+}
+
+
+async function gerarSugestoesRespostasAceitasIA(pergunta, contexto = {}) {
+    const perguntaLimpa = String(pergunta || '').trim();
+    if (!perguntaLimpa) {
+        throw new Error('Informe a pergunta antes de gerar sugestões.');
+    }
+    if (perguntaLimpa.length > MAX_CARACTERES_PERGUNTA) {
+        throw new Error(`A pergunta ultrapassa ${MAX_CARACTERES_PERGUNTA} caracteres.`);
+    }
+    if (!geminiModel) {
+        const erro = new Error('A IA não está disponível no momento. Verifique a chave do Gemini.');
+        erro.code = 'IA_INDISPONIVEL';
+        throw erro;
+    }
+
+    const titulo = String(contexto?.titulo || '').trim().slice(0, 120);
+    const area = String(contexto?.area || '').trim().slice(0, 120);
+
+    const prompt = `Você auxilia um advogado a configurar uma triagem de atendimento por WhatsApp.
+
+PERGUNTA CADASTRADA:
+${JSON.stringify(perguntaLimpa)}
+
+CONTEXTO DA OPÇÃO:
+Título: ${JSON.stringify(titulo || 'não informado')}
+Área: ${JSON.stringify(area || 'não informada')}
+
+Sua tarefa é decidir se essa pergunta comporta um conjunto objetivo e finito de respostas aceitas.
+
+Responda SOMENTE em JSON válido, sem markdown, neste formato:
+{"adequada":true,"respostas":["Opção 1","Opção 2"],"motivo":""}
+
+REGRAS OBRIGATÓRIAS:
+1. Use adequada=true somente para perguntas categóricas em que uma lista de opções ajuda o usuário a responder corretamente.
+2. Gere entre 2 e 15 respostas curtas, claras, mutuamente compreensíveis e úteis para um atendimento jurídico real.
+3. Não gere variações redundantes, abreviações, gírias ou sinônimos da mesma opção apenas para aumentar a lista.
+4. Inclua "Outro" ou equivalente SOMENTE quando fizer sentido e quando a lista não puder ser razoavelmente exaustiva.
+5. Exemplos adequados: "Qual rede social?", "Você ainda trabalha na empresa?", "O imóvel é próprio ou alugado?".
+6. Exemplos NÃO adequados: nome, CPF, telefone, data específica, valor monetário, número de processo, relato livre, descrição do problema, envio de documento ou qualquer pergunta cuja resposta dependa de um dado particular do cliente.
+7. Se não for adequada a respostas fechadas, retorne adequada=false, respostas=[] e explique em motivo, em uma frase curta, que é melhor manter resposta livre.
+8. Não dê orientação jurídica, não invente fatos do cliente e não modifique a pergunta.
+9. As respostas serão exibidas ao cliente exatamente como opções de WhatsApp; escreva-as em português natural e profissional.`;
+
+    const result = await geminiModel.generateContent(prompt);
+    const response = await result.response;
+    const parsed = extrairJsonIA(response.text());
+
+    if (!parsed || typeof parsed.adequada !== 'boolean' || !Array.isArray(parsed.respostas)) {
+        throw new Error('A IA retornou um formato inválido. Tente novamente.');
+    }
+
+    if (!parsed.adequada) {
+        return {
+            adequada: false,
+            respostas: [],
+            motivo: String(parsed.motivo || 'Esta pergunta é mais adequada para resposta livre.').trim().slice(0, 300)
+        };
+    }
+
+    const respostas = normalizarRespostasAceitas(parsed.respostas, 0).slice(0, 15);
+    if (respostas.length < 2) {
+        return {
+            adequada: false,
+            respostas: [],
+            motivo: 'Não foi possível formar uma lista objetiva de respostas para esta pergunta.'
+        };
+    }
+
+    return { adequada: true, respostas, motivo: '' };
 }
 
 function numeroComEmoji(numero) {
@@ -579,7 +719,7 @@ async function mensagemRetomadaFluxo(ticket) {
     if (ticket.aguardandoPerguntaFluxo) {
         const perguntaAtual = perguntaAtualDoTicket(ticket);
         if (perguntaAtual?.texto) {
-            return `\n\nPara continuar o ticket *${ticket.ticketNumber}*:\n\n${perguntaAtual.texto}`;
+            return `\n\nPara continuar o ticket *${ticket.ticketNumber}*:\n\n${formatarPerguntaParaEnvio(perguntaAtual)}`;
         }
     }
 
@@ -1479,7 +1619,7 @@ sock.ev.on('messages.upsert', async m => {
                     menuOptionTitle: opcaoSelecionada.titulo,
                     menuOptionEmoji: opcaoSelecionada.emoji || '',
                     status: 'aguardando_pergunta_fluxo',
-                    perguntasTriagem: perguntasFluxo.map(({ id, texto, ordem }) => ({ id, texto, ordem })),
+                    perguntasTriagem: perguntasFluxo.map(({ id, texto, respostasAceitas, ordem }) => ({ id, texto, respostasAceitas: respostasAceitas || [], ordem })),
                     respostasTriagem: []
                 });
 
@@ -1487,7 +1627,7 @@ sock.ev.on('messages.upsert', async m => {
                     await sendBotMsg(rawJid, { text: respostaArea });
                 }
 
-                await sendBotMsg(rawJid, { text: perguntasFluxo[0].texto });
+                await sendBotMsg(rawJid, { text: formatarPerguntaParaEnvio(perguntasFluxo[0]) });
                 return;
             }
 
@@ -1542,8 +1682,18 @@ sock.ev.on('messages.upsert', async m => {
 
             if (!texto && !isMedia) {
                 await sendBotMsg(rawJid, {
-                    text: `Para continuar, responda à pergunta abaixo:\n\n${perguntaAtual.texto}`
+                    text: `Para continuar, responda à pergunta abaixo:\n\n${formatarPerguntaParaEnvio(perguntaAtual)}`
                 });
+                return;
+            }
+
+            const validacaoResposta = validarRespostaDaPergunta(perguntaAtual, texto, isMedia);
+            if (!validacaoResposta.valida) {
+                await sendBotMsg(rawJid, { text: validacaoResposta.mensagem });
+                await ticketsColl.updateOne(
+                    { _id: ticket._id },
+                    { $set: { lastActivity: Date.now() } }
+                );
                 return;
             }
 
@@ -1556,6 +1706,7 @@ sock.ev.on('messages.upsert', async m => {
             const respostaRegistrada = {
                 perguntaId: perguntaAtual.id,
                 pergunta: perguntaAtual.texto,
+                respostasAceitas: Array.isArray(perguntaAtual.respostasAceitas) ? perguntaAtual.respostasAceitas : [],
                 resposta: texto || `[${tipoResposta} recebido]`,
                 tipo: tipoResposta,
                 respondidaEm: Date.now()
@@ -1589,7 +1740,7 @@ sock.ev.on('messages.upsert', async m => {
             });
 
             if (temProximaPergunta) {
-                await sendBotMsg(rawJid, { text: perguntas[proximoIndice].texto });
+                await sendBotMsg(rawJid, { text: formatarPerguntaParaEnvio(perguntas[proximoIndice]) });
                 return;
             }
 
@@ -1920,6 +2071,31 @@ app.get('/logout-whatsapp', async (req, res) => {
         io.emit('disconnected');
         res.sendStatus(200);
     } catch (err) { res.status(500).send("Erro"); }
+});
+
+// Sugestão assistida por IA para respostas aceitas de uma pergunta da triagem.
+// A IA apenas propõe opções para o painel; nada é salvo automaticamente no MongoDB.
+app.post('/api/triage/suggest-answers', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+
+    try {
+        const pergunta = String(req.body?.pergunta || '').trim();
+        const titulo = String(req.body?.titulo || '').trim();
+        const area = String(req.body?.area || '').trim();
+
+        if (!pergunta) {
+            return res.status(400).json({ erro: 'Escreva a pergunta antes de gerar as sugestões.' });
+        }
+
+        const sugestao = await gerarSugestoesRespostasAceitasIA(pergunta, { titulo, area });
+        return res.json(sugestao);
+    } catch (err) {
+        console.error('[Triagem IA] Erro ao gerar respostas aceitas:', err?.message || err);
+        const status = err?.code === 'IA_INDISPONIVEL' ? 503 : 500;
+        return res.status(status).json({
+            erro: err?.message || 'Não foi possível gerar as sugestões com IA.'
+        });
+    }
 });
 
 // Gestão das opções do atendimento. O painel edita a mesma coleção usada pelo WhatsApp.
