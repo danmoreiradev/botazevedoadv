@@ -357,7 +357,7 @@ function validarRespostaDaPergunta(pergunta, texto = '', isMedia = false) {
 
     return {
         valida: false,
-        mensagem: `Não consegui identificar essa resposta como uma das opções válidas.\n\n${formatarPerguntaParaEnvio(pergunta)}`
+        mensagem: `Não consegui validar essa resposta para esta pergunta. Por favor, responda novamente de forma objetiva.\n\n${formatarPerguntaParaEnvio(pergunta)}`
     };
 }
 
@@ -402,7 +402,7 @@ REGRAS OBRIGATÓRIAS:
 6. Exemplos NÃO adequados: nome, CPF, telefone, data específica, valor monetário, número de processo, relato livre, descrição do problema, envio de documento ou qualquer pergunta cuja resposta dependa de um dado particular do cliente.
 7. Se não for adequada a respostas fechadas, retorne adequada=false, respostas=[] e explique em motivo, em uma frase curta, que é melhor manter resposta livre.
 8. Não dê orientação jurídica, não invente fatos do cliente e não modifique a pergunta.
-9. As respostas serão exibidas ao cliente exatamente como opções de WhatsApp; escreva-as em português natural e profissional.`;
+9. As respostas serão usadas internamente para validação da triagem; escreva-as em português natural e profissional.`;
 
     const result = await geminiModel.generateContent(prompt);
     const response = await result.response;
