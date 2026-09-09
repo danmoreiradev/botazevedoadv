@@ -680,6 +680,7 @@ async function encaminharAutomaticamenteForaDoHorario(ticket, jid, { texto = '',
                 aguardandoCadastroCliente: false,
                 aguardandoNomeCadastro: false,
                 aguardandoCPFCadastro: false,
+                aguardandoWhatsappCadastro: false,
                 paused: false,
                 until: null,
                 foraHorario: true,
@@ -871,6 +872,7 @@ function entradaEstruturadaDoFluxo(ticket, texto = '') {
     if (ticket?.aguardandoPerguntaFluxo && !possuiSinalDePergunta(texto)) return true;
     if (ticket?.aguardandoCadastroCliente && (respostaPositiva(texto) || respostaNegativa(texto))) return true;
     if (ticket?.aguardandoCPFCadastro && /^\d{11}$/.test(texto.replace(/\D/g, ''))) return true;
+    if (ticket?.aguardandoWhatsappCadastro && normalizarNumeroDigitadoCliente(texto)) return true;
 
     // Nome simples não deve acionar IA sem necessidade. Frases com sinais de pergunta/encerramento
     // continuam passando pela IA antes da validação do nome.
@@ -938,6 +940,10 @@ async function mensagemRetomadaFluxo(ticket) {
 
     if (ticket.aguardandoCPFCadastro) {
         return `\n\nPara continuar o cadastro, informe seu *CPF* com 11 números.`;
+    }
+
+    if (ticket.aguardandoWhatsappCadastro) {
+        return `\n\nPara concluir o cadastro, confirme o *número deste WhatsApp com DDD*. Exemplo: 19 99999-9999.`;
     }
 
     if (ticket.paused || ['aguardando_especialista', 'em_atendimento_humano'].includes(ticket.status)) {
@@ -1232,6 +1238,65 @@ async function resolverPnDeLids(...fontes) {
     return null;
 }
 
+function normalizarNumeroDigitadoCliente(valor = '') {
+    const digitos = String(valor || '').replace(/\D/g, '');
+    if (digitos.length < 10 || digitos.length > 15) return null;
+
+    // Para números brasileiros informados somente com DDD + telefone, gravamos
+    // no mesmo padrão E.164 que o WhatsApp usa internamente.
+    if ((digitos.length === 10 || digitos.length === 11) && !digitos.startsWith('55')) {
+        return `55${digitos}`;
+    }
+
+    return digitos;
+}
+
+async function resolverNumeroWhatsAppCadastro(ticket, contato, rawJid, numeroInformado = null) {
+    const identificadoresMesclados = [...new Set([
+        ...(Array.isArray(ticket?.identificadores) ? ticket.identificadores : []),
+        ...(Array.isArray(contato?.identificadores) ? contato.identificadores : []),
+        ticket?.lastRawJid,
+        rawJid
+    ].filter(Boolean))];
+
+    const numeroDigitado = numeroInformado ? normalizarNumeroDigitadoCliente(numeroInformado) : null;
+    const numerosMesclados = [...new Set([
+        numeroDigitado,
+        ...(Array.isArray(ticket?.whatsappNumbers) ? ticket.whatsappNumbers : []),
+        ...(Array.isArray(contato?.whatsappNumbers) ? contato.whatsappNumbers : []),
+        ticket?.numeroReal,
+        contato?.numeroPrincipal
+    ].map(normalizarNumeroWhatsApp).filter(Boolean))];
+
+    let numeroPrincipal = numeroDigitado || extrairNumeroWhatsAppDeFontes(
+        contato?.numeroPrincipal,
+        ticket?.numeroReal,
+        contato?.whatsappNumbers,
+        ticket?.whatsappNumbers,
+        identificadoresMesclados
+    );
+
+    if (!numeroPrincipal) {
+        const resolvido = await resolverPnDeLids(identificadoresMesclados);
+        if (resolvido?.numero) {
+            numeroPrincipal = resolvido.numero;
+            numerosMesclados.push(resolvido.numero);
+            if (resolvido.pnJid) identificadoresMesclados.push(resolvido.pnJid);
+        }
+    }
+
+    if (numeroPrincipal) {
+        numerosMesclados.push(numeroPrincipal);
+        identificadoresMesclados.push(`${numeroPrincipal}@s.whatsapp.net`);
+    }
+
+    return {
+        numeroPrincipal: numeroPrincipal || null,
+        numerosMesclados: [...new Set(numerosMesclados.filter(Boolean))],
+        identificadoresMesclados: [...new Set(identificadoresMesclados.filter(Boolean))]
+    };
+}
+
 async function obterIdentificadoresContato(msg, rawJid) {
     const jids = new Set();
     const numeros = new Set();
@@ -1245,20 +1310,44 @@ async function obterIdentificadoresContato(msg, rawJid) {
         if (numero) numeros.add(numero);
     };
 
-    adicionarJid(rawJid);
-    adicionarJid(msg?.key?.remoteJidAlt);
-    adicionarJid(msg?.key?.participant);
-    adicionarJid(msg?.key?.participantAlt);
-
-    // Mantemos também os campos de versões anteriores, caso a instalação atual
-    // do Baileys ainda os exponha.
-    adicionarJid(msg?.key?.participantPn);
-    adicionarJid(msg?.participantPn);
+    // O formato do identificador varia conforme a versão do Baileys e o
+    // addressingMode usado pelo WhatsApp. Em conversa privada, o telefone pode
+    // aparecer em remoteJid, remoteJidAlt ou senderPn. Em versões intermediárias
+    // também encontramos participantPn/participantAlt. Coletamos todos antes de
+    // decidir qual deles é o número real.
+    [
+        rawJid,
+        msg?.key?.remoteJid,
+        msg?.key?.remoteJidAlt,
+        msg?.key?.senderPn,
+        msg?.key?.senderLid,
+        msg?.key?.participant,
+        msg?.key?.participantAlt,
+        msg?.key?.participantPn,
+        msg?.key?.participantLid,
+        msg?.senderPn,
+        msg?.senderLid,
+        msg?.participantPn,
+        msg?.participantAlt
+    ].filter(Boolean).forEach(adicionarJid);
 
     const jidNormalizado = normalizarJid(rawJid);
 
+    // Quando a própria mensagem traz LID e PN ao mesmo tempo, persistimos esse
+    // par no repositório do Baileys. Isso evita perder a relação antes do cadastro.
+    const lidsObservados = [...jids].filter(jid => String(jid).endsWith('@lid'));
+    const pnsObservados = [...jids].filter(jid => String(jid).endsWith('@s.whatsapp.net'));
+    if (lidsObservados.length && pnsObservados.length && sock?.signalRepository?.lidMapping?.storeLIDPNMappings) {
+        try {
+            await sock.signalRepository.lidMapping.storeLIDPNMappings(
+                lidsObservados.flatMap(lid => pnsObservados.map(pn => ({ lid, pn })))
+            );
+        } catch (err) {
+            console.warn('[LID] Não foi possível persistir o par LID/PN observado:', err?.message || err);
+        }
+    }
+
     // Tenta resolver qualquer LID observado na mensagem para o PN real.
-    // Isso cobre situações em que o WhatsApp entrega o contato usando @lid.
     const mapeamentoLid = await resolverPnDeLids([...jids]);
     if (mapeamentoLid?.pnJid) adicionarJid(mapeamentoLid.pnJid);
 
@@ -1448,7 +1537,9 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
         aguardandoCadastroCliente: false,
         aguardandoNomeCadastro: false,
         aguardandoCPFCadastro: false,
+        aguardandoWhatsappCadastro: false,
         nomeCadastroTemp: null,
+        cpfCadastroTemp: null,
         paused,
         until: paused ? agora + tresDiasEmMs : null,
         lastActivity: agora,
@@ -1503,6 +1594,7 @@ async function encaminharParaEspecialista(ticket, jid, mensagem = null) {
                 aguardandoCadastroCliente: false,
                 aguardandoNomeCadastro: false,
                 aguardandoCPFCadastro: false,
+                aguardandoWhatsappCadastro: false,
                 paused: true,
                 until: agora + tresDiasEmMs,
                 lastActivity: agora
@@ -1560,40 +1652,15 @@ async function concluirTriagemEAvancar(ticket, jid) {
     });
 }
 
-async function salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo) {
+async function salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo, numeroInformado = null) {
     const agora = Date.now();
+    const identidade = await resolverNumeroWhatsAppCadastro(ticket, contato, rawJid, numeroInformado);
+    const numeroPrincipal = identidade.numeroPrincipal;
 
-    // O número pode ter sido identificado em uma mensagem anterior do mesmo ticket,
-    // mesmo que a mensagem do CPF tenha chegado apenas com @lid. Por isso juntamos
-    // os dados acumulados no ticket com os identificadores da mensagem atual.
-    const identificadoresMesclados = [...new Set([
-        ...(Array.isArray(ticket?.identificadores) ? ticket.identificadores : []),
-        ...(Array.isArray(contato?.identificadores) ? contato.identificadores : []),
-        rawJid
-    ].filter(Boolean))];
-
-    const numerosMesclados = [...new Set([
-        ...(Array.isArray(ticket?.whatsappNumbers) ? ticket.whatsappNumbers : []),
-        ...(Array.isArray(contato?.whatsappNumbers) ? contato.whatsappNumbers : []),
-        ticket?.numeroReal,
-        contato?.numeroPrincipal
-    ].map(normalizarNumeroWhatsApp).filter(Boolean))];
-
-    let numeroPrincipal = extrairNumeroWhatsAppDeFontes(
-        contato?.numeroPrincipal,
-        ticket?.numeroReal,
-        numerosMesclados,
-        identificadoresMesclados
-    );
-
-    // Última tentativa: se só houver LID, pede ao repositório do Baileys o PN real.
     if (!numeroPrincipal) {
-        const resolvido = await resolverPnDeLids(identificadoresMesclados, ticket?.lastRawJid, rawJid);
-        if (resolvido?.numero) {
-            numeroPrincipal = resolvido.numero;
-            numerosMesclados.push(resolvido.numero);
-            if (resolvido.pnJid) identificadoresMesclados.push(resolvido.pnJid);
-        }
+        // Não cria um cadastro incompleto. O chamador deverá solicitar a confirmação
+        // do telefone ao cliente e chamar esta função novamente.
+        return { salvo: false, numeroPrincipal: null };
     }
 
     const camposCliente = {
@@ -1601,24 +1668,21 @@ async function salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo
         nome: nomeInfo.nome,
         sobrenome: nomeInfo.sobrenome,
         nomeCompleto: nomeInfo.nomeCompleto,
+        numeroReal: numeroPrincipal,
+        whatsapp: numeroPrincipal,
         lastRawJid: rawJid,
         updatedAt: agora,
         lastSeenAt: agora
     };
 
-    // Não sobrescreve um número já salvo com null/undefined.
-    if (numeroPrincipal) camposCliente.numeroReal = numeroPrincipal;
-
     await clientsColl.updateOne(
         { _id: cpfLimpo },
         {
             $set: camposCliente,
-            $setOnInsert: {
-                createdAt: agora
-            },
+            $setOnInsert: { createdAt: agora },
             $addToSet: {
-                identificadores: { $each: [...new Set(identificadoresMesclados.filter(Boolean))] },
-                whatsappNumbers: { $each: [...new Set(numerosMesclados.filter(Boolean))] },
+                identificadores: { $each: identidade.identificadoresMesclados },
+                whatsappNumbers: { $each: identidade.numerosMesclados },
                 ticketNumbers: ticket.ticketNumber
             }
         },
@@ -1633,11 +1697,18 @@ async function salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo
                 cpf: cpfLimpo,
                 clienteNome: nomeInfo.nomeCompleto,
                 clienteCadastrado: true,
+                numeroReal: numeroPrincipal,
                 nomeCadastroTemp: null,
+                cpfCadastroTemp: null,
                 aguardandoCadastroCliente: false,
                 aguardandoNomeCadastro: false,
                 aguardandoCPFCadastro: false,
+                aguardandoWhatsappCadastro: false,
                 lastActivity: agora
+            },
+            $addToSet: {
+                identificadores: { $each: identidade.identificadoresMesclados },
+                whatsappNumbers: { $each: identidade.numerosMesclados }
             }
         }
     );
@@ -1646,8 +1717,14 @@ async function salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo
         clienteId: cpfLimpo,
         cpf: cpfLimpo,
         clienteNome: nomeInfo.nomeCompleto,
+        numeroReal: numeroPrincipal,
+        whatsappNumbers: identidade.numerosMesclados,
+        identificadores: identidade.identificadoresMesclados,
         cadastroRealizado: true
     });
+
+    console.log(`[Cadastro] Cliente ${cpfLimpo} salvo com WhatsApp ${numeroPrincipal}.`);
+    return { salvo: true, numeroPrincipal };
 }
 
 async function startBot() {
@@ -1808,7 +1885,8 @@ sock.ev.on('messages.upsert', async m => {
         const cadastroJaEmAndamento = !!(
             ticket?.aguardandoCadastroCliente ||
             ticket?.aguardandoNomeCadastro ||
-            ticket?.aguardandoCPFCadastro
+            ticket?.aguardandoCPFCadastro ||
+            ticket?.aguardandoWhatsappCadastro
         );
         const fluxoForaHorarioJaIniciado = !!ticket?.aguardandoDetalhesForaHorario;
 
@@ -1857,7 +1935,8 @@ sock.ev.on('messages.upsert', async m => {
         const emFluxoCadastro = !!(
             ticket?.aguardandoCadastroCliente ||
             ticket?.aguardandoNomeCadastro ||
-            ticket?.aguardandoCPFCadastro
+            ticket?.aguardandoCPFCadastro ||
+            ticket?.aguardandoWhatsappCadastro
         );
 
         if (ticket?.paused && !emFluxoCadastro) {
@@ -2313,6 +2392,7 @@ sock.ev.on('messages.upsert', async m => {
                         nomeCadastroTemp: nomeInfo,
                         aguardandoNomeCadastro: false,
                         aguardandoCPFCadastro: true,
+                        aguardandoWhatsappCadastro: false,
                         lastActivity: Date.now()
                     }
                 }
@@ -2350,16 +2430,113 @@ sock.ev.on('messages.upsert', async m => {
                 return;
             }
 
-            await salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo);
+            // Primeiro tenta capturar o número automaticamente do próprio WhatsApp.
+            const identidadeWhatsApp = await resolverNumeroWhatsAppCadastro(ticket, contato, rawJid);
+
+            // O WhatsApp/Baileys pode entregar apenas um @lid, sem o PN real. Nesse
+            // cenário não gravamos "-" nem um LID como telefone: pedimos confirmação.
+            if (!identidadeWhatsApp.numeroPrincipal) {
+                await ticketsColl.updateOne(
+                    { _id: ticket._id },
+                    {
+                        $set: {
+                            cpfCadastroTemp: cpfLimpo,
+                            aguardandoCPFCadastro: false,
+                            aguardandoWhatsappCadastro: true,
+                            status: 'aguardando_whatsapp_cadastro',
+                            lastActivity: Date.now()
+                        }
+                    }
+                );
+
+                await sendBotMsg(rawJid, {
+                    text: `Para concluir o cadastro, confirme o *número deste WhatsApp com DDD*.\n\nExemplo: 19 99999-9999`
+                });
+                return;
+            }
+
+            const resultadoCadastro = await salvarCadastroCliente(
+                ticket,
+                contato,
+                rawJid,
+                nomeInfo,
+                cpfLimpo,
+                identidadeWhatsApp.numeroPrincipal
+            );
+
+            if (!resultadoCadastro.salvo) {
+                throw new Error('Não foi possível identificar o WhatsApp para concluir o cadastro.');
+            }
 
             await sendBotMsg(rawJid, {
                 text: `✅ Cadastro realizado, ${nomeInfo.nome}! Nos próximos atendimentos vamos reconhecer você automaticamente.\n\nSeu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
             });
 
-            // Atualiza a cópia local para o encaminhamento final.
             ticket.clienteCadastrado = true;
             ticket.clienteNome = nomeInfo.nomeCompleto;
             ticket.cpf = cpfLimpo;
+            ticket.numeroReal = resultadoCadastro.numeroPrincipal;
+
+            await encaminharParaEspecialista(ticket, rawJid);
+            return;
+        }
+
+        // 6) CONFIRMAÇÃO DO WHATSAPP - usada somente quando o Baileys não fornece o PN real
+        if (ticket.aguardandoWhatsappCadastro) {
+            const numeroInformado = normalizarNumeroDigitadoCliente(texto);
+            if (!numeroInformado) {
+                await sendBotMsg(rawJid, {
+                    text: `Número inválido. Informe o *WhatsApp com DDD*. Exemplo: 19 99999-9999.`
+                });
+                return;
+            }
+
+            const cpfLimpo = String(ticket.cpfCadastroTemp || '').replace(/\D/g, '');
+            const nomeInfo = ticket.nomeCadastroTemp;
+
+            if (!validarCPF(cpfLimpo) || !nomeInfo?.nome || !nomeInfo?.sobrenome) {
+                await sendBotMsg(rawJid, {
+                    text: `Precisamos reiniciar a identificação do cadastro. Informe seu *nome e sobrenome*:`
+                });
+                await ticketsColl.updateOne(
+                    { _id: ticket._id },
+                    {
+                        $set: {
+                            aguardandoNomeCadastro: true,
+                            aguardandoCPFCadastro: false,
+                            aguardandoWhatsappCadastro: false,
+                            cpfCadastroTemp: null,
+                            lastActivity: Date.now()
+                        }
+                    }
+                );
+                return;
+            }
+
+            const resultadoCadastro = await salvarCadastroCliente(
+                ticket,
+                contato,
+                rawJid,
+                nomeInfo,
+                cpfLimpo,
+                numeroInformado
+            );
+
+            if (!resultadoCadastro.salvo) {
+                await sendBotMsg(rawJid, {
+                    text: `Não consegui registrar esse número. Informe novamente o *WhatsApp com DDD*.`
+                });
+                return;
+            }
+
+            await sendBotMsg(rawJid, {
+                text: `✅ Cadastro realizado, ${nomeInfo.nome}! Nos próximos atendimentos vamos reconhecer você automaticamente.\n\nSeu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
+            });
+
+            ticket.clienteCadastrado = true;
+            ticket.clienteNome = nomeInfo.nomeCompleto;
+            ticket.cpf = cpfLimpo;
+            ticket.numeroReal = resultadoCadastro.numeroPrincipal;
 
             await encaminharParaEspecialista(ticket, rawJid);
             return;
@@ -2386,6 +2563,7 @@ sock.ev.on('messages.upsert', async m => {
                     aguardandoCadastroCliente: false,
                     aguardandoNomeCadastro: false,
                     aguardandoCPFCadastro: false,
+                    aguardandoWhatsappCadastro: false,
                     lastActivity: Date.now()
                 }
             }
@@ -2404,30 +2582,72 @@ sock.ev.on('messages.upsert', async m => {
                 const numero = numeroDePnJid(pnNormalizado);
                 const ids = [lidNormalizado, pnNormalizado, numero].filter(Boolean);
 
-                if (!ids.length || !clientsColl) return;
+                if (!lidNormalizado || !numero) return;
+                const agora = Date.now();
 
-                const cliente = await clientsColl.findOne({
-                    $or: [
-                        { identificadores: { $in: ids } },
-                        ...(numero ? [{ whatsappNumbers: numero }, { numeroReal: numero }] : [])
-                    ]
-                });
-
-                if (!cliente) return;
-
-                await clientsColl.updateOne(
-                    { _id: cliente._id },
-                    {
-                        $addToSet: {
-                            identificadores: { $each: ids },
-                            ...(numero ? { whatsappNumbers: numero } : {})
+                // Importante: o evento pode chegar ANTES de o usuário aceitar virar
+                // cliente. Por isso atualizamos também ticket ativo e histórico, e não
+                // apenas client_registry.
+                if (ticketsColl) {
+                    await ticketsColl.updateMany(
+                        {
+                            $or: [
+                                { _id: lidNormalizado },
+                                { lastRawJid: lidNormalizado },
+                                { identificadores: lidNormalizado }
+                            ]
                         },
-                        $set: {
-                            ...(numero ? { numeroReal: numero } : {}),
-                            updatedAt: Date.now()
+                        {
+                            $set: { numeroReal: numero, lastActivity: agora },
+                            $addToSet: {
+                                identificadores: { $each: ids },
+                                whatsappNumbers: numero
+                            }
                         }
-                    }
-                );
+                    );
+                }
+
+                if (ticketHistoryColl) {
+                    await ticketHistoryColl.updateMany(
+                        {
+                            $or: [
+                                { lastRawJid: lidNormalizado },
+                                { identificadores: lidNormalizado }
+                            ]
+                        },
+                        {
+                            $set: { numeroReal: numero, updatedAt: agora },
+                            $addToSet: {
+                                identificadores: { $each: ids },
+                                whatsappNumbers: numero
+                            }
+                        }
+                    );
+                }
+
+                if (clientsColl) {
+                    await clientsColl.updateMany(
+                        {
+                            $or: [
+                                { lastRawJid: lidNormalizado },
+                                { identificadores: lidNormalizado }
+                            ]
+                        },
+                        {
+                            $set: {
+                                numeroReal: numero,
+                                whatsapp: numero,
+                                updatedAt: agora
+                            },
+                            $addToSet: {
+                                identificadores: { $each: ids },
+                                whatsappNumbers: numero
+                            }
+                        }
+                    );
+                }
+
+                console.log(`[LID] Mapeamento persistido: ${lidNormalizado} -> ${numero}.`);
             } catch (err) {
                 console.warn('[LID] Falha ao persistir mapeamento:', err?.message || err);
             }
@@ -2852,6 +3072,7 @@ async function resolverWhatsAppCliente(cliente) {
 
     let numero = extrairNumeroWhatsAppDeFontes(
         cliente.numeroReal,
+        cliente.whatsapp,
         cliente.whatsappNumbers,
         cliente.identificadores,
         cliente.lastRawJid
@@ -2937,6 +3158,7 @@ async function resolverWhatsAppCliente(cliente) {
             {
                 $set: {
                     numeroReal: numero,
+                    whatsapp: numero,
                     updatedAt: Date.now()
                 },
                 $addToSet: {
@@ -2965,6 +3187,7 @@ app.get('/api/clients', async (req, res) => {
                     sobrenome: 1,
                     nomeCompleto: 1,
                     numeroReal: 1,
+                    whatsapp: 1,
                     whatsappNumbers: 1,
                     identificadores: 1,
                     lastRawJid: 1,

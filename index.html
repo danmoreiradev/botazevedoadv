@@ -1560,7 +1560,7 @@ function renderizarLista(itens) {
 
                 const nomeTd = criarCelulaCliente(nomeCompletoCliente(cliente), 'client-name');
                 const cpfTd = criarCelulaCliente(formatarCPFCliente(cliente.cpf || cliente._id || ''));
-                const whatsappTd = criarCelulaCliente(formatarWhatsAppCliente(cliente.whatsapp), 'client-whatsapp');
+                const whatsappTd = criarCelulaCliente(formatarWhatsAppCliente(cliente.whatsapp || cliente.numeroReal || cliente.whatsappNumbers?.[0]), 'client-whatsapp');
                 const contatoTd = criarCelulaCliente(formatarDataCliente(cliente.lastSeenAt || cliente.updatedAt || cliente.createdAt));
 
                 const acaoTd = document.createElement('td');
@@ -1630,7 +1630,7 @@ function renderizarLista(itens) {
                     .normalize('NFD')
                     .replace(/[\u0300-\u036f]/g, '');
                 const cpf = String(cliente.cpf || cliente._id || '').replace(/\D/g, '');
-                const whatsapp = String(cliente.whatsapp || '').replace(/\D/g, '');
+                const whatsapp = String(cliente.whatsapp || cliente.numeroReal || cliente.whatsappNumbers?.[0] || '').replace(/\D/g, '');
 
                 return nome.includes(termo) ||
                     (!!apenasNumeros && (cpf.includes(apenasNumeros) || whatsapp.includes(apenasNumeros)));
