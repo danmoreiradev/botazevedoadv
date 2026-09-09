@@ -1165,6 +1165,73 @@ function numeroDePnJid(jid) {
     return jid.split('@')[0].split(':')[0] || null;
 }
 
+function normalizarNumeroWhatsApp(valor = '') {
+    if (!valor) return null;
+
+    const texto = String(valor).trim();
+    const numeroJid = numeroDePnJid(normalizarJid(texto));
+    if (numeroJid) return numeroJid;
+
+    // Só aceita valores que já sejam essencialmente um telefone.
+    // Não tentamos converter LID em telefone porque o número interno do @lid
+    // não corresponde necessariamente ao número real do WhatsApp.
+    if (texto.includes('@lid')) return null;
+
+    const digitos = texto.replace(/\D/g, '');
+    return digitos.length >= 10 && digitos.length <= 15 ? digitos : null;
+}
+
+function extrairNumeroWhatsAppDeFontes(...fontes) {
+    const fila = [...fontes];
+
+    while (fila.length) {
+        const valor = fila.shift();
+        if (valor === null || valor === undefined) continue;
+
+        if (Array.isArray(valor)) {
+            fila.push(...valor);
+            continue;
+        }
+
+        const numero = normalizarNumeroWhatsApp(valor);
+        if (numero) return numero;
+    }
+
+    return null;
+}
+
+async function resolverPnDeLids(...fontes) {
+    if (!sock?.signalRepository?.lidMapping?.getPNForLID) return null;
+
+    const fila = [...fontes];
+    const lids = new Set();
+
+    while (fila.length) {
+        const valor = fila.shift();
+        if (valor === null || valor === undefined) continue;
+
+        if (Array.isArray(valor)) {
+            fila.push(...valor);
+            continue;
+        }
+
+        const jid = normalizarJid(String(valor));
+        if (jid?.endsWith('@lid')) lids.add(jid);
+    }
+
+    for (const lid of lids) {
+        try {
+            const pn = await sock.signalRepository.lidMapping.getPNForLID(lid);
+            const numero = normalizarNumeroWhatsApp(pn);
+            if (numero) return { numero, pnJid: normalizarJid(pn), lid };
+        } catch (err) {
+            console.warn(`[LID] Não foi possível resolver ${lid}:`, err?.message || err);
+        }
+    }
+
+    return null;
+}
+
 async function obterIdentificadoresContato(msg, rawJid) {
     const jids = new Set();
     const numeros = new Set();
@@ -1180,20 +1247,20 @@ async function obterIdentificadoresContato(msg, rawJid) {
 
     adicionarJid(rawJid);
     adicionarJid(msg?.key?.remoteJidAlt);
+    adicionarJid(msg?.key?.participant);
+    adicionarJid(msg?.key?.participantAlt);
+
+    // Mantemos também os campos de versões anteriores, caso a instalação atual
+    // do Baileys ainda os exponha.
     adicionarJid(msg?.key?.participantPn);
     adicionarJid(msg?.participantPn);
 
     const jidNormalizado = normalizarJid(rawJid);
 
-    // Baileys atual mantém o mapeamento LID -> PN no signalRepository quando disponível.
-    if (jidNormalizado?.endsWith('@lid') && sock?.signalRepository?.lidMapping?.getPNForLID) {
-        try {
-            const pn = await sock.signalRepository.lidMapping.getPNForLID(jidNormalizado);
-            adicionarJid(pn);
-        } catch (err) {
-            console.warn(`[LID] Não foi possível resolver ${jidNormalizado}:`, err?.message || err);
-        }
-    }
+    // Tenta resolver qualquer LID observado na mensagem para o PN real.
+    // Isso cobre situações em que o WhatsApp entrega o contato usando @lid.
+    const mapeamentoLid = await resolverPnDeLids([...jids]);
+    if (mapeamentoLid?.pnJid) adicionarJid(mapeamentoLid.pnJid);
 
     // O número telefônico é um identificador adicional. Nunca tratamos o número interno do @lid como telefone.
     for (const numero of numeros) {
@@ -1496,25 +1563,62 @@ async function concluirTriagemEAvancar(ticket, jid) {
 async function salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo) {
     const agora = Date.now();
 
+    // O número pode ter sido identificado em uma mensagem anterior do mesmo ticket,
+    // mesmo que a mensagem do CPF tenha chegado apenas com @lid. Por isso juntamos
+    // os dados acumulados no ticket com os identificadores da mensagem atual.
+    const identificadoresMesclados = [...new Set([
+        ...(Array.isArray(ticket?.identificadores) ? ticket.identificadores : []),
+        ...(Array.isArray(contato?.identificadores) ? contato.identificadores : []),
+        rawJid
+    ].filter(Boolean))];
+
+    const numerosMesclados = [...new Set([
+        ...(Array.isArray(ticket?.whatsappNumbers) ? ticket.whatsappNumbers : []),
+        ...(Array.isArray(contato?.whatsappNumbers) ? contato.whatsappNumbers : []),
+        ticket?.numeroReal,
+        contato?.numeroPrincipal
+    ].map(normalizarNumeroWhatsApp).filter(Boolean))];
+
+    let numeroPrincipal = extrairNumeroWhatsAppDeFontes(
+        contato?.numeroPrincipal,
+        ticket?.numeroReal,
+        numerosMesclados,
+        identificadoresMesclados
+    );
+
+    // Última tentativa: se só houver LID, pede ao repositório do Baileys o PN real.
+    if (!numeroPrincipal) {
+        const resolvido = await resolverPnDeLids(identificadoresMesclados, ticket?.lastRawJid, rawJid);
+        if (resolvido?.numero) {
+            numeroPrincipal = resolvido.numero;
+            numerosMesclados.push(resolvido.numero);
+            if (resolvido.pnJid) identificadoresMesclados.push(resolvido.pnJid);
+        }
+    }
+
+    const camposCliente = {
+        cpf: cpfLimpo,
+        nome: nomeInfo.nome,
+        sobrenome: nomeInfo.sobrenome,
+        nomeCompleto: nomeInfo.nomeCompleto,
+        lastRawJid: rawJid,
+        updatedAt: agora,
+        lastSeenAt: agora
+    };
+
+    // Não sobrescreve um número já salvo com null/undefined.
+    if (numeroPrincipal) camposCliente.numeroReal = numeroPrincipal;
+
     await clientsColl.updateOne(
         { _id: cpfLimpo },
         {
-            $set: {
-                cpf: cpfLimpo,
-                nome: nomeInfo.nome,
-                sobrenome: nomeInfo.sobrenome,
-                nomeCompleto: nomeInfo.nomeCompleto,
-                numeroReal: contato.numeroPrincipal,
-                lastRawJid: rawJid,
-                updatedAt: agora,
-                lastSeenAt: agora
-            },
+            $set: camposCliente,
             $setOnInsert: {
                 createdAt: agora
             },
             $addToSet: {
-                identificadores: { $each: contato.identificadores },
-                whatsappNumbers: { $each: contato.whatsappNumbers },
+                identificadores: { $each: [...new Set(identificadoresMesclados.filter(Boolean))] },
+                whatsappNumbers: { $each: [...new Set(numerosMesclados.filter(Boolean))] },
                 ticketNumbers: ticket.ticketNumber
             }
         },
@@ -2740,6 +2844,112 @@ app.delete('/api/menu-options/:id', async (req, res) => {
     }
 });
 
+// Tenta recuperar o telefone real de cadastros antigos que ficaram apenas com LID.
+// A recuperação usa, nesta ordem: cadastro do cliente, ticket ativo, histórico e
+// mapeamento LID -> PN mantido pelo próprio Baileys.
+async function resolverWhatsAppCliente(cliente) {
+    if (!cliente) return null;
+
+    let numero = extrairNumeroWhatsAppDeFontes(
+        cliente.numeroReal,
+        cliente.whatsappNumbers,
+        cliente.identificadores,
+        cliente.lastRawJid
+    );
+
+    const cpf = String(cliente.cpf || cliente._id || '').replace(/\D/g, '');
+    const ticketNumbers = Array.isArray(cliente.ticketNumbers) ? cliente.ticketNumbers.filter(Boolean) : [];
+    const registrosAuxiliares = [];
+
+    if (!numero && ticketsColl) {
+        const filtros = [];
+        if (cpf) filtros.push({ clienteId: cpf }, { cpf });
+        if (ticketNumbers.length) filtros.push({ ticketNumber: { $in: ticketNumbers } });
+
+        if (filtros.length) {
+            const ticketAtivo = await ticketsColl.findOne(
+                { $or: filtros },
+                {
+                    sort: { lastActivity: -1 },
+                    projection: {
+                        numeroReal: 1,
+                        whatsappNumbers: 1,
+                        identificadores: 1,
+                        lastRawJid: 1
+                    }
+                }
+            );
+            if (ticketAtivo) registrosAuxiliares.push(ticketAtivo);
+        }
+    }
+
+    if (!numero && ticketHistoryColl) {
+        const filtros = [];
+        if (cpf) filtros.push({ clienteId: cpf }, { cpf });
+        if (ticketNumbers.length) filtros.push({ ticketNumber: { $in: ticketNumbers } }, { _id: { $in: ticketNumbers } });
+
+        if (filtros.length) {
+            const historico = await ticketHistoryColl.findOne(
+                { $or: filtros },
+                {
+                    sort: { updatedAt: -1 },
+                    projection: {
+                        numeroReal: 1,
+                        whatsappNumbers: 1,
+                        identificadores: 1,
+                        lastRawJid: 1
+                    }
+                }
+            );
+            if (historico) registrosAuxiliares.push(historico);
+        }
+    }
+
+    if (!numero) {
+        for (const registro of registrosAuxiliares) {
+            numero = extrairNumeroWhatsAppDeFontes(
+                registro.numeroReal,
+                registro.whatsappNumbers,
+                registro.identificadores,
+                registro.lastRawJid
+            );
+            if (numero) break;
+        }
+    }
+
+    const todasAsFontes = [
+        cliente.identificadores,
+        cliente.lastRawJid,
+        ...registrosAuxiliares.flatMap(registro => [registro.identificadores, registro.lastRawJid])
+    ];
+
+    if (!numero) {
+        const resolvido = await resolverPnDeLids(...todasAsFontes);
+        if (resolvido?.numero) numero = resolvido.numero;
+    }
+
+    // Se conseguimos recuperar o número de um cadastro antigo, corrige o MongoDB
+    // para que as próximas consultas não dependam novamente dos fallbacks.
+    if (numero && cpf && clientsColl) {
+        const pnJid = `${numero}@s.whatsapp.net`;
+        await clientsColl.updateOne(
+            { $or: [{ _id: cliente._id }, { cpf }] },
+            {
+                $set: {
+                    numeroReal: numero,
+                    updatedAt: Date.now()
+                },
+                $addToSet: {
+                    whatsappNumbers: numero,
+                    identificadores: pnJid
+                }
+            }
+        );
+    }
+
+    return numero;
+}
+
 // Clientes cadastrados no atendimento.
 app.get('/api/clients', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
@@ -2756,6 +2966,9 @@ app.get('/api/clients', async (req, res) => {
                     nomeCompleto: 1,
                     numeroReal: 1,
                     whatsappNumbers: 1,
+                    identificadores: 1,
+                    lastRawJid: 1,
+                    ticketNumbers: 1,
                     createdAt: 1,
                     updatedAt: 1,
                     lastSeenAt: 1
@@ -2763,10 +2976,14 @@ app.get('/api/clients', async (req, res) => {
             }
         ).sort({ nomeCompleto: 1, nome: 1, createdAt: -1 }).toArray();
 
-        res.json(clientes.map(cliente => ({
-            ...cliente,
-            whatsapp: cliente.numeroReal || (Array.isArray(cliente.whatsappNumbers) ? cliente.whatsappNumbers[0] : null) || null
-        })));
+        const clientesComWhatsApp = await Promise.all(
+            clientes.map(async cliente => ({
+                ...cliente,
+                whatsapp: await resolverWhatsAppCliente(cliente)
+            }))
+        );
+
+        res.json(clientesComWhatsApp);
     } catch (err) {
         console.error('[Clientes] Erro ao carregar clientes:', err);
         res.status(500).json({ erro: 'Não foi possível carregar os clientes cadastrados.' });
