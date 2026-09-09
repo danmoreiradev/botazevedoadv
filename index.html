@@ -343,6 +343,78 @@
             border-color: var(--adv-blue);
         }
 
+        /* Gestão de clientes cadastrados */
+        .clients-toolbar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+        }
+        .clients-search {
+            position: relative;
+            flex: 1;
+            min-width: 260px;
+            max-width: 520px;
+        }
+        .clients-search input {
+            padding-left: 40px;
+            border-radius: 12px;
+        }
+        .clients-count {
+            font-size: 0.9rem;
+            color: #6c757d;
+            font-weight: 600;
+        }
+        .clients-table-wrap {
+            overflow-x: auto;
+            border: 1px solid #e7ecef;
+            border-radius: 16px;
+        }
+        .clients-table {
+            margin-bottom: 0;
+            min-width: 760px;
+        }
+        .clients-table thead th {
+            background: #f8fafb;
+            color: var(--adv-blue);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            border-bottom: 1px solid #e7ecef;
+            padding: 14px 16px;
+        }
+        .clients-table tbody td {
+            padding: 15px 16px;
+            vertical-align: middle;
+        }
+        .client-name {
+            font-weight: 700;
+            color: #1f2d35;
+        }
+        .client-whatsapp {
+            white-space: nowrap;
+        }
+        .btn-remove-client {
+            border: 1px solid rgba(234, 67, 53, 0.25);
+            color: var(--danger-red);
+            background: #fff;
+            border-radius: 10px;
+            padding: 7px 11px;
+            font-weight: 700;
+            font-size: 0.82rem;
+        }
+        .btn-remove-client:hover {
+            background: #fff3f2;
+            border-color: var(--danger-red);
+        }
+        .clients-empty {
+            padding: 45px 20px;
+            text-align: center;
+            color: #7a8790;
+        }
+
         .hidden { display: none !important; }
 
         /* RESPONSIVIDADE MOBILE APRIMORADA */
@@ -351,12 +423,12 @@
             .sidebar { width: 100%; height: auto; position: sticky; top: 0; }
             .sidebar-brand { padding: 25px 15px; }
             .logo-img { max-height: 90px; width: 90%; }
-            .nav { flex-direction: row !important; }
+            .nav { flex-direction: row !important; flex-wrap: wrap; }
             .nav-link { 
-                flex: 1; 
+                flex: 1 1 33.333%; 
                 justify-content: center; 
-                padding: 18px 5px; 
-                font-size: 0.75rem; 
+                padding: 14px 5px; 
+                font-size: 0.72rem; 
                 border-left: none; 
                 border-bottom: 5px solid transparent; 
             }
@@ -377,6 +449,7 @@
             <div class="nav-link active" onclick="switchTab('tab-chatbot', this)">🤖 Chatbot - Conexão</div>
             <div class="nav-link" onclick="switchTab('tab-ia', this)">🧠 Gestão IA</div>
             <div class="nav-link" onclick="switchTab('tab-opcoes', this)">⚙️ Opções Atendimento</div>
+            <div class="nav-link" onclick="switchTab('tab-clientes', this)">👥 Clientes</div>
             <div class="nav-link" onclick="switchTab('tab-horario', this)">🕒 Horário de funcionamento</div>
         </div>
 
@@ -516,6 +589,49 @@
             </div>
         </div>
 
+        <div id="tab-clientes" class="content-section hidden">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                <div>
+                    <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Clientes cadastrados</h4>
+                    <p class="text-muted mb-0">Consulte os clientes reconhecidos automaticamente pelo WhatsApp e remova cadastros quando necessário.</p>
+                </div>
+                <button class="btn btn-outline-secondary" onclick="carregarClientes(true)">↻ Atualizar</button>
+            </div>
+
+            <div class="card-custom text-start p-4" style="max-width: 1100px; width: 100%;">
+                <div class="clients-toolbar">
+                    <div class="clients-search">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" id="clients-search-input" class="form-control" placeholder="Buscar por nome, CPF ou WhatsApp..." oninput="filtrarClientes()">
+                    </div>
+                    <div id="clients-count" class="clients-count">Carregando...</div>
+                </div>
+
+                <div id="clients-status" class="menu-save-status text-muted mb-2"></div>
+
+                <div class="clients-table-wrap">
+                    <table class="table clients-table align-middle">
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>CPF</th>
+                                <th>WhatsApp</th>
+                                <th>Último contato</th>
+                                <th class="text-end">Ação</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clients-table-body">
+                            <tr><td colspan="5" class="clients-empty">Carregando clientes...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="form-text mt-3">
+                    Ao remover um cliente, o cadastro de reconhecimento automático é excluído. O histórico dos tickets já existentes permanece preservado.
+                </div>
+            </div>
+        </div>
+
         <div id="tab-horario" class="content-section hidden">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                 <div>
@@ -527,7 +643,7 @@
 
             <div class="card-custom text-start p-4" style="max-width: 900px; width: 100%;">
                 <div class="alert alert-light border mb-4" role="alert">
-                    <strong>Fluxo fora do horário:</strong> quando um cliente enviar mensagem fora dos dias ou horários definidos abaixo, o chatbot <strong>não enviará o menu nem continuará as perguntas da triagem</strong>. O ticket será colocado automaticamente em <strong>aguardando especialista</strong> e o cliente poderá enviar o relato e os documentos pelo WhatsApp.
+                    <strong>Fluxo fora do horário:</strong> quando uma mensagem chegar fora dos dias ou horários definidos abaixo, o chatbot <strong>não enviará o menu nem continuará as perguntas da triagem</strong>. Primeiro solicitará o relato/documentos; em seguida, se a pessoa ainda não estiver cadastrada, perguntará se deseja <strong>se cadastrar como cliente</strong>. Depois disso, o ticket será encaminhado ao especialista.
                 </div>
 
                 <div class="form-check form-switch mb-4">
@@ -592,6 +708,7 @@
             el.classList.add('active');
             if(tabId === 'tab-ia') carregarConhecimento();
             if(tabId === 'tab-opcoes') carregarOpcoesAtendimento();
+            if(tabId === 'tab-clientes') carregarClientes();
             if(tabId === 'tab-horario') carregarHorarioFuncionamento();
         }
 
@@ -1363,6 +1480,197 @@ function renderizarLista(itens) {
             } catch (err) {
                 console.error(err);
                 alert(err.message || 'Erro ao excluir a opção.');
+            }
+        }
+
+        function formatarCPFCliente(cpf = '') {
+            const numeros = String(cpf || '').replace(/\D/g, '').slice(0, 11);
+            if (numeros.length !== 11) return cpf || '—';
+            return numeros.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+        }
+
+        function formatarWhatsAppCliente(numero = '') {
+            let digitos = String(numero || '').replace(/\D/g, '');
+            if (!digitos) return '—';
+
+            if (digitos.startsWith('55') && digitos.length >= 12) {
+                digitos = digitos.slice(2);
+            }
+
+            if (digitos.length === 11) {
+                return `(${digitos.slice(0,2)}) ${digitos.slice(2,7)}-${digitos.slice(7)}`;
+            }
+            if (digitos.length === 10) {
+                return `(${digitos.slice(0,2)}) ${digitos.slice(2,6)}-${digitos.slice(6)}`;
+            }
+            return `+${String(numero || '').replace(/\D/g, '')}`;
+        }
+
+        function formatarDataCliente(valor) {
+            if (!valor) return '—';
+            const data = new Date(Number(valor) || valor);
+            if (Number.isNaN(data.getTime())) return '—';
+            return data.toLocaleString('pt-BR', {
+                timeZone: 'America/Sao_Paulo',
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function nomeCompletoCliente(cliente = {}) {
+            return String(
+                cliente.nomeCompleto ||
+                [cliente.nome, cliente.sobrenome].filter(Boolean).join(' ') ||
+                'Cliente sem nome'
+            ).trim();
+        }
+
+        function criarCelulaCliente(texto, classe = '') {
+            const td = document.createElement('td');
+            if (classe) td.className = classe;
+            td.textContent = texto;
+            return td;
+        }
+
+        function renderizarClientes(clientes = []) {
+            const tbody = document.getElementById('clients-table-body');
+            const contador = document.getElementById('clients-count');
+            if (!tbody || !contador) return;
+
+            tbody.innerHTML = '';
+            contador.textContent = `${clientes.length} cliente${clientes.length === 1 ? '' : 's'}`;
+
+            if (!clientes.length) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = 5;
+                td.className = 'clients-empty';
+                td.textContent = 'Nenhum cliente encontrado.';
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+                return;
+            }
+
+            clientes.forEach(cliente => {
+                const tr = document.createElement('tr');
+                tr.dataset.cpf = String(cliente.cpf || cliente._id || '');
+
+                const nomeTd = criarCelulaCliente(nomeCompletoCliente(cliente), 'client-name');
+                const cpfTd = criarCelulaCliente(formatarCPFCliente(cliente.cpf || cliente._id || ''));
+                const whatsappTd = criarCelulaCliente(formatarWhatsAppCliente(cliente.whatsapp), 'client-whatsapp');
+                const contatoTd = criarCelulaCliente(formatarDataCliente(cliente.lastSeenAt || cliente.updatedAt || cliente.createdAt));
+
+                const acaoTd = document.createElement('td');
+                acaoTd.className = 'text-end';
+                const botao = document.createElement('button');
+                botao.type = 'button';
+                botao.className = 'btn-remove-client';
+                botao.textContent = '🗑️ Remover';
+                botao.onclick = () => removerCliente(cliente.cpf || cliente._id, nomeCompletoCliente(cliente));
+                acaoTd.appendChild(botao);
+
+                tr.append(nomeTd, cpfTd, whatsappTd, contatoTd, acaoTd);
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function carregarClientes(forcar = false) {
+            if (window.clientsLoaded && !forcar) {
+                filtrarClientes();
+                return;
+            }
+
+            const status = document.getElementById('clients-status');
+            const tbody = document.getElementById('clients-table-body');
+            if (status) {
+                status.className = 'menu-save-status text-muted mb-2';
+                status.textContent = 'Carregando clientes...';
+            }
+            if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="clients-empty">Carregando clientes...</td></tr>';
+
+            try {
+                const res = await fetch('/api/clients');
+                const data = await res.json().catch(() => ([]));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar os clientes.');
+
+                window.clientsData = Array.isArray(data) ? data : [];
+                window.clientsLoaded = true;
+                if (status) status.textContent = '';
+                filtrarClientes();
+            } catch (err) {
+                console.error(err);
+                if (status) {
+                    status.className = 'menu-save-status text-danger mb-2';
+                    status.textContent = err.message || 'Erro ao carregar clientes.';
+                }
+                renderizarClientes([]);
+            }
+        }
+
+        function filtrarClientes() {
+            const termo = String(document.getElementById('clients-search-input')?.value || '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .trim();
+
+            const clientes = Array.isArray(window.clientsData) ? window.clientsData : [];
+            if (!termo) {
+                renderizarClientes(clientes);
+                return;
+            }
+
+            const apenasNumeros = termo.replace(/\D/g, '');
+            const filtrados = clientes.filter(cliente => {
+                const nome = nomeCompletoCliente(cliente)
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '');
+                const cpf = String(cliente.cpf || cliente._id || '').replace(/\D/g, '');
+                const whatsapp = String(cliente.whatsapp || '').replace(/\D/g, '');
+
+                return nome.includes(termo) ||
+                    (!!apenasNumeros && (cpf.includes(apenasNumeros) || whatsapp.includes(apenasNumeros)));
+            });
+
+            renderizarClientes(filtrados);
+        }
+
+        async function removerCliente(cpf, nome) {
+            const cpfLimpo = String(cpf || '').replace(/\D/g, '');
+            if (!cpfLimpo) return;
+
+            if (!confirm(`Deseja realmente remover o cadastro de ${nome}?\n\nO histórico dos tickets será preservado.`)) return;
+
+            const status = document.getElementById('clients-status');
+            if (status) {
+                status.className = 'menu-save-status text-muted mb-2';
+                status.textContent = 'Removendo cliente...';
+            }
+
+            try {
+                const res = await fetch(`/api/clients/${encodeURIComponent(cpfLimpo)}`, { method: 'DELETE' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível remover o cliente.');
+
+                window.clientsData = (window.clientsData || []).filter(cliente =>
+                    String(cliente.cpf || cliente._id || '').replace(/\D/g, '') !== cpfLimpo
+                );
+                filtrarClientes();
+
+                if (status) {
+                    status.className = 'menu-save-status text-success mb-2';
+                    status.textContent = '✓ Cliente removido do cadastro.';
+                }
+            } catch (err) {
+                console.error(err);
+                if (status) {
+                    status.className = 'menu-save-status text-danger mb-2';
+                    status.textContent = err.message || 'Erro ao remover cliente.';
+                }
             }
         }
 

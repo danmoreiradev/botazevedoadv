@@ -664,34 +664,37 @@ async function encaminharAutomaticamenteForaDoHorario(ticket, jid, { texto = '',
     if (!ticket) return;
 
     const agora = Date.now();
-    const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
 
+    // Fora do horário o ticket NÃO é pausado imediatamente. Primeiro aguardamos o
+    // relato/documento do cliente; depois oferecemos o cadastro opcional, exatamente
+    // como no fluxo normal, e só então encaminhamos para o especialista.
     await ticketsColl.updateOne(
         { _id: ticket._id },
         {
             $set: {
-                status: 'aguardando_especialista',
+                status: 'aguardando_detalhes_fora_horario',
                 aguardandoOpcao: false,
                 aguardandoDetalhes: false,
+                aguardandoDetalhesForaHorario: true,
                 aguardandoPerguntaFluxo: false,
                 aguardandoCadastroCliente: false,
                 aguardandoNomeCadastro: false,
                 aguardandoCPFCadastro: false,
-                paused: true,
-                until: agora + tresDiasEmMs,
+                paused: false,
+                until: null,
                 foraHorario: true,
-                encaminhadoForaHorarioEm: agora,
+                fluxoForaHorarioIniciadoEm: agora,
                 lastActivity: agora
             }
         }
     );
 
     await atualizarHistorico(ticket.ticketNumber, {
-        status: 'aguardando_especialista',
+        status: 'aguardando_detalhes_fora_horario',
         foraHorario: true,
-        encaminhadoForaHorarioEm: agora,
-        mensagemRecebidaForaHorario: String(texto || '').trim().slice(0, 5000) || null,
-        mensagemRecebidaForaHorarioPossuiMidia: !!isMedia,
+        fluxoForaHorarioIniciadoEm: agora,
+        mensagemInicialForaHorario: String(texto || '').trim().slice(0, 5000) || null,
+        mensagemInicialForaHorarioPossuiMidia: !!isMedia,
         horarioFuncionamentoAplicado: {
             inicio: config?.inicio || DEFAULT_BUSINESS_HOURS.inicio,
             fim: config?.fim || DEFAULT_BUSINESS_HOURS.fim,
@@ -704,7 +707,7 @@ async function encaminharAutomaticamenteForaDoHorario(ticket, jid, { texto = '',
         text: montarMensagemForaHorario(config || DEFAULT_BUSINESS_HOURS)
     });
 
-    console.log(`[Ticket ${ticket.ticketNumber}] Encaminhado automaticamente para especialista por mensagem fora do horário.`);
+    console.log(`[Ticket ${ticket.ticketNumber}] Fluxo fora do horário iniciado; aguardando relato do cliente.`);
 }
 
 function normalizarTexto(texto = '') {
@@ -915,6 +918,10 @@ async function mensagemRetomadaFluxo(ticket) {
         if (perguntaAtual?.texto) {
             return `\n\nPara continuar o ticket *${ticket.ticketNumber}*:\n\n${formatarPerguntaParaEnvio(perguntaAtual)}`;
         }
+    }
+
+    if (ticket.aguardandoDetalhesForaHorario) {
+        return `\n\nPara continuar o ticket *${ticket.ticketNumber}*, conte detalhadamente o que aconteceu. Pode responder por texto, áudio ou enviar documentos.`;
     }
 
     if (ticket.aguardandoDetalhes) {
@@ -1365,6 +1372,7 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
         lastRawJid: rawJid,
         aguardandoOpcao: !paused,
         aguardandoDetalhes: false,
+        aguardandoDetalhesForaHorario: false,
         aguardandoPerguntaFluxo: false,
         perguntasFluxo: [],
         indicePerguntaFluxo: 0,
@@ -1424,6 +1432,7 @@ async function encaminharParaEspecialista(ticket, jid, mensagem = null) {
             $set: {
                 status: 'aguardando_especialista',
                 aguardandoPerguntaFluxo: false,
+                aguardandoDetalhesForaHorario: false,
                 aguardandoCadastroCliente: false,
                 aguardandoNomeCadastro: false,
                 aguardandoCPFCadastro: false,
@@ -1674,10 +1683,10 @@ sock.ev.on('messages.upsert', async m => {
             return;
         }
 
-        // Antes de iniciar/continuar menu, triagem ou cadastro, verifica o horário do escritório.
-        // Fora do horário não enviamos opções nem novas perguntas: o ticket vai diretamente
-        // para "aguardando_especialista" e o cliente pode enviar relato e documentos livremente.
-        // Conversas já assumidas manualmente por um advogado não são interrompidas por esta regra.
+        // Antes de iniciar/continuar menu ou triagem, verifica o horário do escritório.
+        // Fora do horário iniciamos um fluxo específico: mensagem de aviso -> relato/documentos
+        // -> cadastro opcional -> encaminhamento ao especialista. Conversas humanas e cadastros
+        // já iniciados não são interrompidos pela virada do horário.
         const ticketExpirouAntesDoHorario = !!(
             ticket &&
             !ticket.paused &&
@@ -1692,8 +1701,20 @@ sock.ev.on('messages.upsert', async m => {
         const situacaoHorario = await verificarHorarioFuncionamento();
         const atendimentoHumanoJaAtivo = ticket?.status === 'em_atendimento_humano';
         const jaAguardandoEspecialista = ticket?.status === 'aguardando_especialista';
+        const cadastroJaEmAndamento = !!(
+            ticket?.aguardandoCadastroCliente ||
+            ticket?.aguardandoNomeCadastro ||
+            ticket?.aguardandoCPFCadastro
+        );
+        const fluxoForaHorarioJaIniciado = !!ticket?.aguardandoDetalhesForaHorario;
 
-        if (!situacaoHorario.aberto && !atendimentoHumanoJaAtivo && !jaAguardandoEspecialista) {
+        if (
+            !situacaoHorario.aberto &&
+            !atendimentoHumanoJaAtivo &&
+            !jaAguardandoEspecialista &&
+            !cadastroJaEmAndamento &&
+            !fluxoForaHorarioJaIniciado
+        ) {
             if (!ticket) {
                 const cliente = await buscarClientePorContato(contato);
                 ticket = await criarNovoTicket({
@@ -1806,6 +1827,65 @@ sock.ev.on('messages.upsert', async m => {
         // exatamente o mesmo passo do fluxo para a próxima mensagem do cliente.
         if (analiseIAPrevia?.acao === 'RESPONDER_BASE') {
             await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia);
+            return;
+        }
+
+        // 0.5) FLUXO FORA DO HORÁRIO - recebe o relato e só depois oferece o cadastro.
+        if (ticket.aguardandoDetalhesForaHorario) {
+            if (!texto && !isMedia) {
+                await sendBotMsg(rawJid, {
+                    text: `Para agilizar o atendimento, conte detalhadamente o que aconteceu. Pode responder por texto, áudio ou enviar documentos por aqui.`
+                });
+                return;
+            }
+
+            const agora = Date.now();
+            await ticketsColl.updateOne(
+                { _id: ticket._id },
+                {
+                    $set: {
+                        aguardandoDetalhesForaHorario: false,
+                        status: ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro',
+                        lastActivity: agora
+                    }
+                }
+            );
+
+            await atualizarHistorico(ticket.ticketNumber, {
+                status: ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro',
+                detalhesForaHorarioRecebidosEm: agora,
+                ultimoRelatoForaHorario: String(texto || '').trim().slice(0, 5000) || null,
+                ultimoRelatoForaHorarioPossuiMidia: !!isMedia
+            });
+
+            if (ticket.clienteCadastrado) {
+                await encaminharParaEspecialista(
+                    ticket,
+                    rawJid,
+                    `✅ Recebido! Seu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento no próximo período de atendimento.`
+                );
+                return;
+            }
+
+            await sendBotMsg(rawJid, {
+                text: `✅ Recebemos as informações do seu caso. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.\n\n${PERGUNTA_CADASTRO_CLIENTE}`
+            });
+
+            await ticketsColl.updateOne(
+                { _id: ticket._id },
+                {
+                    $set: {
+                        aguardandoCadastroCliente: true,
+                        status: 'aguardando_cadastro',
+                        lastActivity: agora
+                    }
+                }
+            );
+
+            await atualizarHistorico(ticket.ticketNumber, {
+                status: 'aguardando_cadastro',
+                triagemForaHorarioConcluidaEm: agora
+            });
             return;
         }
 
@@ -2657,6 +2737,83 @@ app.delete('/api/menu-options/:id', async (req, res) => {
     } catch (err) {
         console.error('[Menu] Erro ao excluir opção:', err);
         res.status(500).json({ erro: 'Não foi possível excluir a opção.' });
+    }
+});
+
+// Clientes cadastrados no atendimento.
+app.get('/api/clients', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!clientsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
+
+    try {
+        const clientes = await clientsColl.find(
+            {},
+            {
+                projection: {
+                    cpf: 1,
+                    nome: 1,
+                    sobrenome: 1,
+                    nomeCompleto: 1,
+                    numeroReal: 1,
+                    whatsappNumbers: 1,
+                    createdAt: 1,
+                    updatedAt: 1,
+                    lastSeenAt: 1
+                }
+            }
+        ).sort({ nomeCompleto: 1, nome: 1, createdAt: -1 }).toArray();
+
+        res.json(clientes.map(cliente => ({
+            ...cliente,
+            whatsapp: cliente.numeroReal || (Array.isArray(cliente.whatsappNumbers) ? cliente.whatsappNumbers[0] : null) || null
+        })));
+    } catch (err) {
+        console.error('[Clientes] Erro ao carregar clientes:', err);
+        res.status(500).json({ erro: 'Não foi possível carregar os clientes cadastrados.' });
+    }
+});
+
+app.delete('/api/clients/:cpf', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!clientsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
+
+    try {
+        const cpf = String(req.params.cpf || '').replace(/\D/g, '');
+        if (cpf.length !== 11) {
+            return res.status(400).json({ erro: 'CPF inválido.' });
+        }
+
+        const existente = await clientsColl.findOne({ $or: [{ _id: cpf }, { cpf }] });
+        if (!existente) {
+            return res.status(404).json({ erro: 'Cliente não encontrado.' });
+        }
+
+        const result = await clientsColl.deleteOne({ _id: existente._id });
+        if (!result.deletedCount) {
+            return res.status(404).json({ erro: 'Cliente não encontrado.' });
+        }
+
+        // Remove apenas o vínculo de cadastro dos tickets ativos. O histórico do atendimento
+        // é preservado para não apagar registros jurídicos/operacionais já existentes.
+        if (ticketsColl) {
+            await ticketsColl.updateMany(
+                { $or: [{ clienteId: cpf }, { cpf }] },
+                {
+                    $set: {
+                        clienteId: null,
+                        cpf: null,
+                        clienteNome: null,
+                        clienteCadastrado: false,
+                        updatedAt: Date.now()
+                    }
+                }
+            );
+        }
+
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[Clientes] Erro ao remover cliente:', err);
+        res.status(500).json({ erro: 'Não foi possível remover o cliente.' });
     }
 });
 
