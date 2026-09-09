@@ -1,12 +1,10 @@
 const { 
-    default: makeWASocket, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion, 
-    BufferJSON, 
-    initAuthCreds,
-    jidNormalizedUser,
-    proto,
-    generateWAMessageFromContent
+    default: makeWASocket, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    BufferJSON, 
+    initAuthCreds,
+    jidNormalizedUser 
 } = require('@whiskeysockets/baileys');
 const { MongoClient, ObjectId } = require('mongodb');
 const express = require('express');
@@ -85,248 +83,23 @@ const processing = new Set();
 
 let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl;
 
-const INTERACTIVE_UI_ENABLED = process.env.INTERACTIVE_UI_ENABLED !== 'false';
-const INTERACTIVE_FOOTER = 'Azevedo & Juvencio Advogados';
-
-function registrarIdMensagemBot(id) {
-    if (!id) return;
-    botMessageIds.add(id);
-    setTimeout(() => botMessageIds.delete(id), 60 * 1000);
-}
-
 async function sendBotMsg(jid, content) {
     try {
         const sent = await sock.sendMessage(jid, content);
-        registrarIdMensagemBot(sent?.key?.id);
+        const id = sent?.key?.id;
+
+        // Mantém um conjunto de IDs enviados pelo próprio bot.
+        // Evita confundir mensagens simultâneas do bot com intervenção humana.
+        if (id) {
+            botMessageIds.add(id);
+            setTimeout(() => botMessageIds.delete(id), 60 * 1000);
+        }
+
         return sent;
     } catch (err) {
         console.error('Erro ao enviar:', err);
         return null;
     }
-}
-
-function limitarTextoInterativo(texto = '', max = 60) {
-    const valor = String(texto || '').replace(/\s+/g, ' ').trim();
-    if (valor.length <= max) return valor;
-    return `${valor.slice(0, Math.max(1, max - 1)).trim()}…`;
-}
-
-function dividirEmBlocos(array = [], tamanho = 10) {
-    const blocos = [];
-    for (let i = 0; i < array.length; i += tamanho) blocos.push(array.slice(i, i + tamanho));
-    return blocos;
-}
-
-/**
- * Envia Native Flow (quick_reply / single_select) usando o proto existente no
- * @whiskeysockets/baileys. Esta camada é propositalmente isolada: se a versão
- * instalada não suportar o formato, o chamador cai automaticamente no texto.
- */
-async function sendInteractiveRaw(jid, { body, title = '', footer = INTERACTIVE_FOOTER, buttons = [] } = {}) {
-    if (!INTERACTIVE_UI_ENABLED) throw new Error('Interface interativa desativada por configuração.');
-    if (!sock?.relayMessage) throw new Error('relayMessage indisponível nesta versão do Baileys.');
-    if (!proto?.Message?.InteractiveMessage || typeof generateWAMessageFromContent !== 'function') {
-        throw new Error('InteractiveMessage indisponível nesta versão do Baileys.');
-    }
-    if (!buttons.length) throw new Error('Nenhum botão informado.');
-
-    const interactiveMessage = proto.Message.InteractiveMessage.create({
-        header: proto.Message.InteractiveMessage.Header.create({
-            title: limitarTextoInterativo(title, 60),
-            hasMediaAttachment: false
-        }),
-        body: proto.Message.InteractiveMessage.Body.create({ text: String(body || '') }),
-        footer: proto.Message.InteractiveMessage.Footer.create({ text: String(footer || '') }),
-        nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-            buttons: buttons.map(botao => ({
-                name: botao.name,
-                buttonParamsJson: JSON.stringify(botao.params || {})
-            })),
-            messageParamsJson: ''
-        })
-    });
-
-    const content = {
-        viewOnceMessage: {
-            message: {
-                messageContextInfo: {
-                    deviceListMetadata: {},
-                    deviceListMetadataVersion: 2
-                },
-                interactiveMessage
-            }
-        }
-    };
-
-    const waMessage = generateWAMessageFromContent(jid, content, {
-        userJid: sock?.user?.id
-    });
-
-    const messageId = waMessage?.key?.id;
-    registrarIdMensagemBot(messageId);
-
-    try {
-        await sock.relayMessage(jid, waMessage.message, { messageId });
-        return waMessage;
-    } catch (err) {
-        if (messageId) botMessageIds.delete(messageId);
-        throw err;
-    }
-}
-
-/**
- * Envia escolhas como quick replies quando houver até 3 opções e como lista
- * (single_select) quando houver mais. O texto de fallback continua aceito.
- */
-async function sendChoiceMessage(jid, {
-    body,
-    title = '',
-    footer = INTERACTIVE_FOOTER,
-    options = [],
-    fallbackText = '',
-    listButtonText = 'Escolher opção',
-    forceList = false
-} = {}) {
-    const opcoes = (Array.isArray(options) ? options : [])
-        .map((item, index) => ({
-            id: String(item?.id || `opt_${index + 1}`),
-            text: String(item?.text || '').trim(),
-            description: String(item?.description || '').trim()
-        }))
-        .filter(item => item.text);
-
-    if (!opcoes.length) return sendBotMsg(jid, { text: fallbackText || String(body || '') });
-
-    let buttons;
-    if (!forceList && opcoes.length <= 3) {
-        buttons = opcoes.map(item => ({
-            name: 'quick_reply',
-            params: {
-                display_text: limitarTextoInterativo(item.text, 24),
-                id: item.id
-            }
-        }));
-    } else {
-        const blocos = dividirEmBlocos(opcoes, 10);
-        buttons = [{
-            name: 'single_select',
-            params: {
-                title: limitarTextoInterativo(listButtonText, 20),
-                sections: blocos.map((bloco, blocoIndex) => ({
-                    title: blocos.length > 1 ? `Opções ${blocoIndex + 1}` : 'Opções disponíveis',
-                    rows: bloco.map(item => ({
-                        id: item.id,
-                        title: limitarTextoInterativo(item.text, 55),
-                        description: limitarTextoInterativo(item.description, 70)
-                    }))
-                }))
-            }
-        }];
-    }
-
-    try {
-        const sent = await sendInteractiveRaw(jid, { body, title, footer, buttons });
-        console.log(`[Interativo] Enviado para ${jid}: ${opcoes.length} opção(ões).`);
-        return sent;
-    } catch (err) {
-        console.warn('[Interativo] Não foi possível enviar botões. Usando texto:', err?.message || err);
-        return sendBotMsg(jid, { text: fallbackText || String(body || '') });
-    }
-}
-
-function desembrulharConteudoMensagem(message) {
-    let atual = message || {};
-    for (let i = 0; i < 6; i++) {
-        const wrapper =
-            atual?.ephemeralMessage ||
-            atual?.viewOnceMessage ||
-            atual?.viewOnceMessageV2 ||
-            atual?.viewOnceMessageV2Extension ||
-            atual?.documentWithCaptionMessage ||
-            atual?.editedMessage;
-        if (!wrapper?.message) break;
-        atual = wrapper.message;
-    }
-    return atual || {};
-}
-
-function primeiroValorString(obj, chaves = []) {
-    for (const chave of chaves) {
-        const valor = obj?.[chave];
-        if (typeof valor === 'string' && valor.trim()) return valor.trim();
-    }
-    return '';
-}
-
-function extrairEntradaMensagem(msg) {
-    const message = desembrulharConteudoMensagem(msg?.message);
-    let interactiveId = '';
-    let interactiveLabel = '';
-
-    if (message?.buttonsResponseMessage) {
-        interactiveId = String(message.buttonsResponseMessage.selectedButtonId || '').trim();
-        interactiveLabel = String(message.buttonsResponseMessage.selectedDisplayText || '').trim();
-    } else if (message?.templateButtonReplyMessage) {
-        interactiveId = String(message.templateButtonReplyMessage.selectedId || '').trim();
-        interactiveLabel = String(message.templateButtonReplyMessage.selectedDisplayText || '').trim();
-    } else if (message?.listResponseMessage) {
-        interactiveId = String(message.listResponseMessage.singleSelectReply?.selectedRowId || '').trim();
-        interactiveLabel = String(message.listResponseMessage.title || message.listResponseMessage.description || '').trim();
-    } else if (message?.interactiveResponseMessage) {
-        const resposta = message.interactiveResponseMessage;
-        interactiveLabel = String(resposta.body?.text || '').trim();
-        const paramsRaw = resposta.nativeFlowResponseMessage?.paramsJson;
-        if (paramsRaw) {
-            try {
-                const params = JSON.parse(paramsRaw);
-                interactiveId = primeiroValorString(params, [
-                    'id', 'selected_id', 'selectedId', 'row_id', 'rowId', 'button_id', 'buttonId'
-                ]);
-                interactiveLabel = interactiveLabel || primeiroValorString(params, [
-                    'title', 'display_text', 'displayText', 'description', 'text'
-                ]);
-            } catch (_) {
-                // Se o JSON vier em formato novo, o body ainda pode trazer o rótulo.
-            }
-        }
-    }
-
-    const textoNormal =
-        message.conversation ||
-        message.extendedTextMessage?.text ||
-        message.imageMessage?.caption ||
-        message.videoMessage?.caption ||
-        message.documentMessage?.caption ||
-        '';
-
-    return {
-        textoRaw: String(interactiveLabel || textoNormal || interactiveId || '').trim(),
-        interactiveId: interactiveId || null,
-        message
-    };
-}
-
-function resolverEntradaInterativa(interactiveId, ticket) {
-    const id = String(interactiveId || '').trim();
-    if (!id) return null;
-
-    const menu = id.match(/^aj_menu:(\d+)$/i);
-    if (menu) return menu[1];
-
-    if (id === 'aj_cadastro:sim') return '1';
-    if (id === 'aj_cadastro:nao') return '2';
-
-    const triagem = id.match(/^aj_triage:([^:]+):(\d+)$/i);
-    if (triagem) {
-        const [, perguntaId, indiceRaw] = triagem;
-        const indice = Number(indiceRaw);
-        const perguntas = Array.isArray(ticket?.perguntasFluxo) ? ticket.perguntasFluxo : [];
-        const pergunta = perguntas.find(item => String(item?.id) === String(perguntaId)) || perguntaAtualDoTicket(ticket);
-        const aceitas = Array.isArray(pergunta?.respostasAceitas) ? pergunta.respostasAceitas : [];
-        if (Number.isInteger(indice) && indice >= 0 && aceitas[indice]) return String(aceitas[indice]);
-    }
-
-    return null;
 }
 
 function validarCPF(cpf) {
@@ -768,70 +541,6 @@ async function buscarOpcaoMenu(numero) {
     // O _id permanece estável, então reordenações não quebram o histórico dos tickets.
     const opcoesAtivas = await carregarMenuOpcoes();
     return opcoesAtivas[indice] || null;
-}
-
-async function enviarMenuPrincipal(jid, cliente, ticketNumber, { mensagemErro = '' } = {}) {
-    const opcoes = await carregarMenuOpcoes();
-    const menuTexto = await gerarMenuTexto();
-    const saudacao = cliente?.nome
-        ? `Olá, ${primeiroNome(cliente.nome)}! Seja bem-vindo de volta à *Azevedo & Juvencio Advogados*. 👋\n\nSeu novo atendimento é o ticket *${ticketNumber}*.`
-        : `Olá! Seja bem-vindo à *Azevedo & Juvencio Advogados*. 👋\n\nSeu atendimento é o ticket *${ticketNumber}*.`;
-
-    const avisoErro = mensagemErro ? `${mensagemErro.trim()}\n\n` : '';
-    const body = `${saudacao}\n\n${avisoErro}Escolha a área de atendimento abaixo.\n\n${menuTexto}\n\nSe a lista não aparecer no seu WhatsApp, você também pode digitar apenas o número da opção.`;
-
-    const options = opcoes.map((item, index) => ({
-        id: `aj_menu:${index + 1}`,
-        text: `${index + 1}. ${item.emoji ? `${item.emoji} ` : ''}${item.titulo}`,
-        description: item.area && item.area !== item.titulo ? item.area : ''
-    }));
-
-    return sendChoiceMessage(jid, {
-        body,
-        title: 'Como podemos ajudar?',
-        options,
-        listButtonText: 'Escolher área',
-        forceList: true,
-        fallbackText: body
-    });
-}
-
-async function enviarPerguntaCadastro(jid, prefixo = '') {
-    const body = `${prefixo ? `${String(prefixo).trim()}\n\n` : ''}${PERGUNTA_CADASTRO_CLIENTE}`;
-    return sendChoiceMessage(jid, {
-        body,
-        title: 'Cadastro de cliente',
-        options: [
-            { id: 'aj_cadastro:sim', text: '✅ Sim' },
-            { id: 'aj_cadastro:nao', text: '❌ Não' }
-        ],
-        fallbackText: body
-    });
-}
-
-async function enviarPerguntaTriagem(jid, pergunta, { textoCustom = '' } = {}) {
-    if (!pergunta?.texto) return null;
-    const aceitas = Array.isArray(pergunta.respostasAceitas) ? pergunta.respostasAceitas.filter(Boolean) : [];
-
-    if (!aceitas.length) {
-        return sendBotMsg(jid, { text: textoCustom || pergunta.texto });
-    }
-
-    const corpoBase = textoCustom || pergunta.texto;
-    const listaTexto = aceitas.map(item => `• ${item}`).join('\n');
-    const body = `${corpoBase}\n\nEscolha uma opção abaixo. Se os botões não aparecerem, responda com uma destas opções:\n${listaTexto}`;
-    const perguntaId = String(pergunta.id || 'pergunta');
-
-    return sendChoiceMessage(jid, {
-        body,
-        title: 'Triagem do atendimento',
-        options: aceitas.map((item, index) => ({
-            id: `aj_triage:${perguntaId}:${index}`,
-            text: item
-        })),
-        listButtonText: 'Ver opções',
-        fallbackText: body
-    });
 }
 
 function invalidarCacheHorarioFuncionamento() {
@@ -1733,12 +1442,25 @@ async function gerarNumeroTicket() {
 }
 
 async function mensagemRecepcao(cliente, ticketNumber) {
-    // Mantido para retomadas/fallbacks em texto. O novo atendimento usa enviarMenuPrincipal().
     const menuTexto = await gerarMenuTexto();
-    const saudacao = cliente?.nome
-        ? `Olá, ${primeiroNome(cliente.nome)}! Seja bem-vindo de volta à *Azevedo & Juvencio Advogados*. 👋\n\nSeu novo atendimento é o ticket *${ticketNumber}*.`
-        : `Olá! Seja bem-vindo à *Azevedo & Juvencio Advogados*. 👋\n\nSeu atendimento é o ticket *${ticketNumber}*.`;
-    return `${saudacao}\n\nEscolha uma opção:\n\n${menuTexto}`;
+
+    if (cliente?.nome) {
+        return `Olá, ${primeiroNome(cliente.nome)}! Seja bem-vindo de volta à *Azevedo & Juvencio Advogados*. 👋
+
+Seu novo atendimento é o ticket *${ticketNumber}*.
+
+Segue as opções. Digite apenas o número:
+
+${menuTexto}`;
+    }
+
+    return `Olá! Seja bem-vindo à *Azevedo & Juvencio Advogados*. 👋
+
+Seu atendimento é o ticket *${ticketNumber}*.
+
+Para começar, escolha uma opção digitando apenas o número:
+
+${menuTexto}`;
 }
 
 async function registrarTicketHistorico(ticket) {
@@ -1909,10 +1631,9 @@ async function concluirTriagemEAvancar(ticket, jid) {
         return;
     }
 
-    await enviarPerguntaCadastro(
-        jid,
-        `✅ Obrigado pelas informações. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.`
-    );
+    await sendBotMsg(jid, {
+        text: `✅ Obrigado pelas informações. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.\n\n${PERGUNTA_CADASTRO_CLIENTE}`
+    });
 
     await ticketsColl.updateOne(
         { _id: ticket._id },
@@ -2075,16 +1796,19 @@ sock.ev.on('messages.upsert', async m => {
     setTimeout(() => processing.delete(msgId), 10 * 1000);
 
     const isMe = !!msg.key.fromMe;
-    const entradaMensagem = extrairEntradaMensagem(msg);
-    const textoRaw = entradaMensagem.textoRaw;
-    let texto = textoRaw.trim();
-    const interactiveId = entradaMensagem.interactiveId;
-    const conteudoMensagem = entradaMensagem.message || msg.message;
+    const textoRaw =
+        msg.message.conversation ||
+        msg.message.extendedTextMessage?.text ||
+        msg.message.imageMessage?.caption ||
+        msg.message.videoMessage?.caption ||
+        msg.message.documentMessage?.caption ||
+        '';
+    const texto = textoRaw.trim();
     const isMedia = !!(
-        conteudoMensagem.imageMessage ||
-        conteudoMensagem.videoMessage ||
-        conteudoMensagem.documentMessage ||
-        conteudoMensagem.audioMessage
+        msg.message.imageMessage ||
+        msg.message.videoMessage ||
+        msg.message.documentMessage ||
+        msg.message.audioMessage
     );
 
     const timeoutNovoAtendimento = 2 * 60 * 60 * 1000;
@@ -2093,22 +1817,6 @@ sock.ev.on('messages.upsert', async m => {
     try {
         const contato = await obterIdentificadoresContato(msg, rawJid);
         let ticket = await buscarTicketAtivo(contato);
-
-        if (interactiveId) {
-            if (interactiveId === 'aj_test:sim' || interactiveId === 'aj_test:nao') {
-                await sendBotMsg(rawJid, {
-                    text: `✅ Teste de botão recebido com sucesso (${interactiveId === 'aj_test:sim' ? 'SIM' : 'NÃO'}). A sua instalação conseguiu enviar e receber a resposta interativa.`
-                });
-                console.log(`[Interativo] Teste confirmado por ${rawJid}: ${interactiveId}`);
-                return;
-            }
-
-            const textoResolvido = resolverEntradaInterativa(interactiveId, ticket);
-            if (textoResolvido) {
-                texto = textoResolvido;
-                console.log(`[Interativo] Resposta recebida ${interactiveId} -> ${textoResolvido}`);
-            }
-        }
 
         // Tickets criados pelo fluxo antigo não possuem ticketNumber.
         // Em vez de tentar reaproveitar estados incompatíveis, iniciamos o novo fluxo limpo.
@@ -2274,7 +1982,9 @@ sock.ev.on('messages.upsert', async m => {
                 paused: false
             });
 
-            await enviarMenuPrincipal(rawJid, cliente, ticket.ticketNumber);
+            await sendBotMsg(rawJid, {
+                text: await mensagemRecepcao(cliente, ticket.ticketNumber)
+            });
 
             console.log(`[Ticket ${ticket.ticketNumber}] Novo atendimento aberto${cliente ? ` para ${cliente.nome}` : ''}.`);
             return;
@@ -2340,10 +2050,9 @@ sock.ev.on('messages.upsert', async m => {
                 return;
             }
 
-            await enviarPerguntaCadastro(
-                rawJid,
-                `✅ Recebemos as informações do seu caso. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.`
-            );
+            await sendBotMsg(rawJid, {
+                text: `✅ Recebemos as informações do seu caso. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.\n\n${PERGUNTA_CADASTRO_CLIENTE}`
+            });
 
             await ticketsColl.updateOne(
                 { _id: ticket._id },
@@ -2368,11 +2077,9 @@ sock.ev.on('messages.upsert', async m => {
             const opcaoSelecionada = await buscarOpcaoMenu(texto);
 
             if (!opcaoSelecionada) {
-                const clienteAtual = ticket.clienteCadastrado
-                    ? { nome: ticket.clienteNome || '' }
-                    : null;
-                await enviarMenuPrincipal(rawJid, clienteAtual, ticket.ticketNumber, {
-                    mensagemErro: 'Não consegui identificar a opção escolhida.'
+                const menuTexto = await gerarMenuTexto();
+                await sendBotMsg(rawJid, {
+                    text: `Por favor, digite apenas o número da opção desejada:\n\n${menuTexto}`
                 });
                 return;
             }
@@ -2420,7 +2127,7 @@ sock.ev.on('messages.upsert', async m => {
                     await sendBotMsg(rawJid, { text: respostaArea });
                 }
 
-                await enviarPerguntaTriagem(rawJid, perguntasFluxo[0]);
+                await sendBotMsg(rawJid, { text: formatarPerguntaParaEnvio(perguntasFluxo[0]) });
                 return;
             }
 
@@ -2474,8 +2181,8 @@ sock.ev.on('messages.upsert', async m => {
             }
 
             if (!texto && !isMedia) {
-                await enviarPerguntaTriagem(rawJid, perguntaAtual, {
-                    textoCustom: `Para continuar, responda à pergunta abaixo:\n\n${perguntaAtual.texto}`
+                await sendBotMsg(rawJid, {
+                    text: `Para continuar, responda à pergunta abaixo:\n\n${formatarPerguntaParaEnvio(perguntaAtual)}`
                 });
                 return;
             }
@@ -2506,7 +2213,7 @@ sock.ev.on('messages.upsert', async m => {
                     );
                 }
 
-                await enviarPerguntaTriagem(rawJid, perguntaAtual, { textoCustom: validacaoResposta.mensagem });
+                await sendBotMsg(rawJid, { text: validacaoResposta.mensagem });
                 await ticketsColl.updateOne(
                     { _id: ticket._id },
                     {
@@ -2564,7 +2271,7 @@ sock.ev.on('messages.upsert', async m => {
             });
 
             if (temProximaPergunta) {
-                await enviarPerguntaTriagem(rawJid, perguntas[proximoIndice]);
+                await sendBotMsg(rawJid, { text: formatarPerguntaParaEnvio(perguntas[proximoIndice]) });
                 return;
             }
 
@@ -2606,10 +2313,9 @@ sock.ev.on('messages.upsert', async m => {
                 return;
             }
 
-            await enviarPerguntaCadastro(
-                rawJid,
-                `✅ Recebido! Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.`
-            );
+            await sendBotMsg(rawJid, {
+                text: `✅ Recebido! Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.\n\n${PERGUNTA_CADASTRO_CLIENTE}`
+            });
 
             await ticketsColl.updateOne(
                 { _id: ticket._id },
@@ -2641,7 +2347,9 @@ sock.ev.on('messages.upsert', async m => {
             }
 
             if (!respostaPositiva(texto)) {
-                await enviarPerguntaCadastro(rawJid, 'Escolha uma das opções abaixo para continuar.');
+                await sendBotMsg(rawJid, {
+                    text: `Deseja se cadastrar como cliente?\n\n1️⃣ Sim\n2️⃣ Não`
+                });
                 return;
             }
 
@@ -2837,8 +2545,9 @@ sock.ev.on('messages.upsert', async m => {
         // Estado de segurança: se o ticket existir mas não estiver em nenhum passo válido,
         // mantém a conversa simples e não cria um segundo ticket por engano.
         console.warn(`[Ticket ${ticket.ticketNumber}] Estado não reconhecido. Reiniciando menu do mesmo ticket.`);
-        await enviarMenuPrincipal(rawJid, null, ticket.ticketNumber, {
-            mensagemErro: `Vamos continuar pelo ticket *${ticket.ticketNumber}*.`
+        const menuTextoSeguranca = await gerarMenuTexto();
+        await sendBotMsg(rawJid, {
+            text: `Vamos continuar pelo ticket *${ticket.ticketNumber}*. Escolha uma opção:\n\n${menuTextoSeguranca}`
         });
         await ticketsColl.updateOne(
             { _id: ticket._id },
@@ -3035,67 +2744,6 @@ app.get('/logout-whatsapp', async (req, res) => {
         io.emit('disconnected');
         res.sendStatus(200);
     } catch (err) { res.status(500).send("Erro"); }
-});
-
-// Diagnóstico experimental de botões/listas interativas do Baileys.
-// Não altera tickets nem clientes. Serve apenas para validar a versão instalada.
-app.get('/api/interactive-capabilities', (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
-
-    res.json({
-        enabled: INTERACTIVE_UI_ENABLED,
-        whatsappConnected: !!sock?.user,
-        relayMessage: typeof sock?.relayMessage === 'function',
-        interactiveProto: !!proto?.Message?.InteractiveMessage,
-        generateWAMessageFromContent: typeof generateWAMessageFromContent === 'function'
-    });
-});
-
-app.post('/api/interactive-test', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
-    if (!sock?.user) return res.status(503).json({ erro: 'O WhatsApp não está conectado.' });
-
-    try {
-        const numero = normalizarNumeroDigitadoCliente(req.body?.numero);
-        if (!numero) {
-            return res.status(400).json({ erro: 'Informe um número de WhatsApp válido com DDD.' });
-        }
-
-        let jid = `${numero}@s.whatsapp.net`;
-        if (typeof sock.onWhatsApp === 'function') {
-            const resultado = await sock.onWhatsApp(numero).catch(() => []);
-            const localizado = Array.isArray(resultado) ? resultado.find(item => item?.exists !== false && item?.jid) : null;
-            if (localizado?.jid) jid = localizado.jid;
-        }
-
-        const sent = await sendInteractiveRaw(jid, {
-            title: 'Teste de botões',
-            body: 'Este é um teste da interface interativa da Azevedo & Juvencio Advogados. Toque em uma das opções abaixo.',
-            buttons: [
-                {
-                    name: 'quick_reply',
-                    params: { display_text: '✅ Sim, funcionou', id: 'aj_test:sim' }
-                },
-                {
-                    name: 'quick_reply',
-                    params: { display_text: '❌ Não funcionou', id: 'aj_test:nao' }
-                }
-            ]
-        });
-
-        return res.json({
-            ok: true,
-            numero,
-            jid,
-            messageId: sent?.key?.id || null,
-            observacao: 'O relay aceitou a mensagem. Confirme no aparelho destinatário se os botões foram renderizados.'
-        });
-    } catch (err) {
-        console.error('[Interativo] Falha no teste:', err);
-        return res.status(500).json({
-            erro: err?.message || 'Não foi possível enviar a mensagem interativa.'
-        });
-    }
 });
 
 // Horário de funcionamento configurável pelo advogado no painel.
