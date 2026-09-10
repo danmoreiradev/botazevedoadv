@@ -904,9 +904,20 @@ function obterMensagemEnviadaBaileys(key = {}) {
     return item.message;
 }
 
-async function enviarMensagemBaileys(jid, content, options) {
-    if (!sock) throw new Error('WhatsApp não conectado.');
-    const sent = await sock.sendMessage(jid, content, options);
+async function enviarMensagemBaileys(jid, content, options = {}) {
+    if (!sock?.user) throw new Error('WhatsApp não conectado.');
+
+    // Em versões 6.x do Baileys, a lista de dispositivos do destinatário pode
+    // ficar desatualizada e provocar mensagens que chegam como "Aguardando mensagem".
+    // Forçamos uma consulta fresca dos dispositivos em cada envio. Como o volume
+    // do escritório é pequeno/moderado, o custo adicional é preferível à falha
+    // intermitente de criptografia. O chamador ainda pode sobrescrever a opção.
+    const sendOptions = {
+        useUserDevicesCache: false,
+        ...options
+    };
+
+    const sent = await sock.sendMessage(jid, content, sendOptions);
     guardarMensagemEnviadaBaileys(sent);
     return sent;
 }
@@ -3071,7 +3082,11 @@ async function startBot() {
             connectTimeoutMs: 60000,
             generateHighQualityLinkPreview: false,
             syncFullHistory: false,
+            shouldSyncHistoryMessage: () => false,
             markOnlineOnConnect: false,
+            defaultQueryTimeoutMs: 60 * 1000,
+            retryRequestDelayMs: 350,
+            maxMsgRetryCount: 5,
             enableAutoSessionRecreation: true,
             getMessage: async (key) => obterMensagemEnviadaBaileys(key)
         });

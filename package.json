@@ -9,7 +9,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^6.7.21",
+    "@whiskeysockets/baileys": "6.7.23",
     "axios": "^1.13.6",
     "connect-mongodb-session": "^5.0.0",
     "express": "^5.2.1",
