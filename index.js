@@ -16,6 +16,7 @@ const P = require('pino');
 const { Boom } = require('@hapi/boom');
 const axios = require('axios');
 const session = require('express-session');
+const crypto = require('crypto');
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 let genAI = null;
@@ -802,6 +803,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const port = process.env.PORT || 10000;
+app.set('trust proxy', 1);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -812,13 +814,22 @@ const store = new MongoDBStore({
   collection: 'sessions'
 });
 
-app.use(session({
-    secret: 'azevedo-secret-key',
+const sessionMiddleware = session({
+    secret: process.env.SESSION_SECRET || 'azevedo-secret-key',
     resave: false,
-    saveUninitialized: false, // Melhor para produção
-    store: store, // Agora as sessões ficam salvas no Banco, não na memória!
-    cookie: { maxAge: 1000 * 60 * 60 * 24 } // 24 horas de login
-}));
+    saveUninitialized: false,
+    store,
+    cookie: {
+        maxAge: 1000 * 60 * 60 * 24,
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: 'auto'
+    }
+});
+app.use(sessionMiddleware);
+// A mesma sessão HTTP é reutilizada pelo Socket.IO, permitindo identificar
+// o advogado conectado também nos eventos em tempo real.
+io.engine.use(sessionMiddleware);
 
 const mongoUri = process.env.MONGODB_URI;
 const client = new MongoClient(mongoUri);
@@ -827,9 +838,317 @@ let lastQr = null;
 let currentUser = null;
 let sock;
 const botMessageIds = new Set();
+const panelMessageIds = new Set();
+const panelPendingJids = new Set();
 const processing = new Set();
 
-let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl;
+let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl, ticketMessagesColl;
+
+// -----------------------------------------------------------------------------
+// USUÁRIOS, PERMISSÕES E CHAT DO PAINEL
+// -----------------------------------------------------------------------------
+const PERMISSOES_PAINEL = [
+    'tickets', 'clients', 'chat', 'crm', 'whatsapp', 'ia', 'menu', 'business_hours', 'users'
+];
+const PERMISSOES_ADVOGADO_PADRAO = ['tickets', 'clients', 'chat'];
+
+// O MongoDB gratuito é protegido de duas formas: retenção temporal e limite por ticket.
+// Somente texto e metadados são persistidos. Arquivos, imagens, áudios e vídeos NÃO
+// são armazenados na coleção de chat.
+const CHAT_RETENTION_DAYS = 60;
+const CHAT_MAX_MESSAGES_PER_TICKET = 500;
+const CHAT_TRIM_TRIGGER = 540;
+const CHAT_LIST_LIMIT_DEFAULT = 60;
+const CHAT_LIST_LIMIT_MAX = 100;
+const CHAT_MAX_TEXT_CHARS = 12000;
+const CHAT_MAX_CAPTION_CHARS = 2000;
+const CHAT_MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+const chatLastTrimAt = new Map();
+
+function normalizarUsuarioLogin(valor = '') {
+    return String(valor || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function normalizarPapelUsuario(valor = '') {
+    return String(valor || '').toLowerCase() === 'advogado' ? 'advogado' : 'admin';
+}
+
+function normalizarPermissoesUsuario(conta = {}) {
+    if (normalizarPapelUsuario(conta.role) === 'admin') return [...PERMISSOES_PAINEL];
+    const recebidas = Array.isArray(conta.permissions) ? conta.permissions : PERMISSOES_ADVOGADO_PADRAO;
+    return [...new Set(recebidas.map(String).filter(item => PERMISSOES_PAINEL.includes(item)))];
+}
+
+function usuarioDaSessao(req) {
+    return req?.session?.panelUser || null;
+}
+
+function usuarioPode(req, permissao) {
+    const user = usuarioDaSessao(req);
+    if (!req?.session?.loggedIn || !user) return false;
+    if (user.role === 'admin') return true;
+    return Array.isArray(user.permissions) && user.permissions.includes(permissao);
+}
+
+function exigirLogin(req, res, next) {
+    if (!req.session?.loggedIn || !req.session?.panelUser) {
+        return res.status(401).json({ erro: 'Sessão expirada. Faça login novamente.' });
+    }
+    next();
+}
+
+function exigirPermissao(permissao) {
+    return (req, res, next) => {
+        if (!req.session?.loggedIn || !req.session?.panelUser) {
+            return res.status(401).json({ erro: 'Sessão expirada. Faça login novamente.' });
+        }
+        if (!usuarioPode(req, permissao)) {
+            return res.status(403).json({ erro: 'Seu usuário não possui permissão para acessar este recurso.' });
+        }
+        next();
+    };
+}
+
+function assinaturaPadraoUsuario(nome = '') {
+    const limpo = String(nome || '').trim();
+    return limpo ? `Dr(a). ${limpo}` : 'Advogado(a)';
+}
+
+function sessaoPublicaDaConta(conta = {}) {
+    const nome = String(conta.nome || conta.nomeCompleto || conta.user || 'Usuário').trim();
+    const assinatura = String(conta.assinatura || assinaturaPadraoUsuario(nome)).trim();
+    const role = normalizarPapelUsuario(conta.role);
+    return {
+        id: String(conta._id || ''),
+        user: String(conta.user || '').trim(),
+        nome,
+        assinatura,
+        email: String(conta.email || '').trim(),
+        oab: String(conta.oab || '').trim(),
+        role,
+        roleLabel: role === 'admin' ? 'Administrador' : 'Advogado',
+        permissions: normalizarPermissoesUsuario(conta)
+    };
+}
+
+function hashSenhaPainel(senha, salt = crypto.randomBytes(16).toString('hex')) {
+    const hash = crypto.scryptSync(String(senha), salt, 64).toString('hex');
+    return { salt, hash };
+}
+
+function validarSenhaPainel(senha, conta = {}) {
+    if (conta.passwordHash && conta.passwordSalt) {
+        try {
+            const atual = crypto.scryptSync(String(senha), String(conta.passwordSalt), 64);
+            const esperado = Buffer.from(String(conta.passwordHash), 'hex');
+            return atual.length === esperado.length && crypto.timingSafeEqual(atual, esperado);
+        } catch (_) { return false; }
+    }
+    // Compatibilidade com o cadastro antigo. Ao primeiro login bem-sucedido,
+    // a senha em texto simples é migrada automaticamente para scrypt.
+    return typeof conta.pass === 'string' && conta.pass === String(senha);
+}
+
+async function migrarSenhaLegadaSeNecessario(conta, senha) {
+    if (!conta?._id || !conta.pass || conta.passwordHash) return;
+    const cred = hashSenhaPainel(senha);
+    await userLoginColl.updateOne(
+        { _id: conta._id },
+        {
+            $set: { passwordHash: cred.hash, passwordSalt: cred.salt, updatedAt: Date.now() },
+            $unset: { pass: '' }
+        }
+    );
+}
+
+function limitarTextoChat(valor, max = CHAT_MAX_TEXT_CHARS) {
+    return String(valor ?? '').trim().slice(0, max);
+}
+
+
+function serializarMensagemChat(doc = {}) {
+    return {
+        id: String(doc._id || `${doc.ticketNumber || ''}:${doc.messageId || ''}`),
+        ticketNumber: doc.ticketNumber || null,
+        messageId: doc.messageId || null,
+        direction: doc.direction || 'in',
+        source: doc.source || 'cliente',
+        tipo: doc.tipo || 'text',
+        texto: doc.texto || '',
+        fileName: doc.fileName || null,
+        mimeType: doc.mimeType || null,
+        fileSize: Number(doc.fileSize || 0) || null,
+        senderId: doc.senderId || null,
+        senderName: doc.senderName || null,
+        createdAt: doc.createdAt instanceof Date ? doc.createdAt.getTime() : Number(doc.createdAt || Date.now())
+    };
+}
+
+async function apararHistoricoChatSeNecessario(ticketNumber) {
+    if (!ticketMessagesColl || !ticketNumber) return;
+    const agora = Date.now();
+    const ultima = chatLastTrimAt.get(ticketNumber) || 0;
+    if (agora - ultima < 60 * 60 * 1000) return;
+    chatLastTrimAt.set(ticketNumber, agora);
+
+    setImmediate(async () => {
+        try {
+            const total = await ticketMessagesColl.countDocuments({ ticketNumber });
+            if (total <= CHAT_TRIM_TRIGGER) return;
+            const excedentes = await ticketMessagesColl.find(
+                { ticketNumber },
+                { projection: { _id: 1 } }
+            ).sort({ createdAt: -1 }).skip(CHAT_MAX_MESSAGES_PER_TICKET).toArray();
+            if (excedentes.length) {
+                await ticketMessagesColl.deleteMany({ _id: { $in: excedentes.map(item => item._id) } });
+            }
+        } catch (err) {
+            console.warn('[Chat] Não foi possível aparar histórico do ticket:', err?.message || err);
+        }
+    });
+}
+
+async function registrarMensagemChat(documento = {}) {
+    if (!ticketMessagesColl || !documento.ticketNumber || !documento.messageId) return null;
+    const registro = {
+        _id: documento._id || `msg_${documento.ticketNumber}_${documento.messageId}`,
+        ticketNumber: String(documento.ticketNumber),
+        messageId: String(documento.messageId),
+        direction: documento.direction === 'out' ? 'out' : 'in',
+        source: String(documento.source || (documento.direction === 'out' ? 'painel' : 'cliente')).slice(0, 40),
+        tipo: String(documento.tipo || 'text').slice(0, 30),
+        texto: limitarTextoChat(documento.texto || '', CHAT_MAX_TEXT_CHARS),
+        fileName: documento.fileName ? limitarTextoChat(documento.fileName, 240) : null,
+        mimeType: documento.mimeType ? limitarTextoChat(documento.mimeType, 120) : null,
+        fileSize: Number(documento.fileSize || 0) || null,
+        senderId: documento.senderId ? String(documento.senderId).slice(0, 120) : null,
+        senderName: documento.senderName ? limitarTextoChat(documento.senderName, 180) : null,
+        createdAt: documento.createdAt instanceof Date ? documento.createdAt : new Date(Number(documento.createdAt || Date.now()))
+    };
+
+    if (!registro.texto) delete registro.texto;
+    if (!registro.fileName) delete registro.fileName;
+    if (!registro.mimeType) delete registro.mimeType;
+    if (!registro.fileSize) delete registro.fileSize;
+    if (!registro.senderId) delete registro.senderId;
+    if (!registro.senderName) delete registro.senderName;
+
+    try {
+        await ticketMessagesColl.insertOne(registro);
+        const serializada = serializarMensagemChat(registro);
+        io.emit('ticket_chat_message', { ticketNumber: registro.ticketNumber, message: serializada });
+        apararHistoricoChatSeNecessario(registro.ticketNumber);
+        return serializada;
+    } catch (err) {
+        if (err?.code === 11000) return null;
+        throw err;
+    }
+}
+
+function dadosMensagemChatWhatsApp(msg) {
+    const conteudo = conteudoMensagemDesembrulhado(msg);
+    const texto = limitarTextoChat(
+        conteudo.conversation ||
+        conteudo.extendedTextMessage?.text ||
+        conteudo.imageMessage?.caption ||
+        conteudo.videoMessage?.caption ||
+        conteudo.documentMessage?.caption ||
+        '',
+        CHAT_MAX_TEXT_CHARS
+    );
+    const media = extrairMidiaAnalisavel(msg);
+    let tipo = 'text';
+    if (conteudo.imageMessage) tipo = 'image';
+    else if (conteudo.audioMessage) tipo = 'audio';
+    else if (conteudo.videoMessage) tipo = 'video';
+    else if (conteudo.documentMessage) tipo = 'document';
+    else if (conteudo.stickerMessage) tipo = 'sticker';
+
+    return {
+        tipo,
+        texto,
+        fileName: media?.nomeArquivo || (tipo !== 'text' ? tipo : null),
+        mimeType: media?.mimeType || null,
+        fileSize: media?.tamanhoDeclarado || null
+    };
+}
+
+async function registrarMensagemClienteChat(ticket, msg) {
+    if (!ticket?.ticketNumber || !msg?.key?.id || msg?.key?.fromMe) return;
+    const dados = dadosMensagemChatWhatsApp(msg);
+    if (!dados.texto && dados.tipo === 'text') return;
+    await registrarMensagemChat({
+        ticketNumber: ticket.ticketNumber,
+        messageId: msg.key.id,
+        direction: 'in',
+        source: 'cliente',
+        ...dados,
+        createdAt: Date.now()
+    });
+    io.emit('ticket_activity_updated', { ticketNumber: ticket.ticketNumber, direction: 'in' });
+}
+
+async function registrarMensagemManualWhatsAppChat(ticket, msg) {
+    if (!ticket?.ticketNumber || !msg?.key?.id || !msg?.key?.fromMe) return;
+    const dados = dadosMensagemChatWhatsApp(msg);
+    if (!dados.texto && dados.tipo === 'text') return;
+    await registrarMensagemChat({
+        ticketNumber: ticket.ticketNumber,
+        messageId: msg.key.id,
+        direction: 'out',
+        source: 'whatsapp_manual',
+        senderName: 'Escritório (WhatsApp)',
+        ...dados,
+        createdAt: Date.now()
+    });
+}
+
+function filtrosTicketPorJidChat(jid = '') {
+    const normalizado = normalizarJid(String(jid || ''));
+    const numero = normalizarNumeroWhatsApp(normalizado || jid);
+    const filtros = [];
+    if (normalizado) {
+        filtros.push({ _id: normalizado }, { lastRawJid: normalizado }, { identificadores: normalizado });
+    }
+    if (numero) {
+        filtros.push({ _id: numero }, { numeroReal: numero }, { whatsappNumbers: numero }, { identificadores: numero });
+    }
+    return filtros;
+}
+
+async function registrarMensagemAutomaticaChat(jid, sent, content) {
+    if (!ticketMessagesColl || !ticketsColl || !sent?.key?.id || !content?.text) return;
+    const filtros = filtrosTicketPorJidChat(jid);
+    if (!filtros.length) return;
+    const ticket = await ticketsColl.findOne({ $or: filtros }, { projection: { ticketNumber: 1 } });
+    if (!ticket?.ticketNumber) return;
+    await registrarMensagemChat({
+        ticketNumber: ticket.ticketNumber,
+        messageId: sent.key.id,
+        direction: 'out',
+        source: 'bot',
+        tipo: 'text',
+        texto: limitarTextoChat(content.text, CHAT_MAX_TEXT_CHARS),
+        senderName: 'Assistente automático',
+        createdAt: Date.now()
+    });
+}
+
+function destinoWhatsAppTicket(ticket = {}) {
+    const numero = whatsappDoTicket(ticket);
+    if (numero) return `${numero}@s.whatsapp.net`;
+    const jid = normalizarJid(ticket.lastRawJid || '');
+    return jid && jid.includes('@') ? jid : null;
+}
+
+function identidadeAdvogadoSessao(req) {
+    const user = usuarioDaSessao(req) || {};
+    return {
+        id: String(user.id || ''),
+        nome: String(user.nome || user.user || 'Advogado(a)').trim(),
+        assinatura: String(user.assinatura || assinaturaPadraoUsuario(user.nome || user.user)).trim()
+    };
+}
 
 
 // -----------------------------------------------------------------------------
@@ -880,6 +1199,11 @@ async function sendBotMsg(jid, content) {
             botMessageIds.add(id);
             setTimeout(() => botMessageIds.delete(id), 60 * 1000);
         }
+
+        // Persistência leve do chat: somente texto/metadados, nunca o binário.
+        registrarMensagemAutomaticaChat(jid, sent, content).catch(err => {
+            console.warn('[Chat] Falha ao registrar mensagem automática:', err?.message || err);
+        });
 
         return sent;
     } catch (err) {
@@ -2578,10 +2902,34 @@ async function startBot() {
         menuOptionsColl = db.collection('menu_options');
         settingsColl = db.collection('settings');
         crmLeadsColl = db.collection('crm_leads');
+        ticketMessagesColl = db.collection('ticket_messages');
 
         // Cria as opções atuais e o horário padrão somente se ainda não existirem.
         await garantirMenuPadrao();
         await garantirHorarioFuncionamentoPadrao();
+
+        // Contas antigas não possuíam papel/permissões. Para preservar o acesso do
+        // administrador existente, elas são tratadas como admin na primeira atualização.
+        await userLoginColl.updateMany(
+            { role: { $exists: false } },
+            { $set: { role: 'admin', ativo: true, updatedAt: Date.now() } }
+        );
+        const usuariosLegados = await userLoginColl.find(
+            { $or: [{ userLower: { $exists: false } }, { nome: { $exists: false } }] },
+            { projection: { _id: 1, user: 1, nome: 1, assinatura: 1 } }
+        ).toArray();
+        if (usuariosLegados.length) {
+            await userLoginColl.bulkWrite(usuariosLegados.map(item => ({
+                updateOne: {
+                    filter: { _id: item._id },
+                    update: { $set: {
+                        userLower: normalizarUsuarioLogin(item.user),
+                        nome: String(item.nome || item.user || 'Administrador').trim(),
+                        assinatura: String(item.assinatura || assinaturaPadraoUsuario(item.nome || item.user || 'Administrador')).trim()
+                    } }
+                }
+            })), { ordered: false });
+        }
 
         // Índices para manter CPF e número de ticket únicos e acelerar a identificação do cliente.
         await Promise.all([
@@ -2603,7 +2951,12 @@ async function startBot() {
             crmLeadsColl.createIndex({ status: 1, dataProximaAcao: 1 }),
             crmLeadsColl.createIndex({ responsavel: 1, status: 1 }),
             crmLeadsColl.createIndex({ origemTipo: 1, status: 1 }),
-            crmLeadsColl.createIndex({ updatedAt: -1 })
+            crmLeadsColl.createIndex({ updatedAt: -1 }),
+            userLoginColl.createIndex({ userLower: 1 }),
+            userLoginColl.createIndex({ role: 1, ativo: 1 }),
+            ticketMessagesColl.createIndex({ ticketNumber: 1, createdAt: -1 }),
+            ticketMessagesColl.createIndex({ ticketNumber: 1, messageId: 1 }, { unique: true }),
+            ticketMessagesColl.createIndex({ createdAt: 1 }, { expireAfterSeconds: CHAT_RETENTION_DAYS * 24 * 60 * 60 })
         ]);
         
         apiKeysColl = db.collection('api_keys');
@@ -2672,7 +3025,8 @@ sock.ev.on('messages.upsert', async m => {
 
         // Mensagem enviada manualmente pelo escritório.
         if (isMe) {
-            if (botMessageIds.has(msgId)) return;
+            const jidMensagemNormalizado = normalizarJid(rawJid) || rawJid;
+            if (botMessageIds.has(msgId) || panelMessageIds.has(msgId) || panelPendingJids.has(jidMensagemNormalizado)) return;
 
             let cliente = await buscarClientePorContato(contato);
 
@@ -2706,6 +3060,9 @@ sock.ev.on('messages.upsert', async m => {
                     status: 'em_atendimento_humano'
                 });
             }
+            await registrarMensagemManualWhatsAppChat(ticket, msg).catch(err => {
+                console.warn('[Chat] Falha ao registrar mensagem manual do WhatsApp:', err?.message || err);
+            });
             return;
         }
 
@@ -2722,6 +3079,14 @@ sock.ev.on('messages.upsert', async m => {
         if (ticketExpirouAntesDoHorario) {
             await fecharTicketAnterior(ticket, 'encerrado_timeout');
             ticket = null;
+        }
+
+        // Registra a mensagem do cliente uma única vez quando já existe ticket.
+        // Chamadas adicionais abaixo são seguras por causa do índice único messageId.
+        if (ticket) {
+            await registrarMensagemClienteChat(ticket, msg).catch(err => {
+                console.warn('[Chat] Falha ao registrar mensagem recebida:', err?.message || err);
+            });
         }
 
         // Se já existe um ticket válido, qualquer PDF/imagem/áudio/vídeo/documento
@@ -2768,6 +3133,9 @@ sock.ev.on('messages.upsert', async m => {
                 });
             }
 
+            await registrarMensagemClienteChat(ticket, msg).catch(err => {
+                console.warn('[Chat] Falha ao registrar primeira mensagem fora do horário:', err?.message || err);
+            });
             dispararAnaliseArquivo(ticket);
 
             await encaminharAutomaticamenteForaDoHorario(ticket, rawJid, {
@@ -2845,6 +3213,9 @@ sock.ev.on('messages.upsert', async m => {
                 notificarPainel: true
             });
 
+            await registrarMensagemClienteChat(ticket, msg).catch(err => {
+                console.warn('[Chat] Falha ao registrar primeira mensagem do ticket:', err?.message || err);
+            });
             dispararAnaliseArquivo(ticket);
 
             await sendBotMsg(rawJid, {
@@ -3580,28 +3951,88 @@ async function useMongoDBAuthState(collection) {
     };
 }
 
-app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'login.html')));
+app.get('/login', (req, res) => {
+    if (req.session?.loggedIn && req.session?.panelUser) return res.redirect('/');
+    res.sendFile(path.join(__dirname, 'login.html'));
+});
+
 app.post('/login', async (req, res) => {
-    const { user, pass } = req.body;
-    try {
-        const adminAccount = await userLoginColl.findOne({ user });
-        if (adminAccount && adminAccount.pass === pass) {
-            req.session.loggedIn = true;
-            res.redirect('/');
-        } else res.send("<script>alert('Erro'); window.location='/login';</script>");
-    } catch (e) { res.status(500).send("Erro"); }
+    const userInput = String(req.body?.user || '').trim();
+    const pass = String(req.body?.pass || '');
+    const userLower = normalizarUsuarioLogin(userInput);
+    try {
+        if (!userLower || !pass) {
+            return res.send("<script>alert('Informe usuário e senha.'); window.location='/login';</script>");
+        }
+        const conta = await userLoginColl.findOne({
+            $or: [{ user: userInput }, { userLower }]
+        });
+        if (!conta || conta.ativo === false || !validarSenhaPainel(pass, conta)) {
+            return res.send("<script>alert('Usuário ou senha inválidos.'); window.location='/login';</script>");
+        }
+
+        await migrarSenhaLegadaSeNecessario(conta, pass);
+        const painelUser = sessaoPublicaDaConta(conta);
+        req.session.loggedIn = true;
+        req.session.panelUser = painelUser;
+        req.session.userId = painelUser.id;
+        req.session.save(err => {
+            if (err) return res.status(500).send('Erro ao iniciar sessão.');
+            res.redirect('/');
+        });
+    } catch (e) {
+        console.error('[Login] Erro:', e);
+        res.status(500).send('Erro');
+    }
 });
 
 app.get('/', (req, res) => {
-    if (!req.session.loggedIn) return res.redirect('/login');
-    res.sendFile(path.join(__dirname, 'index.html'));
+    if (!req.session?.loggedIn || !req.session?.panelUser) return res.redirect('/login');
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.get('/logout-panel', (req, res) => {
-    req.session.destroy(() => { res.redirect('/login'); });
+    req.session.destroy(() => { res.redirect('/login'); });
 });
 
-app.get('/logout-whatsapp', async (req, res) => {
+app.get('/api/me', exigirLogin, (req, res) => {
+    res.json({ user: req.session.panelUser });
+});
+
+// Lista pública interna de profissionais ativos para campos como "advogado responsável".
+// Não expõe login, senha, e-mail ou permissões.
+app.get('/api/lawyers', exigirLogin, async (req, res) => {
+    try {
+        const profissionais = await userLoginColl.find(
+            { ativo: { $ne: false } },
+            { projection: { nome: 1, assinatura: 1, role: 1, oab: 1 } }
+        ).sort({ nome: 1 }).toArray();
+        res.json({
+            lawyers: profissionais.map(item => ({
+                id: String(item._id),
+                nome: String(item.nome || '').trim(),
+                assinatura: String(item.assinatura || assinaturaPadraoUsuario(item.nome || '')).trim(),
+                oab: String(item.oab || '').trim(),
+                role: normalizarPapelUsuario(item.role)
+            })).filter(item => item.nome)
+        });
+    } catch (err) {
+        res.status(500).json({ erro: 'Não foi possível carregar a lista de profissionais.' });
+    }
+});
+
+// Proteção por módulo. O administrador ignora a lista de permissões; advogados
+// comuns recebem por padrão apenas tickets, clientes e chat.
+app.use('/api/business-hours', exigirPermissao('business_hours'));
+app.use('/api/triage', exigirPermissao('menu'));
+app.use('/api/menu-options', exigirPermissao('menu'));
+app.use('/api/crm', exigirPermissao('crm'));
+app.use('/api/clients', exigirPermissao('clients'));
+app.use('/api/knowledgeColl', exigirPermissao('ia'));
+app.use('/api/users', exigirPermissao('users'));
+app.use('/api/tickets', exigirPermissao('tickets'));
+
+app.get('/logout-whatsapp', exigirPermissao('whatsapp'), async (req, res) => {
     try {
         await authColl.deleteMany({});
         if (sock) await sock.logout();
@@ -3609,6 +4040,147 @@ app.get('/logout-whatsapp', async (req, res) => {
         io.emit('disconnected');
         res.sendStatus(200);
     } catch (err) { res.status(500).send("Erro"); }
+});
+
+
+// -----------------------------------------------------------------------------
+// GESTÃO DE USUÁRIOS DO PAINEL - somente administradores
+// -----------------------------------------------------------------------------
+function normalizarDadosUsuarioPainel(body = {}, existente = null) {
+    const user = normalizarUsuarioLogin(body.user ?? existente?.user ?? '');
+    const nome = String(body.nome ?? existente?.nome ?? '').trim().slice(0, 180);
+    const role = normalizarPapelUsuario(body.role ?? existente?.role ?? 'advogado');
+    const permissions = role === 'admin'
+        ? [...PERMISSOES_PAINEL]
+        : [...new Set((Array.isArray(body.permissions) ? body.permissions : (existente?.permissions || PERMISSOES_ADVOGADO_PADRAO))
+            .map(String).filter(item => PERMISSOES_PAINEL.includes(item)))];
+    const assinatura = String(body.assinatura ?? existente?.assinatura ?? assinaturaPadraoUsuario(nome)).trim().slice(0, 180);
+    return {
+        user,
+        userLower: user,
+        nome,
+        assinatura: assinatura || assinaturaPadraoUsuario(nome),
+        email: String(body.email ?? existente?.email ?? '').trim().slice(0, 240),
+        oab: String(body.oab ?? existente?.oab ?? '').trim().slice(0, 80),
+        role,
+        permissions,
+        ativo: body.ativo !== undefined ? body.ativo !== false : existente?.ativo !== false
+    };
+}
+
+app.get('/api/users', async (req, res) => {
+    try {
+        const usuarios = await userLoginColl.find({}, {
+            projection: { pass: 0, passwordHash: 0, passwordSalt: 0 }
+        }).sort({ ativo: -1, role: 1, nome: 1, user: 1 }).toArray();
+        res.json({
+            usuarios: usuarios.map(item => ({ ...sessaoPublicaDaConta(item), ativo: item.ativo !== false, createdAt: item.createdAt || null, updatedAt: item.updatedAt || null })),
+            permissionsAvailable: PERMISSOES_PAINEL,
+            defaultLawyerPermissions: PERMISSOES_ADVOGADO_PADRAO
+        });
+    } catch (err) {
+        console.error('[Usuários] Erro ao listar:', err);
+        res.status(500).json({ erro: 'Não foi possível carregar os usuários.' });
+    }
+});
+
+app.post('/api/users', async (req, res) => {
+    try {
+        const dados = normalizarDadosUsuarioPainel(req.body || {});
+        const senha = String(req.body?.password || '');
+        if (!dados.user || dados.user.length < 3) return res.status(400).json({ erro: 'O usuário deve possuir ao menos 3 caracteres.' });
+        if (!dados.nome || dados.nome.length < 3) return res.status(400).json({ erro: 'Informe o nome do usuário.' });
+        if (senha.length < 6) return res.status(400).json({ erro: 'A senha deve possuir ao menos 6 caracteres.' });
+        const duplicado = await userLoginColl.findOne({ $or: [{ userLower: dados.userLower }, { user: dados.user }] });
+        if (duplicado) return res.status(409).json({ erro: 'Este nome de usuário já está em uso.' });
+
+        const cred = hashSenhaPainel(senha);
+        const agora = Date.now();
+        const documento = {
+            ...dados,
+            passwordHash: cred.hash,
+            passwordSalt: cred.salt,
+            createdAt: agora,
+            updatedAt: agora,
+            createdBy: usuarioDaSessao(req)?.id || null
+        };
+        const result = await userLoginColl.insertOne(documento);
+        const salvo = { ...documento, _id: result.insertedId };
+        delete salvo.passwordHash;
+        delete salvo.passwordSalt;
+        io.emit('panel_users_updated', { action: 'created', id: String(result.insertedId) });
+        res.status(201).json({ ok: true, user: { ...sessaoPublicaDaConta(salvo), ativo: salvo.ativo !== false } });
+    } catch (err) {
+        console.error('[Usuários] Erro ao criar:', err);
+        res.status(500).json({ erro: 'Não foi possível criar o usuário.' });
+    }
+});
+
+app.put('/api/users/:id', async (req, res) => {
+    try {
+        let id;
+        try { id = new ObjectId(req.params.id); } catch (_) { id = req.params.id; }
+        const existente = await userLoginColl.findOne({ _id: id });
+        if (!existente) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+        const dados = normalizarDadosUsuarioPainel(req.body || {}, existente);
+        if (!dados.user || dados.user.length < 3 || !dados.nome) return res.status(400).json({ erro: 'Usuário e nome são obrigatórios.' });
+
+        const duplicado = await userLoginColl.findOne({
+            _id: { $ne: existente._id },
+            $or: [{ userLower: dados.userLower }, { user: dados.user }]
+        });
+        if (duplicado) return res.status(409).json({ erro: 'Este nome de usuário já está em uso.' });
+
+        // Não permite retirar o último administrador ativo do sistema.
+        if (normalizarPapelUsuario(existente.role) === 'admin' && existente.ativo !== false && (dados.role !== 'admin' || dados.ativo === false)) {
+            const adminsAtivos = await userLoginColl.countDocuments({ role: 'admin', ativo: { $ne: false } });
+            if (adminsAtivos <= 1) return res.status(409).json({ erro: 'É necessário manter ao menos um administrador ativo.' });
+        }
+
+        const update = { $set: { ...dados, updatedAt: Date.now() } };
+        const senha = String(req.body?.password || '');
+        if (senha) {
+            if (senha.length < 6) return res.status(400).json({ erro: 'A nova senha deve possuir ao menos 6 caracteres.' });
+            const cred = hashSenhaPainel(senha);
+            update.$set.passwordHash = cred.hash;
+            update.$set.passwordSalt = cred.salt;
+            update.$unset = { pass: '' };
+        }
+        await userLoginColl.updateOne({ _id: existente._id }, update);
+        const salvo = await userLoginColl.findOne({ _id: existente._id }, { projection: { pass: 0, passwordHash: 0, passwordSalt: 0 } });
+
+        // Se o próprio usuário editou sua conta (admin), atualiza imediatamente a sessão.
+        if (String(req.session.panelUser?.id || '') === String(existente._id)) {
+            req.session.panelUser = sessaoPublicaDaConta(salvo);
+        }
+        io.emit('panel_users_updated', { action: 'updated', id: String(existente._id) });
+        res.json({ ok: true, user: { ...sessaoPublicaDaConta(salvo), ativo: salvo.ativo !== false } });
+    } catch (err) {
+        console.error('[Usuários] Erro ao atualizar:', err);
+        res.status(500).json({ erro: 'Não foi possível atualizar o usuário.' });
+    }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+    try {
+        let id;
+        try { id = new ObjectId(req.params.id); } catch (_) { id = req.params.id; }
+        const existente = await userLoginColl.findOne({ _id: id });
+        if (!existente) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+        if (String(req.session.panelUser?.id || '') === String(existente._id)) {
+            return res.status(409).json({ erro: 'Você não pode excluir o usuário da sua própria sessão.' });
+        }
+        if (normalizarPapelUsuario(existente.role) === 'admin' && existente.ativo !== false) {
+            const adminsAtivos = await userLoginColl.countDocuments({ role: 'admin', ativo: { $ne: false } });
+            if (adminsAtivos <= 1) return res.status(409).json({ erro: 'É necessário manter ao menos um administrador ativo.' });
+        }
+        await userLoginColl.deleteOne({ _id: existente._id });
+        io.emit('panel_users_updated', { action: 'deleted', id: String(existente._id) });
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[Usuários] Erro ao excluir:', err);
+        res.status(500).json({ erro: 'Não foi possível excluir o usuário.' });
+    }
 });
 
 // Horário de funcionamento configurável pelo advogado no painel.
@@ -4561,6 +5133,212 @@ function whatsappDoTicket(ticket = {}) {
     );
 }
 
+
+// -----------------------------------------------------------------------------
+// CHAT INTERNO DO TICKET
+// -----------------------------------------------------------------------------
+app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
+    if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
+    if (!ticketMessagesColl || !ticketsColl) return res.status(503).json({ erro: 'Chat ainda não está disponível.' });
+    try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        const ticket = await ticketsColl.findOne({ ticketNumber });
+        if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+        const limite = Math.min(CHAT_LIST_LIMIT_MAX, Math.max(10, Number(req.query.limit || CHAT_LIST_LIMIT_DEFAULT)));
+        const filtro = { ticketNumber };
+        if (req.query.before) {
+            const antes = new Date(Number(req.query.before));
+            if (!Number.isNaN(antes.getTime())) filtro.createdAt = { $lt: antes };
+        }
+        const docsDesc = await ticketMessagesColl.find(filtro).sort({ createdAt: -1 }).limit(limite + 1).toArray();
+        const hasMore = docsDesc.length > limite;
+        const docs = docsDesc.slice(0, limite).reverse();
+        res.json({
+            ticket: {
+                ticketNumber,
+                clienteNome: ticket.clienteNome || null,
+                whatsapp: whatsappDoTicket(ticket),
+                area: ticket.area || ticket.menuOptionTitle || null,
+                advogadoResponsavelNome: ticket.advogadoResponsavelNome || null
+            },
+            messages: docs.map(serializarMensagemChat),
+            hasMore,
+            retentionDays: CHAT_RETENTION_DAYS,
+            maxMessagesPerTicket: CHAT_MAX_MESSAGES_PER_TICKET
+        });
+    } catch (err) {
+        console.error('[Chat] Erro ao carregar mensagens:', err);
+        res.status(500).json({ erro: 'Não foi possível carregar o chat.' });
+    }
+});
+
+app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
+    if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
+    if (!sock?.user) return res.status(503).json({ erro: 'O WhatsApp do escritório não está conectado.' });
+    try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        const texto = limitarTextoChat(req.body?.text || '', CHAT_MAX_TEXT_CHARS);
+        if (!texto) return res.status(400).json({ erro: 'Digite uma mensagem para enviar.' });
+        const ticket = await ticketsColl.findOne({ ticketNumber });
+        if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+        const jid = destinoWhatsAppTicket(ticket);
+        if (!jid) return res.status(409).json({ erro: 'Não foi possível identificar o WhatsApp deste ticket.' });
+
+        const advogado = identidadeAdvogadoSessao(req);
+        const textoWhatsApp = `${advogado.assinatura}: ${texto}`;
+        const jidNormalizadoPainel = normalizarJid(jid) || jid;
+        panelPendingJids.add(jidNormalizadoPainel);
+        setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 5000);
+        let sent;
+        try {
+            sent = await sock.sendMessage(jid, { text: textoWhatsApp });
+        } finally {
+            setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 2500);
+        }
+        const messageId = String(sent?.key?.id || `panel_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`);
+        if (sent?.key?.id) {
+            panelMessageIds.add(sent.key.id);
+            setTimeout(() => panelMessageIds.delete(sent.key.id), 2 * 60 * 1000);
+        }
+
+        const registrada = await registrarMensagemChat({
+            ticketNumber,
+            messageId,
+            direction: 'out',
+            source: 'painel',
+            tipo: 'text',
+            texto,
+            senderId: advogado.id,
+            senderName: advogado.assinatura,
+            createdAt: Date.now()
+        });
+
+        const agora = Date.now();
+        const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+        const camposTicket = {
+            status: 'em_atendimento_humano',
+            paused: true,
+            until: agora + tresDiasEmMs,
+            lastActivity: agora,
+            advogadoResponsavelId: advogado.id || null,
+            advogadoResponsavelNome: advogado.nome || null
+        };
+        await ticketsColl.updateOne({ _id: ticket._id }, { $set: camposTicket });
+        await atualizarHistorico(ticketNumber, {
+            status: 'em_atendimento_humano',
+            advogadoResponsavelId: advogado.id || null,
+            advogadoResponsavelNome: advogado.nome || null,
+            ultimaMensagemPainelEm: agora
+        });
+        if (ticket.clienteId && clientsColl) {
+            await clientsColl.updateOne(
+                { _id: ticket.clienteId, $or: [{ advogadoResponsavel: { $exists: false } }, { advogadoResponsavel: null }, { advogadoResponsavel: '' }] },
+                { $set: { advogadoResponsavel: advogado.nome || advogado.assinatura, updatedAt: agora } }
+            );
+        }
+        io.emit('ticket_activity_updated', { ticketNumber, direction: 'out', status: 'em_atendimento_humano' });
+        res.status(201).json({ ok: true, message: registrada });
+    } catch (err) {
+        console.error('[Chat] Erro ao enviar mensagem:', err);
+        res.status(500).json({ erro: err?.message || 'Não foi possível enviar a mensagem.' });
+    }
+});
+
+app.post(
+    '/api/tickets/:ticketNumber/chat/files',
+    express.raw({ type: 'application/octet-stream', limit: CHAT_MAX_UPLOAD_BYTES }),
+    async (req, res) => {
+        if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
+        if (!sock?.user) return res.status(503).json({ erro: 'O WhatsApp do escritório não está conectado.' });
+        try {
+            const ticketNumber = String(req.params.ticketNumber || '').trim();
+            const ticket = await ticketsColl.findOne({ ticketNumber });
+            if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+            const jid = destinoWhatsAppTicket(ticket);
+            if (!jid) return res.status(409).json({ erro: 'Não foi possível identificar o WhatsApp deste ticket.' });
+            if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ erro: 'Arquivo vazio ou inválido.' });
+            if (req.body.length > CHAT_MAX_UPLOAD_BYTES) return res.status(413).json({ erro: 'Arquivo acima do limite de 15 MB do chat.' });
+
+            const nomeArquivo = limitarTextoChat(req.query.name || 'arquivo', 240);
+            const mimeType = limitarTextoChat(req.query.mimeType || 'application/octet-stream', 120).toLowerCase();
+            const legenda = limitarTextoChat(req.query.caption || '', CHAT_MAX_CAPTION_CHARS);
+            const advogado = identidadeAdvogadoSessao(req);
+            const captionAssinada = legenda ? `${advogado.assinatura}: ${legenda}` : `${advogado.assinatura}:`;
+            const jidNormalizadoPainel = normalizarJid(jid) || jid;
+            panelPendingJids.add(jidNormalizadoPainel);
+            setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 5000);
+            let payload;
+            let tipo = 'document';
+            if (mimeType.startsWith('image/')) {
+                tipo = 'image'; payload = { image: req.body, mimetype: mimeType, caption: captionAssinada };
+            } else if (mimeType.startsWith('video/')) {
+                tipo = 'video'; payload = { video: req.body, mimetype: mimeType, caption: captionAssinada };
+            } else if (mimeType.startsWith('audio/')) {
+                tipo = 'audio'; payload = { audio: req.body, mimetype: mimeType, ptt: false };
+            } else {
+                payload = { document: req.body, mimetype: mimeType, fileName: nomeArquivo, caption: captionAssinada };
+            }
+
+            // Áudio não aceita legenda no WhatsApp. Envia a identificação em uma
+            // mensagem curta imediatamente antes, sem salvar binário no MongoDB.
+            if (tipo === 'audio') {
+                const intro = await sock.sendMessage(jid, { text: legenda ? `${advogado.assinatura}: ${legenda}` : `${advogado.assinatura}:` });
+                if (intro?.key?.id) {
+                    panelMessageIds.add(intro.key.id);
+                    setTimeout(() => panelMessageIds.delete(intro.key.id), 2 * 60 * 1000);
+                    await registrarMensagemChat({
+                        ticketNumber, messageId: intro.key.id, direction: 'out', source: 'painel', tipo: 'text',
+                        texto: legenda || 'Áudio enviado.', senderId: advogado.id, senderName: advogado.assinatura, createdAt: Date.now()
+                    });
+                }
+            }
+
+            let sent;
+            try {
+                sent = await sock.sendMessage(jid, payload);
+            } finally {
+                setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 2500);
+            }
+            const messageId = String(sent?.key?.id || `panel_file_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`);
+            if (sent?.key?.id) {
+                panelMessageIds.add(sent.key.id);
+                setTimeout(() => panelMessageIds.delete(sent.key.id), 2 * 60 * 1000);
+            }
+            const registrada = await registrarMensagemChat({
+                ticketNumber,
+                messageId,
+                direction: 'out',
+                source: 'painel',
+                tipo,
+                texto: tipo === 'audio' ? '' : legenda,
+                fileName: nomeArquivo,
+                mimeType,
+                fileSize: req.body.length,
+                senderId: advogado.id,
+                senderName: advogado.assinatura,
+                createdAt: Date.now()
+            });
+
+            const agora = Date.now();
+            const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+            await ticketsColl.updateOne({ _id: ticket._id }, { $set: {
+                status: 'em_atendimento_humano', paused: true, until: agora + tresDiasEmMs, lastActivity: agora,
+                advogadoResponsavelId: advogado.id || null, advogadoResponsavelNome: advogado.nome || null
+            } });
+            await atualizarHistorico(ticketNumber, {
+                status: 'em_atendimento_humano', advogadoResponsavelId: advogado.id || null,
+                advogadoResponsavelNome: advogado.nome || null, ultimaMensagemPainelEm: agora
+            });
+            io.emit('ticket_activity_updated', { ticketNumber, direction: 'out', status: 'em_atendimento_humano' });
+            res.status(201).json({ ok: true, message: registrada });
+        } catch (err) {
+            console.error('[Chat] Erro ao enviar arquivo:', err);
+            const status = err?.type === 'entity.too.large' ? 413 : 500;
+            res.status(status).json({ erro: status === 413 ? 'Arquivo acima do limite de 15 MB do chat.' : (err?.message || 'Não foi possível enviar o arquivo.') });
+        }
+    }
+);
+
 app.get('/api/tickets/active', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
     if (!ticketsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
@@ -4594,7 +5372,9 @@ app.get('/api/tickets/active', async (req, res) => {
                     until: 1,
                     lastActivity: 1,
                     createdAt: 1,
-                    documentosIA: 1
+                    documentosIA: 1,
+                    advogadoResponsavelId: 1,
+                    advogadoResponsavelNome: 1
                 }
             }
         ).toArray();
@@ -4742,6 +5522,8 @@ app.get('/api/tickets/active', async (req, res) => {
                 triagemConcluidaEm: historico.triagemConcluidaEm || null,
                 crm: crmPorTicket.get(String(ticket.ticketNumber)) || null,
                 documentosIA,
+                advogadoResponsavelId: ticket.advogadoResponsavelId || null,
+                advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
                 documentosResumo: {
                     total: documentosIA.length,
                     concluidos: documentosIA.filter(doc => doc.statusAnalise === 'concluida').length,
@@ -5578,9 +6360,17 @@ setInterval(async () => {
     } catch (e) {}
 }, 5 * 60 * 1000);
 
+io.use((socket, next) => {
+    const sessao = socket.request?.session;
+    if (sessao?.loggedIn && sessao?.panelUser) return next();
+    next(new Error('unauthorized'));
+});
+
 io.on('connection', (socket) => {
-    if (currentUser) socket.emit('connected', currentUser);
-    else if (lastQr) socket.emit('qr', lastQr);
+    const painelUser = socket.request?.session?.panelUser || null;
+    if (painelUser) socket.emit('panel_user', painelUser);
+    if (currentUser) socket.emit('connected', currentUser);
+    else if (lastQr) socket.emit('qr', lastQr);
 });
 
 setInterval(async () => {
