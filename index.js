@@ -1,11 +1,12 @@
 const { 
-    default: makeWASocket, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion, 
-    BufferJSON, 
-    initAuthCreds,
-    jidNormalizedUser,
-    downloadMediaMessage 
+    default: makeWASocket, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion, 
+    BufferJSON, 
+    initAuthCreds,
+    jidNormalizedUser,
+    downloadMediaMessage,
+    makeCacheableSignalKeyStore
 } = require('@whiskeysockets/baileys');
 const { MongoClient, ObjectId } = require('mongodb');
 const express = require('express');
@@ -865,6 +866,51 @@ const CHAT_MAX_CAPTION_CHARS = 2000;
 const CHAT_MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const chatLastTrimAt = new Map();
 
+// Cache efêmero de mensagens enviadas pelo Baileys. Não ocupa MongoDB e permite
+// que a biblioteca recupere a mensagem original caso o WhatsApp solicite retry.
+const BAILEYS_SENT_CACHE_TTL_MS = 15 * 60 * 1000;
+const BAILEYS_SENT_CACHE_MAX = 500;
+const baileysSentMessageCache = new Map();
+
+function guardarMensagemEnviadaBaileys(sent) {
+    const id = String(sent?.key?.id || '').trim();
+    if (!id || !sent?.message) return;
+
+    baileysSentMessageCache.set(id, { message: sent.message, savedAt: Date.now() });
+
+    const agora = Date.now();
+    for (const [cacheId, item] of baileysSentMessageCache) {
+        if ((agora - Number(item?.savedAt || 0)) > BAILEYS_SENT_CACHE_TTL_MS) {
+            baileysSentMessageCache.delete(cacheId);
+        }
+    }
+
+    while (baileysSentMessageCache.size > BAILEYS_SENT_CACHE_MAX) {
+        const primeiro = baileysSentMessageCache.keys().next().value;
+        if (!primeiro) break;
+        baileysSentMessageCache.delete(primeiro);
+    }
+}
+
+function obterMensagemEnviadaBaileys(key = {}) {
+    const id = String(key?.id || '').trim();
+    if (!id) return undefined;
+    const item = baileysSentMessageCache.get(id);
+    if (!item) return undefined;
+    if ((Date.now() - Number(item.savedAt || 0)) > BAILEYS_SENT_CACHE_TTL_MS) {
+        baileysSentMessageCache.delete(id);
+        return undefined;
+    }
+    return item.message;
+}
+
+async function enviarMensagemBaileys(jid, content, options) {
+    if (!sock) throw new Error('WhatsApp não conectado.');
+    const sent = await sock.sendMessage(jid, content, options);
+    guardarMensagemEnviadaBaileys(sent);
+    return sent;
+}
+
 function normalizarUsuarioLogin(valor = '') {
     return String(valor || '').trim().toLowerCase().replace(/\s+/g, '');
 }
@@ -1134,11 +1180,46 @@ async function registrarMensagemAutomaticaChat(jid, sent, content) {
     });
 }
 
-function destinoWhatsAppTicket(ticket = {}) {
+async function destinoWhatsAppTicket(ticket = {}) {
+    // Para envio 1:1, priorizamos SEMPRE o PN real (@s.whatsapp.net).
+    // Evitamos envio direto para @lid, que pode produzir o placeholder
+    // "Aguardando mensagem. Essa ação pode levar alguns instantes." no destinatário.
     const numero = whatsappDoTicket(ticket);
     if (numero) return `${numero}@s.whatsapp.net`;
-    const jid = normalizarJid(ticket.lastRawJid || '');
-    return jid && jid.includes('@') ? jid : null;
+
+    const candidatos = [
+        ticket.lastRawJid,
+        ...(Array.isArray(ticket.identificadores) ? ticket.identificadores : [])
+    ].map(normalizarJid).filter(Boolean);
+
+    const pnDireto = candidatos.find(jid => String(jid).endsWith('@s.whatsapp.net'));
+    if (pnDireto) return pnDireto;
+
+    if (sock?.signalRepository?.lidMapping?.getPNForLID) {
+        for (const lid of candidatos.filter(jid => String(jid).endsWith('@lid'))) {
+            try {
+                const pn = await sock.signalRepository.lidMapping.getPNForLID(lid);
+                const numeroResolvido = normalizarNumeroWhatsApp(pn);
+                if (numeroResolvido) {
+                    const pnJid = `${numeroResolvido}@s.whatsapp.net`;
+                    if (ticket?._id && ticketsColl) {
+                        await ticketsColl.updateOne(
+                            { _id: ticket._id },
+                            {
+                                $set: { numeroReal: numeroResolvido, lastActivity: Date.now() },
+                                $addToSet: { whatsappNumbers: numeroResolvido, identificadores: pnJid }
+                            }
+                        ).catch(() => {});
+                    }
+                    return pnJid;
+                }
+            } catch (err) {
+                console.warn(`[Chat] Não foi possível resolver LID ${lid} para PN:`, err?.message || err);
+            }
+        }
+    }
+
+    return null;
 }
 
 function identidadeAdvogadoSessao(req) {
@@ -1190,7 +1271,7 @@ function emitirNotificacaoPainel({
 
 async function sendBotMsg(jid, content) {
     try {
-        const sent = await sock.sendMessage(jid, content);
+        const sent = await enviarMensagemBaileys(jid, content);
         const id = sent?.key?.id;
 
         // Mantém um conjunto de IDs enviados pelo próprio bot.
@@ -2889,13 +2970,13 @@ async function salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo
 }
 
 async function startBot() {
-    try {
-        await client.connect();
-        const db = client.db('bot_whatsapp');
-        authColl = db.collection('auth_session');
-        ticketsColl = db.collection('active_tickets');
-        knowledgeColl = db.collection('knowledge_base');
-        userLoginColl = db.collection('user_login');
+    try {
+        await client.connect();
+        const db = client.db('bot_whatsapp');
+        authColl = db.collection('auth_session');
+        ticketsColl = db.collection('active_tickets');
+        knowledgeColl = db.collection('knowledge_base');
+        userLoginColl = db.collection('user_login');
         clientsColl = db.collection('client_registry');
         ticketHistoryColl = db.collection('ticket_history');
         countersColl = db.collection('counters');
@@ -2971,19 +3052,31 @@ async function startBot() {
             console.log("✅ Sistema Gemini pronto e estável.");
         }
 
-        const { state, saveCreds } = await useMongoDBAuthState(authColl);
-        const { version } = await fetchLatestBaileysVersion();
+        const { state, saveCreds } = await useMongoDBAuthState(authColl);
+        const { version } = await fetchLatestBaileysVersion();
 
-        sock = makeWASocket({
-            version,
-            auth: state,
-            logger: P({ level: 'silent' }),
-            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
-            connectTimeoutMs: 60000,
-            generateHighQualityLinkPreview: false
-        });
+        const baileysLogger = P({ level: 'silent' });
+        const authStateSeguro = {
+            creds: state.creds,
+            keys: typeof makeCacheableSignalKeyStore === 'function'
+                ? makeCacheableSignalKeyStore(state.keys, baileysLogger)
+                : state.keys
+        };
 
-        sock.ev.on('creds.update', saveCreds);
+        sock = makeWASocket({
+            version,
+            auth: authStateSeguro,
+            logger: baileysLogger,
+            browser: ['Azevedo Advogados', 'Chrome', '1.0.0'],
+            connectTimeoutMs: 60000,
+            generateHighQualityLinkPreview: false,
+            syncFullHistory: false,
+            markOnlineOnConnect: false,
+            enableAutoSessionRecreation: true,
+            getMessage: async (key) => obterMensagemEnviadaBaileys(key)
+        });
+
+        sock.ev.on('creds.update', saveCreds);
 
 sock.ev.on('messages.upsert', async m => {
     const msg = m.messages?.[0];
@@ -3888,67 +3981,96 @@ sock.ev.on('messages.upsert', async m => {
                 console.warn('[LID] Falha ao persistir mapeamento:', err?.message || err);
             }
         });
-        sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update;
-            if (qr) { lastQr = qr; io.emit('qr', qr); }
-            
-            if (connection === 'open') {
-                lastQr = null;
-                const userNumber = sock.user.id.split(':')[0];
-                let ppUrl = null;
-                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch (e) { ppUrl = null; }
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
+            if (qr) { lastQr = qr; io.emit('qr', qr); }
+            
+            if (connection === 'open') {
+                lastQr = null;
+                const userNumber = sock.user.id.split(':')[0];
+                let ppUrl = null;
+                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch (e) { ppUrl = null; }
 
-                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
-                io.emit('connected', currentUser);
-            }
-                        
-            if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-                if (shouldReconnect) startBot();
-                else { currentUser = null; io.emit('disconnected'); }
-            }
-        });
+                currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
+                io.emit('connected', currentUser);
+            }
+                        
+            if (connection === 'close') {
+                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+                if (shouldReconnect) startBot();
+                else { currentUser = null; io.emit('disconnected'); }
+            }
+        });
 
-    } catch (err) { 
-        console.error("Erro crítico:", err);
-        setTimeout(startBot, 5000);
-    }
+    } catch (err) { 
+        console.error("Erro crítico:", err);
+        setTimeout(startBot, 5000);
+    }
 }
 
 async function useMongoDBAuthState(collection) {
-    const writeData = (data, id) => collection.replaceOne({ _id: id }, JSON.parse(JSON.stringify(data, BufferJSON.replacer)), { upsert: true });
-    const readData = async (id) => {
-        const data = await collection.findOne({ _id: id });
-        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
-    };
-    const removeData = (id) => collection.deleteOne({ _id: id });
-    const creds = await readData('creds') || initAuthCreds();
-    return {
-        state: {
-            creds,
-            keys: {
-                get: async (type, ids) => {
-                    const data = {};
-                    await Promise.all(ids.map(async id => {
-                        let value = await readData(`${type}-${id}`);
-                        if (type === 'app-state-sync-key' && value) value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
-                        data[id] = value;
-                    }));
-                    return data;
-                },
-                set: async (data) => {
-                    for (const type in data) {
-                        for (const id in data[type]) {
-                            const value = data[type][id];
-                            if (value) writeData(value, `${type}-${id}`);
-                            else removeData(`${type}-${id}`);
-                        }
-                    }
-                }
-            }
-        },
-        saveCreds: () => writeData(creds, 'creds')
-    };
+    // Chaves Signal precisam estar realmente persistidas antes de keys.set() resolver.
+    // A versão anterior disparava replaceOne/deleteOne sem await, abrindo condição
+    // de corrida nas próprias chaves usadas para criptografar as mensagens.
+    let filaEscrita = Promise.resolve();
+
+    const enfileirarEscrita = (trabalho) => {
+        const operacao = filaEscrita.then(trabalho, trabalho);
+        filaEscrita = operacao.catch(() => {});
+        return operacao;
+    };
+
+    const serializar = (data) => JSON.parse(JSON.stringify(data, BufferJSON.replacer));
+
+    const writeData = async (data, id) => {
+        await collection.replaceOne({ _id: id }, serializar(data), { upsert: true });
+    };
+
+    const removeData = async (id) => {
+        await collection.deleteOne({ _id: id });
+    };
+
+    const readData = async (id) => {
+        await filaEscrita.catch(() => {});
+        const data = await collection.findOne({ _id: id });
+        return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
+    };
+
+    const creds = await readData('creds') || initAuthCreds();
+
+    return {
+        state: {
+            creds,
+            keys: {
+                get: async (type, ids) => {
+                    const data = {};
+                    await Promise.all(ids.map(async id => {
+                        let value = await readData(`${type}-${id}`);
+                        if (type === 'app-state-sync-key' && value) {
+                            value = require('@whiskeysockets/baileys').proto.Message.AppStateSyncKeyData.fromObject(value);
+                        }
+                        data[id] = value;
+                    }));
+                    return data;
+                },
+                set: async (data) => enfileirarEscrita(async () => {
+                    const tarefas = [];
+                    for (const type in data) {
+                        for (const id in data[type]) {
+                            const value = data[type][id];
+                            tarefas.push(
+                                value !== null && value !== undefined
+                                    ? writeData(value, `${type}-${id}`)
+                                    : removeData(`${type}-${id}`)
+                            );
+                        }
+                    }
+                    await Promise.all(tarefas);
+                })
+            }
+        },
+        saveCreds: () => enfileirarEscrita(() => writeData(creds, 'creds'))
+    };
 }
 
 app.get('/login', (req, res) => {
@@ -4033,13 +4155,23 @@ app.use('/api/users', exigirPermissao('users'));
 app.use('/api/tickets', exigirPermissao('tickets'));
 
 app.get('/logout-whatsapp', exigirPermissao('whatsapp'), async (req, res) => {
-    try {
-        await authColl.deleteMany({});
-        if (sock) await sock.logout();
-        currentUser = null; lastQr = null;
-        io.emit('disconnected');
-        res.sendStatus(200);
-    } catch (err) { res.status(500).send("Erro"); }
+    try {
+        // Encerra primeiro no WhatsApp e só depois remove o estado criptográfico
+        // do MongoDB. Assim um creds.update disparado pelo logout não recria uma
+        // sessão parcial depois da limpeza.
+        if (sock) {
+            try { await sock.logout(); } catch (err) {
+                console.warn('[WhatsApp] Logout remoto falhou; limpando sessão local:', err?.message || err);
+            }
+        }
+        await authColl.deleteMany({});
+        currentUser = null; lastQr = null;
+        io.emit('disconnected');
+        res.sendStatus(200);
+    } catch (err) {
+        console.error('[WhatsApp] Erro ao desconectar:', err);
+        res.status(500).send("Erro");
+    }
 });
 
 
@@ -5181,7 +5313,7 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
         if (!texto) return res.status(400).json({ erro: 'Digite uma mensagem para enviar.' });
         const ticket = await ticketsColl.findOne({ ticketNumber });
         if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
-        const jid = destinoWhatsAppTicket(ticket);
+        const jid = await destinoWhatsAppTicket(ticket);
         if (!jid) return res.status(409).json({ erro: 'Não foi possível identificar o WhatsApp deste ticket.' });
 
         const advogado = identidadeAdvogadoSessao(req);
@@ -5191,7 +5323,7 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
         setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 5000);
         let sent;
         try {
-            sent = await sock.sendMessage(jid, { text: textoWhatsApp });
+            sent = await enviarMensagemBaileys(jid, { text: textoWhatsApp });
         } finally {
             setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 2500);
         }
@@ -5254,7 +5386,7 @@ app.post(
             const ticketNumber = String(req.params.ticketNumber || '').trim();
             const ticket = await ticketsColl.findOne({ ticketNumber });
             if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
-            const jid = destinoWhatsAppTicket(ticket);
+            const jid = await destinoWhatsAppTicket(ticket);
             if (!jid) return res.status(409).json({ erro: 'Não foi possível identificar o WhatsApp deste ticket.' });
             if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ erro: 'Arquivo vazio ou inválido.' });
             if (req.body.length > CHAT_MAX_UPLOAD_BYTES) return res.status(413).json({ erro: 'Arquivo acima do limite de 15 MB do chat.' });
@@ -5282,7 +5414,7 @@ app.post(
             // Áudio não aceita legenda no WhatsApp. Envia a identificação em uma
             // mensagem curta imediatamente antes, sem salvar binário no MongoDB.
             if (tipo === 'audio') {
-                const intro = await sock.sendMessage(jid, { text: legenda ? `${advogado.assinatura}: ${legenda}` : `${advogado.assinatura}:` });
+                const intro = await enviarMensagemBaileys(jid, { text: legenda ? `${advogado.assinatura}: ${legenda}` : `${advogado.assinatura}:` });
                 if (intro?.key?.id) {
                     panelMessageIds.add(intro.key.id);
                     setTimeout(() => panelMessageIds.delete(intro.key.id), 2 * 60 * 1000);
@@ -5295,7 +5427,7 @@ app.post(
 
             let sent;
             try {
-                sent = await sock.sendMessage(jid, payload);
+                sent = await enviarMensagemBaileys(jid, payload);
             } finally {
                 setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 2500);
             }
@@ -6325,11 +6457,11 @@ app.get('/api/knowledgeColl', async (req, res) => {
 });
 
 app.post('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    const { pergunta, resposta } = req.body;
-    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
+    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
+    const { pergunta, resposta } = req.body;
+    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
     invalidarCacheKnowledge();
-    res.sendStatus(200);
+    res.sendStatus(200);
 });
 
 app.delete('/api/knowledgeColl/:id', async (req, res) => {
@@ -6353,11 +6485,11 @@ app.delete('/api/knowledgeColl/:id', async (req, res) => {
 });
 
 setInterval(async () => {
-    try {
-        const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
-        const protocol = host.includes('localhost') ? 'http' : 'https';
-        await axios.get(`${protocol}://${host}/`);
-    } catch (e) {}
+    try {
+        const host = process.env.RENDER_EXTERNAL_HOSTNAME || `localhost:${port}`;
+        const protocol = host.includes('localhost') ? 'http' : 'https';
+        await axios.get(`${protocol}://${host}/`);
+    } catch (e) {}
 }, 5 * 60 * 1000);
 
 io.use((socket, next) => {
