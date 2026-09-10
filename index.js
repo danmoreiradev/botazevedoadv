@@ -2013,6 +2013,16 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
 
     await registrarTicketHistorico(ticket);
 
+    // LEADS DE ANÚNCIO entram automaticamente no CRM no mesmo instante em que
+    // o ticket é criado. A falha do CRM nunca impede a abertura do atendimento.
+    if (ticket.origem === 'lead_anuncio') {
+        try {
+            await sincronizarLeadCRMDoTicket(ticket);
+        } catch (err) {
+            console.error(`[CRM] Ticket ${ticket.ticketNumber} foi criado, mas não foi possível sincronizar o lead automaticamente:`, err?.message || err);
+        }
+    }
+
     if (cliente) {
         await clientsColl.updateOne(
             { _id: cliente._id },
@@ -3926,6 +3936,161 @@ function montarResumoTicketParaCRM(ticket = {}, historico = {}) {
     return textoCRM(linhas.join('\n'), 6000);
 }
 
+// Cria ou atualiza o registro comercial correspondente a um ticket de anúncio.
+// Esta é a única rotina usada tanto pela criação automática quanto pelo botão/endpoint
+// do painel, evitando lógicas diferentes e duplicidade de leads.
+async function sincronizarLeadCRMDoTicket(ticketOuNumero, { emitirEvento = true } = {}) {
+    if (!crmLeadsColl || !ticketsColl) return { ok: false, motivo: 'crm_indisponivel' };
+
+    let ticket = ticketOuNumero && typeof ticketOuNumero === 'object'
+        ? ticketOuNumero
+        : null;
+
+    const ticketNumberInformado = typeof ticketOuNumero === 'string'
+        ? textoCRM(ticketOuNumero, 80)
+        : textoCRM(ticket?.ticketNumber, 80);
+
+    if (!ticket && ticketNumberInformado) {
+        ticket = await ticketsColl.findOne({ ticketNumber: ticketNumberInformado });
+    }
+
+    if (!ticket?.ticketNumber) return { ok: false, motivo: 'ticket_nao_encontrado' };
+    if (ticket.origem !== 'lead_anuncio') return { ok: false, motivo: 'nao_e_lead_anuncio' };
+
+    const ticketNumber = textoCRM(ticket.ticketNumber, 80);
+    const historico = ticketHistoryColl
+        ? (await ticketHistoryColl.findOne({ _id: ticketNumber })) || {}
+        : {};
+
+    const existente = await crmLeadsColl.findOne({ ticketNumber });
+    const agora = Date.now();
+    const telefoneTicket = whatsappDoTicket(ticket) || '';
+    const clienteTicket = textoCRM(ticket.clienteNome || '', 240);
+    const areaTicket = textoCRM(ticket.area || ticket.menuOptionTitle || '', 160);
+    const resumoTicket = montarResumoTicketParaCRM(ticket, historico);
+
+    if (existente) {
+        const atualizacao = {
+            origemTipo: 'anuncio',
+            origemTecnica: 'lead_anuncio',
+            ultimaSincronizacaoTicketEm: agora,
+            updatedAt: agora
+        };
+
+        // Dados do próprio ticket podem amadurecer depois da abertura (nome, área e
+        // respostas da triagem). Atualizamos somente esses campos operacionais e
+        // preservamos status, valores, responsável, próxima ação e demais dados comerciais.
+        if (clienteTicket) atualizacao.cliente = clienteTicket;
+        if (telefoneTicket) atualizacao.telefone = telefoneTicket;
+        if (areaTicket) atualizacao.area = areaTicket;
+        if (resumoTicket) atualizacao.assuntoResumo = resumoTicket;
+
+        await crmLeadsColl.updateOne({ _id: existente._id }, { $set: atualizacao });
+        const atualizado = { ...existente, ...atualizacao };
+
+        if (ticketHistoryColl) {
+            await atualizarHistorico(ticketNumber, {
+                crmLeadId: String(existente._id),
+                crmNumber: existente.crmNumber || null,
+                crmAutomatico: true,
+                crmSincronizadoEm: agora
+            });
+        }
+
+        if (emitirEvento) {
+            io.emit('crm_updated', {
+                action: 'synced_from_ticket',
+                id: String(existente._id),
+                ticketNumber
+            });
+        }
+
+        return { ok: true, created: false, lead: atualizado };
+    }
+
+    const base = normalizarLeadCRM({
+        dataEntrada: dataTimestampParaCRM(ticket.createdAt),
+        // O detector atual identifica mensagens provenientes de campanhas Meta/Facebook/Instagram.
+        // O campo continua editável no CRM caso o advogado queira especificar a plataforma.
+        origem: 'Meta Ads',
+        cliente: clienteTicket || `Lead ${ticketNumber}`,
+        telefone: telefoneTicket,
+        area: areaTicket,
+        assuntoResumo: resumoTicket,
+        status: 'Novo lead',
+        proximaAcao: 'Realizar primeiro contato / avaliar contratação',
+        dataProximaAcao: dataHojeCRM(),
+        observacoes: `Criado automaticamente a partir do ticket ${ticketNumber}. Origem técnica: lead_anuncio.`
+    });
+
+    const doc = {
+        ...base,
+        origemTipo: 'anuncio',
+        origemTecnica: 'lead_anuncio',
+        crmNumber: await gerarNumeroCRM(),
+        ticketNumber,
+        ultimaSincronizacaoTicketEm: agora,
+        createdAt: agora,
+        updatedAt: agora
+    };
+
+    try {
+        const resultado = await crmLeadsColl.insertOne(doc);
+        const salvo = { ...doc, _id: resultado.insertedId };
+
+        if (ticketHistoryColl) {
+            await atualizarHistorico(ticketNumber, {
+                crmLeadId: String(resultado.insertedId),
+                crmNumber: doc.crmNumber,
+                crmAutomatico: true,
+                crmCriadoEm: agora,
+                crmSincronizadoEm: agora
+            });
+        }
+
+        if (emitirEvento) {
+            io.emit('crm_updated', {
+                action: 'created_from_ticket_auto',
+                id: String(resultado.insertedId),
+                ticketNumber
+            });
+        }
+
+        console.log(`[CRM ${doc.crmNumber}] Lead criado automaticamente a partir do ticket ${ticketNumber}.`);
+        return { ok: true, created: true, lead: salvo };
+    } catch (err) {
+        // O índice único por ticketNumber garante idempotência caso duas mensagens/eventos
+        // tentem criar o mesmo lead simultaneamente.
+        if (err?.code === 11000) {
+            const duplicado = await crmLeadsColl.findOne({ ticketNumber });
+            if (duplicado) return { ok: true, created: false, lead: duplicado };
+        }
+        throw err;
+    }
+}
+
+// Recuperação automática para tickets de anúncio que já estavam ativos antes desta
+// correção. Sempre que o CRM é carregado, tickets de anúncio e seus leads são reconciliados.
+async function reconciliarTicketsAnuncioNoCRM() {
+    if (!crmLeadsColl || !ticketsColl) return { processados: 0, criados: 0 };
+
+    const tickets = await ticketsColl.find({ origem: 'lead_anuncio' }).limit(1000).toArray();
+    if (!tickets.length) return { processados: 0, criados: 0 };
+
+    let criados = 0;
+    for (const ticket of tickets) {
+        try {
+            const resultado = await sincronizarLeadCRMDoTicket(ticket, { emitirEvento: false });
+            if (resultado?.created) criados += 1;
+        } catch (err) {
+            console.error(`[CRM] Falha ao reconciliar ticket ${ticket.ticketNumber || ticket._id}:`, err?.message || err);
+        }
+    }
+
+    if (criados) io.emit('crm_updated', { action: 'reconciled', created: criados });
+    return { processados: tickets.length, criados };
+}
+
 // Painel operacional de tickets ativos.
 // A classificação abaixo separa o que depende da equipe do que ainda depende do cliente.
 const TICKET_STATUS_LABELS = {
@@ -4057,6 +4222,13 @@ app.get('/api/tickets/active', async (req, res) => {
                 }
             }
         ).toArray();
+
+        // Garante também no painel de tickets que todo ticket classificado como
+        // lead_anuncio já possua seu registro correspondente no CRM. Isso recupera
+        // automaticamente tickets criados antes desta correção.
+        if (crmLeadsColl && tickets.some(ticket => ticket.origem === 'lead_anuncio')) {
+            await reconciliarTicketsAnuncioNoCRM();
+        }
 
         const ticketNumbers = tickets.map(ticket => ticket.ticketNumber).filter(Boolean);
         const historicos = ticketHistoryColl && ticketNumbers.length
@@ -4233,6 +4405,10 @@ app.get('/api/crm/leads', async (req, res) => {
     if (!crmLeadsColl) return res.status(503).json({ erro: 'CRM ainda não está disponível.' });
 
     try {
+        // Self-healing: se havia um ticket de anúncio ativo antes da criação automática
+        // ser implementada, ele é criado/sincronizado no CRM ao abrir esta tela.
+        await reconciliarTicketsAnuncioNoCRM();
+
         const leadsBrutos = await crmLeadsColl.find({}).sort({ updatedAt: -1 }).limit(3000).toArray();
         // O CRM é exclusivamente de leads originados de mídia paga/anúncios.
         // Registros orgânicos eventualmente criados por versões anteriores permanecem
@@ -4297,52 +4473,21 @@ app.post('/api/crm/leads/from-ticket/:ticketNumber', async (req, res) => {
             return res.status(400).json({ erro: 'Somente tickets originados de anúncio podem ser adicionados ao CRM.' });
         }
 
-        const existente = await crmLeadsColl.findOne({ ticketNumber });
-        if (existente && leadCRMDeAnuncio(existente)) {
-            return res.json({ ok: true, created: false, lead: serializarLeadCRM(existente) });
+        // O botão agora funciona como criação/sincronização idempotente. Normalmente o lead
+        // já terá sido criado automaticamente no momento em que o ticket nasceu.
+        const resultado = await sincronizarLeadCRMDoTicket(ticket);
+        if (!resultado?.ok || !resultado?.lead) {
+            return res.status(500).json({ erro: 'Não foi possível sincronizar o ticket com o CRM.' });
         }
 
-        const historico = ticketHistoryColl
-            ? (await ticketHistoryColl.findOne({ _id: ticketNumber })) || {}
-            : {};
-
-        const origem = 'Meta Ads';
-        const telefone = whatsappDoTicket(ticket) || '';
-        const base = normalizarLeadCRM({
-            dataEntrada: dataTimestampParaCRM(ticket.createdAt),
-            origem,
-            cliente: ticket.clienteNome || `Lead ${ticket.ticketNumber}`,
-            telefone,
-            area: ticket.area || ticket.menuOptionTitle || '',
-            assuntoResumo: montarResumoTicketParaCRM(ticket, historico),
-            status: 'Novo lead',
-            proximaAcao: 'Realizar primeiro contato / avaliar contratação',
-            dataProximaAcao: dataHojeCRM(),
-            observacoes: `Criado automaticamente a partir do ticket ${ticket.ticketNumber}. Origem técnica: ${ticket.origem || 'não informada'}.`
+        res.status(resultado.created ? 201 : 200).json({
+            ok: true,
+            created: !!resultado.created,
+            lead: serializarLeadCRM(resultado.lead)
         });
-
-        const agora = Date.now();
-        const doc = {
-            ...base,
-            origemTipo: 'anuncio',
-            origemTecnica: 'lead_anuncio',
-            crmNumber: await gerarNumeroCRM(),
-            ticketNumber,
-            createdAt: agora,
-            updatedAt: agora
-        };
-
-        const resultado = await crmLeadsColl.insertOne(doc);
-        const salvo = { ...doc, _id: resultado.insertedId };
-        io.emit('crm_updated', { action: 'created_from_ticket', id: String(resultado.insertedId), ticketNumber });
-        res.status(201).json({ ok: true, created: true, lead: serializarLeadCRM(salvo) });
     } catch (err) {
-        if (err?.code === 11000) {
-            const existente = await crmLeadsColl.findOne({ ticketNumber: textoCRM(req.params.ticketNumber, 80) });
-            if (existente) return res.json({ ok: true, created: false, lead: serializarLeadCRM(existente) });
-        }
-        console.error('[CRM] Erro ao criar lead a partir do ticket:', err);
-        res.status(500).json({ erro: 'Não foi possível adicionar o ticket ao CRM.' });
+        console.error('[CRM] Erro ao sincronizar lead a partir do ticket:', err);
+        res.status(500).json({ erro: 'Não foi possível sincronizar o ticket com o CRM.' });
     }
 });
 
