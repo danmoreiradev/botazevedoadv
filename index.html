@@ -1376,6 +1376,33 @@
             word-break: break-word;
         }
 
+        .ticket-doc-actions {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+        .ticket-doc-retry-btn {
+            min-height: 36px;
+            padding: 7px 11px;
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            color: var(--adv-blue);
+            background: #fff;
+            border: 1px solid var(--border-strong);
+            border-radius: 9px;
+            font-size: .78rem;
+            font-weight: 760;
+        }
+        .ticket-doc-retry-btn:hover:not(:disabled) {
+            background: #f5f6f8;
+            border-color: #bfc5cd;
+        }
+        .ticket-doc-retry-btn:disabled { opacity: .65; cursor: wait; }
+        .ticket-doc-retry-hint { color: var(--text-muted); font-size: .74rem; }
+
         @media (max-width: 1199.98px) {
             .tickets-summary-grid { grid-template-columns: repeat(3, 1fr); }
             .tickets-toolbar { grid-template-columns: 1fr 1fr; }
@@ -2495,20 +2522,24 @@
             window.location.reload();
         });
 
-        socket.on('ticket_document_ai_updated', ({ ticketNumber } = {}) => {
+        socket.on('ticket_document_ai_updated', ({ ticketNumber, status } = {}) => {
             const tab = document.getElementById('tab-tickets');
             const activeView = document.getElementById('tickets-view-active');
             if (!tab || tab.classList.contains('hidden') || activeView?.classList.contains('hidden')) return;
+
+            // Evita recarregar toda a lista a cada etapa interna (fila, download, chamada IA).
+            // Atualizamos automaticamente apenas quando a análise termina.
+            if (!['concluida', 'erro', 'nao_suportado'].includes(String(status || ''))) return;
 
             clearTimeout(window.ticketDocumentAIRefreshTimer);
             window.ticketDocumentAIRefreshTimer = setTimeout(() => {
                 window.activeTicketsLoaded = false;
                 if (window.activeTicketsLoading) {
-                    setTimeout(() => carregarTicketsAtivos(true), 600);
+                    setTimeout(() => carregarTicketsAtivos(true), 700);
                 } else {
                     carregarTicketsAtivos(true);
                 }
-            }, 250);
+            }, 500);
         });
 
         socket.on('crm_updated', () => {
@@ -3587,6 +3618,8 @@ function renderizarLista(itens) {
         function rotuloStatusDocumentoIA(status) {
             const mapa = {
                 analisando: 'Preparando análise',
+                na_fila: 'Na fila',
+                baixando: 'Preparando arquivo',
                 processando_ia: 'Gemini analisando',
                 concluida: 'Análise concluída',
                 erro: 'Falha na análise',
@@ -3629,6 +3662,38 @@ function renderizarLista(itens) {
             });
             bloco.append(h, ul);
             container.appendChild(bloco);
+        }
+
+        async function reprocessarDocumentoIA(ticketNumber, messageId, button) {
+            if (!ticketNumber || !messageId) return;
+
+            const textoOriginal = button?.innerHTML || '';
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Solicitando...';
+            }
+
+            try {
+                const url = `/api/tickets/${encodeURIComponent(ticketNumber)}/documents/${encodeURIComponent(messageId)}/retry`;
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível gerar uma nova leitura.');
+
+                // Atualiza imediatamente para mostrar "Na fila"; o socket atualizará de novo
+                // quando a nova análise for concluída ou falhar.
+                window.activeTicketsLoaded = false;
+                await carregarTicketsAtivos(true);
+            } catch (err) {
+                console.error(err);
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = textoOriginal;
+                }
+                alert(err.message || 'Não foi possível gerar uma nova leitura.');
+            }
         }
 
         function renderizarDocumentosIATicket(body, ticket) {
@@ -3705,12 +3770,44 @@ function renderizarLista(itens) {
                     erro.className = 'ticket-doc-error';
                     erro.textContent = doc.erro || 'Não foi possível concluir a análise automática deste arquivo.';
                     docBody.appendChild(erro);
+
+                    if (doc.statusAnalise === 'erro') {
+                        const actions = document.createElement('div');
+                        actions.className = 'ticket-doc-actions';
+
+                        if (doc.podeReprocessar && doc.messageId) {
+                            const retryBtn = document.createElement('button');
+                            retryBtn.type = 'button';
+                            retryBtn.className = 'ticket-doc-retry-btn';
+                            retryBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Gerar leitura novamente';
+                            retryBtn.onclick = () => reprocessarDocumentoIA(ticket.ticketNumber, doc.messageId, retryBtn);
+                            actions.appendChild(retryBtn);
+
+                            if (doc.erroTemporario) {
+                                const hint = document.createElement('span');
+                                hint.className = 'ticket-doc-retry-hint';
+                                hint.textContent = 'Falha temporária: normalmente uma nova tentativa resolve.';
+                                actions.appendChild(hint);
+                            }
+                        } else if (doc.erroCodigo !== 'ARQUIVO_MUITO_GRANDE') {
+                            const hint = document.createElement('span');
+                            hint.className = 'ticket-doc-retry-hint';
+                            hint.textContent = 'Para este arquivo não há referência disponível para reprocessamento. Se necessário, peça o reenvio ao cliente.';
+                            actions.appendChild(hint);
+                        }
+
+                        if (actions.childNodes.length) docBody.appendChild(actions);
+                    }
                 } else {
                     const note = document.createElement('div');
                     note.className = 'ticket-doc-note';
                     note.textContent = doc.statusAnalise === 'processando_ia'
-                        ? 'O arquivo já foi baixado e está sendo analisado pelo Gemini. Esta tela será atualizada automaticamente quando o resumo estiver pronto.'
-                        : 'O arquivo foi recebido e está sendo preparado para análise. Esta tela será atualizada automaticamente.';
+                        ? 'O arquivo já foi preparado e está sendo analisado pelo Gemini. Esta tela será atualizada automaticamente quando o resumo estiver pronto.'
+                        : doc.statusAnalise === 'na_fila'
+                            ? 'O arquivo está na fila de leitura. O sistema processa um documento por vez para reduzir o consumo de memória e evitar sobrecarga.'
+                            : doc.statusAnalise === 'baixando'
+                                ? 'O arquivo está sendo preparado para a análise. Esta etapa ocorre somente quando chega a vez dele na fila.'
+                                : 'O arquivo foi recebido e está sendo preparado para análise.';
                     docBody.appendChild(note);
                 }
 

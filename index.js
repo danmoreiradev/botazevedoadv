@@ -28,10 +28,53 @@ let apiKeysColl;
 // O arquivo recebido pelo WhatsApp é baixado apenas para a memória do processo,
 // enviado ao Gemini e descartado em seguida. O MongoDB armazena somente metadados
 // e o resumo estruturado; o binário do documento não é persistido nesta rotina.
-const DOCUMENT_AI_MAX_PDF_BYTES = 48 * 1024 * 1024;
-const DOCUMENT_AI_MAX_OTHER_BYTES = 70 * 1024 * 1024;
+// Limites deliberadamente menores para evitar picos de RAM/CPU ao converter arquivos
+// para base64. Ajuste estes valores conforme a capacidade da hospedagem.
+const DOCUMENT_AI_MAX_PDF_BYTES = 20 * 1024 * 1024;
+const DOCUMENT_AI_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const DOCUMENT_AI_MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+const DOCUMENT_AI_MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+const DOCUMENT_AI_MAX_TEXT_BYTES = 2 * 1024 * 1024;
+const DOCUMENT_AI_MAX_OTHER_BYTES = 12 * 1024 * 1024;
+const DOCUMENT_AI_TEXT_MAX_CHARS = 750_000;
 const DOCUMENT_AI_MAX_ITEMS = 30;
-const DOCUMENT_AI_PROMPT_VERSION = 'aj-doc-v1';
+const DOCUMENT_AI_PROMPT_VERSION = 'aj-doc-v2';
+
+// Apenas uma análise pesada por vez. O WhatsApp continua respondendo normalmente,
+// porque a fila roda em paralelo ao fluxo de atendimento.
+const DOCUMENT_AI_MAX_CONCURRENCY = 1;
+const DOCUMENT_AI_GEMINI_MAX_ATTEMPTS = 3;
+const DOCUMENT_AI_RETRY_BASE_DELAY_MS = 1200;
+const DOCUMENT_AI_RETRY_REF_MAX_CHARS = 150_000;
+
+let documentAIActiveJobs = 0;
+const documentAIQueue = [];
+
+function drenarFilaDocumentoIA() {
+    while (documentAIActiveJobs < DOCUMENT_AI_MAX_CONCURRENCY && documentAIQueue.length) {
+        const job = documentAIQueue.shift();
+        documentAIActiveJobs += 1;
+
+        Promise.resolve()
+            .then(job.tarefa)
+            .then(job.resolve, job.reject)
+            .finally(() => {
+                documentAIActiveJobs = Math.max(0, documentAIActiveJobs - 1);
+                drenarFilaDocumentoIA();
+            });
+    }
+}
+
+function enfileirarTrabalhoDocumentoIA(tarefa) {
+    return new Promise((resolve, reject) => {
+        documentAIQueue.push({ tarefa, resolve, reject });
+        drenarFilaDocumentoIA();
+    });
+}
+
+function esperarDocumentoIA(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 const DOCUMENT_AI_MIME_EXACT = new Set([
     'application/pdf',
@@ -199,13 +242,192 @@ function mimeEhTextoParaGemini(mimeType = '') {
 }
 
 function limiteArquivoGemini(mimeType = '') {
-    return String(mimeType).toLowerCase().startsWith('application/pdf')
-        ? DOCUMENT_AI_MAX_PDF_BYTES
-        : DOCUMENT_AI_MAX_OTHER_BYTES;
+    const mime = String(mimeType || '').toLowerCase().split(';')[0].trim();
+    if (mime === 'application/pdf') return DOCUMENT_AI_MAX_PDF_BYTES;
+    if (mime.startsWith('image/')) return DOCUMENT_AI_MAX_IMAGE_BYTES;
+    if (mime.startsWith('audio/')) return DOCUMENT_AI_MAX_AUDIO_BYTES;
+    if (mime.startsWith('video/')) return DOCUMENT_AI_MAX_VIDEO_BYTES;
+    if (mimeEhTextoParaGemini(mime)) return DOCUMENT_AI_MAX_TEXT_BYTES;
+    return DOCUMENT_AI_MAX_OTHER_BYTES;
 }
 
 function mensagemMimeNaoSuportado(nomeArquivo, mimeType) {
     return `O arquivo ${nomeArquivo || ''} foi registrado no ticket, mas o tipo ${mimeType || 'desconhecido'} não é aceito diretamente pela rotina atual do Gemini. PDFs, imagens, áudios, vídeos e formatos textuais comuns são analisados automaticamente.`;
+}
+
+
+function criarReferenciaRetryDocumentoIA(msg, media) {
+    if (!msg || !media?.payload || msg?.key?.fromMe) return null;
+
+    // Guardamos SOMENTE os metadados criptográficos/de-download necessários para
+    // tentar recuperar a mídia do WhatsApp novamente. O conteúdo do arquivo não é
+    // salvo no MongoDB, evitando aumentar muito o banco.
+    const camposPermitidos = [
+        'url', 'directPath', 'mediaKey', 'fileEncSha256', 'fileSha256',
+        'fileLength', 'mediaKeyTimestamp', 'mimetype', 'fileName', 'title',
+        'caption', 'seconds', 'ptt', 'gifPlayback'
+    ];
+
+    const payloadMinimo = {};
+    for (const campo of camposPermitidos) {
+        if (media.payload[campo] !== undefined && media.payload[campo] !== null) {
+            payloadMinimo[campo] = media.payload[campo];
+        }
+    }
+
+    try {
+        const serializado = JSON.stringify({
+            tipo: media.tipo,
+            remoteJid: msg?.key?.remoteJid || null,
+            remoteJidAlt: msg?.key?.remoteJidAlt || null,
+            payload: payloadMinimo
+        }, BufferJSON.replacer);
+
+        if (!serializado || serializado.length > DOCUMENT_AI_RETRY_REF_MAX_CHARS) return null;
+        return serializado;
+    } catch (err) {
+        console.warn('[Documentos IA] Não foi possível criar referência leve para reprocessamento:', err?.message || err);
+        return null;
+    }
+}
+
+function reconstruirMensagemRetryDocumentoIA(retryRef, messageId) {
+    if (!retryRef || !messageId) return null;
+
+    try {
+        const dados = JSON.parse(String(retryRef), BufferJSON.reviver);
+        const campoPorTipo = {
+            documento: 'documentMessage',
+            imagem: 'imageMessage',
+            audio: 'audioMessage',
+            video: 'videoMessage'
+        };
+        const campo = campoPorTipo[dados?.tipo];
+        if (!campo || !dados?.payload) return null;
+
+        return {
+            key: {
+                id: String(messageId),
+                remoteJid: dados.remoteJid || dados.remoteJidAlt || null,
+                remoteJidAlt: dados.remoteJidAlt || null,
+                fromMe: false
+            },
+            message: {
+                [campo]: dados.payload
+            }
+        };
+    } catch (err) {
+        console.warn('[Documentos IA] Referência de reprocessamento inválida:', err?.message || err);
+        return null;
+    }
+}
+
+function statusHttpErroDocumentoIA(err) {
+    const candidatos = [
+        err?.status,
+        err?.statusCode,
+        err?.response?.status,
+        err?.cause?.status,
+        err?.cause?.statusCode
+    ];
+
+    for (const valor of candidatos) {
+        const numero = Number(valor);
+        if (Number.isInteger(numero) && numero >= 100 && numero <= 599) return numero;
+    }
+
+    const texto = String(err?.message || err || '');
+    const match = texto.match(/\[(429|500|502|503|504)\b/i) || texto.match(/\b(429|500|502|503|504)\b/);
+    return match ? Number(match[1]) : null;
+}
+
+function erroDocumentoIATemporario(err) {
+    const status = statusHttpErroDocumentoIA(err);
+    if ([429, 500, 502, 503, 504].includes(status)) return true;
+
+    return /(high demand|service unavailable|temporar|resource exhausted|rate limit|too many requests|overload|fetch failed|econnreset|etimedout|socket hang up)/i
+        .test(String(err?.message || err || ''));
+}
+
+function erroDocumentoIADownloadIrrecuperavel(err) {
+    return /(media.*not found|arquivo.*não.*encontr|message.*not found|mídia.*expir|media.*expired|404)/i
+        .test(String(err?.message || err || ''));
+}
+
+function descreverErroDocumentoIA(err, { temRetryRef = false } = {}) {
+    const status = statusHttpErroDocumentoIA(err);
+    const texto = String(err?.message || err || '');
+    const temporario = erroDocumentoIATemporario(err);
+    const downloadIrrecuperavel = erroDocumentoIADownloadIrrecuperavel(err);
+
+    if (status === 503 || /high demand|service unavailable|overload/i.test(texto)) {
+        return {
+            codigo: 'GEMINI_SOBRECARREGADO',
+            temporario: true,
+            podeReprocessar: !!temRetryRef,
+            mensagem: 'A IA está temporariamente sobrecarregada. O sistema já realizou novas tentativas automáticas. Tente gerar a leitura novamente em alguns instantes.'
+        };
+    }
+
+    if (status === 429 || /resource exhausted|rate limit|too many requests/i.test(texto)) {
+        return {
+            codigo: 'GEMINI_LIMITE_TEMPORARIO',
+            temporario: true,
+            podeReprocessar: !!temRetryRef,
+            mensagem: 'O limite temporário da IA foi atingido. Aguarde alguns instantes e tente gerar a leitura novamente.'
+        };
+    }
+
+    if (downloadIrrecuperavel) {
+        return {
+            codigo: 'MIDIA_NAO_RECUPERAVEL',
+            temporario: false,
+            podeReprocessar: false,
+            mensagem: 'Não foi possível recuperar novamente este arquivo do WhatsApp. Se necessário, solicite o reenvio do documento pelo cliente.'
+        };
+    }
+
+    if (temporario) {
+        return {
+            codigo: 'FALHA_TEMPORARIA_IA',
+            temporario: true,
+            podeReprocessar: !!temRetryRef,
+            mensagem: 'Houve uma falha temporária de comunicação com a IA. Tente gerar a leitura novamente em alguns instantes.'
+        };
+    }
+
+    return {
+        codigo: 'FALHA_ANALISE_DOCUMENTO',
+        temporario: false,
+        podeReprocessar: !!temRetryRef,
+        mensagem: 'Não foi possível concluir a análise automática deste arquivo. Você pode tentar gerar a leitura novamente.'
+    };
+}
+
+async function gerarConteudoDocumentoComRetry(partesEntrada) {
+    let ultimoErro = null;
+    let tentativasExecutadas = 0;
+
+    for (let tentativa = 1; tentativa <= DOCUMENT_AI_GEMINI_MAX_ATTEMPTS; tentativa++) {
+        tentativasExecutadas = tentativa;
+        try {
+            const resultado = await geminiModel.generateContent(partesEntrada);
+            return { resultado, tentativas: tentativa };
+        } catch (err) {
+            ultimoErro = err;
+            const deveTentarNovamente = erroDocumentoIATemporario(err) && tentativa < DOCUMENT_AI_GEMINI_MAX_ATTEMPTS;
+            if (!deveTentarNovamente) break;
+
+            const atraso = (DOCUMENT_AI_RETRY_BASE_DELAY_MS * (2 ** (tentativa - 1))) + Math.floor(Math.random() * 350);
+            console.warn(`[Documentos IA] Gemini indisponível na tentativa ${tentativa}/${DOCUMENT_AI_GEMINI_MAX_ATTEMPTS}. Nova tentativa em ${atraso}ms.`);
+            await esperarDocumentoIA(atraso);
+        }
+    }
+
+    try {
+        ultimoErro.documentAITentativas = tentativasExecutadas;
+    } catch (_) {}
+    throw ultimoErro || new Error('Falha desconhecida ao consultar o Gemini.');
 }
 
 function normalizarAnaliseDocumentoIA(parsed, textoFallback = '') {
@@ -231,12 +453,12 @@ function normalizarAnaliseDocumentoIA(parsed, textoFallback = '') {
 
     return {
         tipoDocumento: limitarTextoDocumentoIA(dados.tipoDocumento || 'Não identificado', 300),
-        resumoExecutivo: limitarTextoDocumentoIA(dados.resumoExecutivo || textoFallback || 'Não foi possível gerar um resumo estruturado.', 8000),
+        resumoExecutivo: limitarTextoDocumentoIA(dados.resumoExecutivo || textoFallback || 'Não foi possível gerar um resumo estruturado.', 5000),
         partesPessoas: partes,
-        pontosRelevantes: limitarListaDocumentoIA(dados.pontosRelevantes, 25, 1200),
+        pontosRelevantes: limitarListaDocumentoIA(dados.pontosRelevantes, 15, 900),
         datasValores,
-        obrigacoesPrazos: limitarListaDocumentoIA(dados.obrigacoesPrazos, 25, 1200),
-        alertasAdvogado: limitarListaDocumentoIA(dados.alertasAdvogado, 25, 1200),
+        obrigacoesPrazos: limitarListaDocumentoIA(dados.obrigacoesPrazos, 15, 900),
+        alertasAdvogado: limitarListaDocumentoIA(dados.alertasAdvogado, 15, 900),
         informacoesNaoIdentificadas: limitarListaDocumentoIA(dados.informacoesNaoIdentificadas, 20, 700)
     };
 }
@@ -265,7 +487,7 @@ Retorne SOMENTE JSON válido, sem markdown, neste formato:
 }
 
 REGRAS:
-1. O resumo executivo deve ser objetivo, fiel e compreensível em até 8 parágrafos curtos.
+1. O resumo executivo deve ser objetivo, fiel e compreensível em até 4 parágrafos curtos. Evite repetições.
 2. Identifique nomes, empresas e papéis somente quando constarem do arquivo.
 3. Destaque fatos, cláusulas, pedidos, obrigações, prazos, datas, valores, números de processo, protocolos e documentos citados quando existirem.
 4. Em alertasAdvogado, aponte somente pontos do próprio arquivo que merecem conferência humana: ausência aparente de assinatura, divergência interna, página ilegível, prazo mencionado, cláusula relevante ou informação incompleta. Não dê orientação jurídica conclusiva.
@@ -350,7 +572,10 @@ async function atualizarDocumentoIA(ticket, messageId, campos = {}) {
     });
 }
 
-async function processarArquivoRecebidoComIA(ticket, msg) {
+async function processarArquivoRecebidoComIA(ticket, msg, { reprocessar = false } = {}) {
+    // REGRA CENTRAL: documentos enviados pelo escritório/advogado nunca são enviados à IA.
+    if (msg?.key?.fromMe) return;
+
     const media = extrairMidiaAnalisavel(msg);
     if (!media || !ticket?.ticketNumber) return;
 
@@ -358,28 +583,51 @@ async function processarArquivoRecebidoComIA(ticket, msg) {
     if (!messageId) return;
 
     const agora = Date.now();
-    const documentoInicial = {
-        id: `wa_${messageId}`,
-        messageId,
-        nomeArquivo: media.nomeArquivo,
-        mimeType: media.mimeType,
-        tipoMidia: media.tipo,
-        tamanhoBytes: media.tamanhoDeclarado,
-        caption: media.caption || null,
-        recebidoEm: agora,
-        statusAnalise: 'analisando',
-        promptVersion: DOCUMENT_AI_PROMPT_VERSION,
-        analisadoEm: null,
-        erro: null
-    };
+    const retryRef = criarReferenciaRetryDocumentoIA(msg, media);
 
-    const registrado = await registrarDocumentoIANoTicket(ticket, documentoInicial);
-    if (!registrado) return; // idempotência para eventual upsert duplicado do WhatsApp
+    if (!reprocessar) {
+        const documentoInicial = {
+            id: `wa_${messageId}`,
+            messageId,
+            nomeArquivo: media.nomeArquivo,
+            mimeType: media.mimeType,
+            tipoMidia: media.tipo,
+            tamanhoBytes: media.tamanhoDeclarado,
+            caption: media.caption || null,
+            recebidoEm: agora,
+            origemArquivo: 'cliente',
+            statusAnalise: 'analisando',
+            promptVersion: DOCUMENT_AI_PROMPT_VERSION,
+            analisadoEm: null,
+            reprocessadoEm: null,
+            tentativasManuais: 0,
+            tentativasGemini: 0,
+            erro: null,
+            erroCodigo: null,
+            erroTemporario: null,
+            retryRef: retryRef || null
+        };
+
+        const registrado = await registrarDocumentoIANoTicket(ticket, documentoInicial);
+        if (!registrado) return; // idempotência para eventual upsert duplicado do WhatsApp
+    } else {
+        await atualizarDocumentoIA(ticket, messageId, {
+            statusAnalise: 'analisando',
+            analisadoEm: null,
+            reprocessadoEm: agora,
+            erro: null,
+            erroCodigo: null,
+            erroTemporario: null,
+            ...(retryRef ? { retryRef } : {})
+        });
+    }
 
     if (!geminiModel) {
         await atualizarDocumentoIA(ticket, messageId, {
             statusAnalise: 'erro',
-            erro: 'Gemini indisponível. Verifique a chave configurada em api_keys.',
+            erro: 'A IA está indisponível no momento. Verifique a chave/configuração do Gemini.',
+            erroCodigo: 'GEMINI_INDISPONIVEL',
+            erroTemporario: false,
             analisadoEm: Date.now()
         });
         return;
@@ -389,6 +637,8 @@ async function processarArquivoRecebidoComIA(ticket, msg) {
         await atualizarDocumentoIA(ticket, messageId, {
             statusAnalise: 'nao_suportado',
             erro: mensagemMimeNaoSuportado(media.nomeArquivo, media.mimeType),
+            erroCodigo: 'TIPO_NAO_SUPORTADO',
+            erroTemporario: false,
             analisadoEm: Date.now()
         });
         return;
@@ -398,84 +648,123 @@ async function processarArquivoRecebidoComIA(ticket, msg) {
     if (media.tamanhoDeclarado && media.tamanhoDeclarado > limite) {
         await atualizarDocumentoIA(ticket, messageId, {
             statusAnalise: 'erro',
-            erro: `Arquivo acima do limite automático configurado (${Math.round(limite / 1024 / 1024)} MB).`,
+            erro: `Arquivo acima do limite automático configurado para este tipo (${Math.round(limite / 1024 / 1024)} MB).`,
+            erroCodigo: 'ARQUIVO_MUITO_GRANDE',
+            erroTemporario: false,
             analisadoEm: Date.now()
         });
         return;
     }
 
-    try {
-        const buffer = await downloadMediaMessage(
-            msg,
-            'buffer',
-            {},
-            {
-                logger: P({ level: 'silent' }),
-                reuploadRequest: sock?.updateMediaMessage
-            }
-        );
+    // O arquivo fica aguardando um slot antes do download. Assim vários documentos
+    // recebidos em sequência não ocupam memória ao mesmo tempo.
+    await atualizarDocumentoIA(ticket, messageId, {
+        statusAnalise: 'na_fila',
+        erro: null,
+        erroCodigo: null,
+        erroTemporario: null
+    });
 
-        if (!Buffer.isBuffer(buffer) || !buffer.length) {
-            throw new Error('O WhatsApp não retornou conteúdo para este arquivo.');
-        }
+    await enfileirarTrabalhoDocumentoIA(async () => {
+        let buffer = null;
 
-        if (buffer.length > limite) {
-            throw new Error(`Arquivo acima do limite automático configurado (${Math.round(limite / 1024 / 1024)} MB).`);
-        }
-
-        await atualizarDocumentoIA(ticket, messageId, {
-            tamanhoBytes: buffer.length,
-            statusAnalise: 'processando_ia',
-            erro: null
-        });
-
-        const prompt = montarPromptAnaliseDocumento(ticket, media);
-        const partesEntrada = [{ text: prompt }];
-
-        // A API do Gemini orienta que arquivos textuais sejam enviados como texto,
-        // enquanto PDF/imagem/áudio/vídeo seguem como inlineData.
-        if (mimeEhTextoParaGemini(media.mimeType)) {
-            const conteudoTexto = buffer.toString('utf8').slice(0, 5_000_000);
-            partesEntrada.push({
-                text: `\n\nCONTEÚDO DO ARQUIVO ${JSON.stringify(media.nomeArquivo)}:\n${conteudoTexto}`
+        try {
+            await atualizarDocumentoIA(ticket, messageId, {
+                statusAnalise: 'baixando',
+                erro: null
             });
-        } else {
-            partesEntrada.push({
-                inlineData: {
-                    mimeType: media.mimeType,
-                    data: buffer.toString('base64')
+
+            buffer = await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+                {
+                    logger: P({ level: 'silent' }),
+                    reuploadRequest: sock?.updateMediaMessage
+                        ? sock.updateMediaMessage.bind(sock)
+                        : undefined
                 }
+            );
+
+            if (!Buffer.isBuffer(buffer) || !buffer.length) {
+                throw new Error('O WhatsApp não retornou conteúdo para este arquivo.');
+            }
+
+            if (buffer.length > limite) {
+                throw new Error(`Arquivo acima do limite automático configurado para este tipo (${Math.round(limite / 1024 / 1024)} MB).`);
+            }
+
+            await atualizarDocumentoIA(ticket, messageId, {
+                tamanhoBytes: buffer.length,
+                statusAnalise: 'processando_ia',
+                erro: null
             });
+
+            const prompt = montarPromptAnaliseDocumento(ticket, media);
+            const partesEntrada = [{ text: prompt }];
+
+            // Texto é enviado como texto, sem base64. Para os demais formatos, o base64
+            // só é criado quando o job chega ao primeiro lugar da fila.
+            if (mimeEhTextoParaGemini(media.mimeType)) {
+                const conteudoTexto = buffer.toString('utf8').slice(0, DOCUMENT_AI_TEXT_MAX_CHARS);
+                partesEntrada.push({
+                    text: `\n\nCONTEÚDO DO ARQUIVO ${JSON.stringify(media.nomeArquivo)}:\n${conteudoTexto}`
+                });
+            } else {
+                const base64 = buffer.toString('base64');
+                partesEntrada.push({
+                    inlineData: {
+                        mimeType: media.mimeType,
+                        data: base64
+                    }
+                });
+            }
+
+            // Libera a referência ao binário original antes da chamada externa. O conteúdo
+            // necessário já está em partesEntrada.
+            buffer = null;
+
+            const { resultado, tentativas } = await gerarConteudoDocumentoComRetry(partesEntrada);
+            const resposta = await resultado.response;
+            const textoResposta = String(resposta.text() || '').trim();
+            const parsed = extrairJsonIA(textoResposta);
+            const analise = normalizarAnaliseDocumentoIA(parsed, textoResposta);
+
+            await atualizarDocumentoIA(ticket, messageId, {
+                ...analise,
+                statusAnalise: 'concluida',
+                analisadoEm: Date.now(),
+                tentativasGemini: tentativas,
+                erro: null,
+                erroCodigo: null,
+                erroTemporario: null
+            });
+
+            console.log(`[Ticket ${ticket.ticketNumber}] Arquivo ${media.nomeArquivo} analisado pelo Gemini em ${tentativas} tentativa(s).`);
+        } catch (err) {
+            console.error(`[Ticket ${ticket.ticketNumber}] Falha na análise de arquivo com Gemini:`, err?.message || err);
+            const erroTratado = descreverErroDocumentoIA(err, { temRetryRef: !!retryRef });
+
+            await atualizarDocumentoIA(ticket, messageId, {
+                statusAnalise: 'erro',
+                erro: erroTratado.mensagem,
+                erroCodigo: erroTratado.codigo,
+                erroTemporario: erroTratado.temporario,
+                tentativasGemini: Number(err?.documentAITentativas || DOCUMENT_AI_GEMINI_MAX_ATTEMPTS),
+                analisadoEm: Date.now()
+            });
+        } finally {
+            buffer = null;
         }
-
-        const resultado = await geminiModel.generateContent(partesEntrada);
-
-        const resposta = await resultado.response;
-        const textoResposta = String(resposta.text() || '').trim();
-        const parsed = extrairJsonIA(textoResposta);
-        const analise = normalizarAnaliseDocumentoIA(parsed, textoResposta);
-
-        await atualizarDocumentoIA(ticket, messageId, {
-            ...analise,
-            statusAnalise: 'concluida',
-            analisadoEm: Date.now(),
-            erro: null
-        });
-
-        console.log(`[Ticket ${ticket.ticketNumber}] Arquivo ${media.nomeArquivo} analisado pelo Gemini.`);
-    } catch (err) {
-        console.error(`[Ticket ${ticket.ticketNumber}] Falha na análise de arquivo com Gemini:`, err?.message || err);
-        await atualizarDocumentoIA(ticket, messageId, {
-            statusAnalise: 'erro',
-            erro: limitarTextoDocumentoIA(err?.message || 'Não foi possível analisar o arquivo.', 1000),
-            analisadoEm: Date.now()
-        });
-    }
+    });
 }
 
-function iniciarAnaliseArquivoSemBloquearFluxo(ticket, msg) {
-    if (!ticket || !extrairMidiaAnalisavel(msg)) return;
-    processarArquivoRecebidoComIA(ticket, msg).catch(err => {
+function iniciarAnaliseArquivoSemBloquearFluxo(ticket, msg, opcoes = {}) {
+    // Segunda proteção explícita: mesmo que esta função seja chamada de outro ponto
+    // no futuro, arquivos enviados pelo próprio escritório nunca serão analisados.
+    if (!ticket || msg?.key?.fromMe || !extrairMidiaAnalisavel(msg)) return;
+
+    processarArquivoRecebidoComIA(ticket, msg, opcoes).catch(err => {
         console.error('[Documentos IA] Erro não tratado:', err?.message || err);
     });
 }
@@ -2360,7 +2649,8 @@ sock.ev.on('messages.upsert', async m => {
         let analiseArquivoDisparada = false;
         const dispararAnaliseArquivo = (ticketAtual) => {
             if (analiseArquivoDisparada || !ticketAtual) return;
-            if (!extrairMidiaAnalisavel(msg)) return;
+            // Nunca analisa arquivo enviado pelo advogado/escritório.
+            if (msg?.key?.fromMe || !extrairMidiaAnalisavel(msg)) return;
             analiseArquivoDisparada = true;
             iniciarAnaliseArquivoSemBloquearFluxo(ticketAtual, msg);
         };
@@ -4294,7 +4584,7 @@ app.get('/api/tickets/active', async (req, res) => {
                 const chave = String(doc?.messageId || doc?.id || '');
                 if (!chave) return;
                 const anterior = documentosPorMensagem.get(chave);
-                const peso = estado => ({ concluida: 5, erro: 4, nao_suportado: 4, processando_ia: 3, analisando: 2 }[estado] || 1);
+                const peso = estado => ({ concluida: 7, erro: 6, nao_suportado: 6, processando_ia: 5, baixando: 4, na_fila: 3, analisando: 2 }[estado] || 1);
                 if (!anterior || peso(doc?.statusAnalise) >= peso(anterior?.statusAnalise)) {
                     documentosPorMensagem.set(chave, doc);
                 }
@@ -4321,7 +4611,13 @@ app.get('/api/tickets/active', async (req, res) => {
                     obrigacoesPrazos: Array.isArray(doc?.obrigacoesPrazos) ? doc.obrigacoesPrazos : [],
                     alertasAdvogado: Array.isArray(doc?.alertasAdvogado) ? doc.alertasAdvogado : [],
                     informacoesNaoIdentificadas: Array.isArray(doc?.informacoesNaoIdentificadas) ? doc.informacoesNaoIdentificadas : [],
-                    erro: doc?.erro || null
+                    erro: doc?.erro || null,
+                    erroCodigo: doc?.erroCodigo || null,
+                    erroTemporario: doc?.erroTemporario === true,
+                    tentativasGemini: Number(doc?.tentativasGemini || 0),
+                    tentativasManuais: Number(doc?.tentativasManuais || 0),
+                    reprocessadoEm: doc?.reprocessadoEm || null,
+                    podeReprocessar: doc?.statusAnalise === 'erro' && !!doc?.retryRef
                 }));
 
             return {
@@ -4363,7 +4659,7 @@ app.get('/api/tickets/active', async (req, res) => {
                 documentosResumo: {
                     total: documentosIA.length,
                     concluidos: documentosIA.filter(doc => doc.statusAnalise === 'concluida').length,
-                    processando: documentosIA.filter(doc => ['analisando', 'processando_ia'].includes(doc.statusAnalise)).length,
+                    processando: documentosIA.filter(doc => ['analisando', 'na_fila', 'baixando', 'processando_ia'].includes(doc.statusAnalise)).length,
                     comErro: documentosIA.filter(doc => ['erro', 'nao_suportado'].includes(doc.statusAnalise)).length
                 }
             };
@@ -4396,6 +4692,108 @@ app.get('/api/tickets/active', async (req, res) => {
     } catch (err) {
         console.error('[Tickets] Erro ao carregar painel de tickets ativos:', err);
         res.status(500).json({ erro: 'Não foi possível carregar os tickets ativos.' });
+    }
+});
+
+// Reprocessamento manual de documento com falha. Não salvamos o binário no banco:
+// usamos apenas uma referência leve da mídia original para tentar baixá-la novamente.
+app.post('/api/tickets/:ticketNumber/documents/:messageId/retry', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!ticketsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
+
+    try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        const messageId = String(req.params.messageId || '').trim();
+        if (!ticketNumber || !messageId) {
+            return res.status(400).json({ erro: 'Ticket ou documento inválido.' });
+        }
+
+        const ticket = await ticketsColl.findOne({ ticketNumber });
+        if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+
+        const documento = (Array.isArray(ticket.documentosIA) ? ticket.documentosIA : [])
+            .find(doc => String(doc?.messageId || '') === messageId);
+
+        if (!documento) return res.status(404).json({ erro: 'Documento não encontrado neste ticket.' });
+        if (documento.statusAnalise === 'nao_suportado') {
+            return res.status(400).json({ erro: 'Este tipo de arquivo não é suportado pela leitura automática.' });
+        }
+        if (documento.statusAnalise !== 'erro') {
+            return res.status(409).json({ erro: 'Este documento não está com falha de análise.' });
+        }
+        if (!documento.retryRef) {
+            return res.status(409).json({
+                erro: 'Este documento foi recebido antes da função de reprocessamento e não possui referência de mídia salva. Solicite o reenvio do arquivo pelo cliente.'
+            });
+        }
+
+        const msgRetry = reconstruirMensagemRetryDocumentoIA(documento.retryRef, messageId);
+        if (!msgRetry) {
+            return res.status(409).json({
+                erro: 'Não foi possível reconstruir a referência deste arquivo. Solicite o reenvio pelo cliente.'
+            });
+        }
+
+        const agora = Date.now();
+
+        // Lock atômico: impede clique duplo de colocar o mesmo documento duas vezes na fila.
+        const lock = await ticketsColl.updateOne(
+            {
+                _id: ticket._id,
+                documentosIA: { $elemMatch: { messageId, statusAnalise: 'erro' } }
+            },
+            {
+                $set: {
+                    'documentosIA.$.statusAnalise': 'na_fila',
+                    'documentosIA.$.erro': null,
+                    'documentosIA.$.erroCodigo': null,
+                    'documentosIA.$.erroTemporario': null,
+                    'documentosIA.$.analisadoEm': null,
+                    'documentosIA.$.reprocessadoEm': agora
+                },
+                $inc: { 'documentosIA.$.tentativasManuais': 1 }
+            }
+        );
+
+        if (!lock.modifiedCount) {
+            return res.status(409).json({ erro: 'Este documento já está sendo reprocessado.' });
+        }
+
+        if (ticketHistoryColl) {
+            await ticketHistoryColl.updateOne(
+                { _id: ticket.ticketNumber, 'documentosIA.messageId': messageId },
+                {
+                    $set: {
+                        'documentosIA.$.statusAnalise': 'na_fila',
+                        'documentosIA.$.erro': null,
+                        'documentosIA.$.erroCodigo': null,
+                        'documentosIA.$.erroTemporario': null,
+                        'documentosIA.$.analisadoEm': null,
+                        'documentosIA.$.reprocessadoEm': agora,
+                        updatedAt: agora
+                    },
+                    $inc: { 'documentosIA.$.tentativasManuais': 1 }
+                }
+            );
+        }
+
+        io.emit('ticket_document_ai_updated', {
+            ticketNumber: ticket.ticketNumber,
+            messageId,
+            status: 'na_fila'
+        });
+
+        // Responde ao painel imediatamente; a análise continua sem bloquear a requisição HTTP.
+        iniciarAnaliseArquivoSemBloquearFluxo(ticket, msgRetry, { reprocessar: true });
+
+        return res.status(202).json({
+            ok: true,
+            status: 'na_fila',
+            mensagem: 'Nova leitura adicionada à fila.'
+        });
+    } catch (err) {
+        console.error('[Documentos IA] Erro ao solicitar reprocessamento:', err?.message || err);
+        return res.status(500).json({ erro: 'Não foi possível solicitar uma nova leitura deste documento.' });
     }
 });
 
