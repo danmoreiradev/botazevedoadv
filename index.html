@@ -1018,6 +1018,69 @@
         .btn-remove-client:hover { color: #fff; background: var(--danger-red); }
         .clients-empty { color: var(--text-muted) !important; }
 
+
+        /* Gestão aprimorada de clientes e contatos */
+        .clients-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .clients-summary-card {
+            padding: 15px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: var(--shadow-sm);
+        }
+        .clients-summary-label { color: var(--text-muted); font-size: .68rem; font-weight: 760; letter-spacing: .05em; text-transform: uppercase; }
+        .clients-summary-value { margin-top: 4px; color: var(--adv-blue); font-size: 1.45rem; line-height: 1; font-weight: 790; }
+        .clients-summary-icon { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; color: var(--adv-blue); background: #f1f3f6; border-radius: 11px; }
+        .clients-summary-card.is-unregistered .clients-summary-icon { color:#946a12; background:#fff8e7; }
+        .clients-summary-card.is-registered .clients-summary-icon { color:#167541; background:#ecfaf2; }
+        .clients-toolbar { display:grid; grid-template-columns:minmax(260px,1fr) minmax(190px,.42fr) auto; gap:10px; }
+        .clients-table { min-width: 1120px; }
+        .client-status-pill { display:inline-flex; align-items:center; gap:6px; padding:6px 9px; border:1px solid transparent; border-radius:999px; font-size:.70rem; font-weight:760; white-space:nowrap; }
+        .client-status-pill::before { content:''; width:6px; height:6px; border-radius:50%; background:currentColor; }
+        .client-status-pill.registered { color:#167541; background:#ecfaf2; border-color:#caecd9; }
+        .client-status-pill.unregistered { color:#8a6108; background:#fff8e7; border-color:#f1dfb5; }
+        .client-secondary { margin-top:3px; color:var(--text-muted); font-size:.72rem; }
+        .client-responsavel { color:#414a55; font-size:.82rem; font-weight:650; }
+        .client-actions { display:flex; justify-content:flex-end; gap:7px; flex-wrap:wrap; }
+        .btn-client-register, .btn-client-edit { min-height:35px; padding:7px 10px; display:inline-flex; align-items:center; gap:6px; color:var(--adv-blue); background:#fff; border:1px solid var(--border-strong); border-radius:9px; font-size:.76rem; font-weight:750; }
+        .btn-client-register { color:#70571f; background:#fff9e9; border-color:#ead8aa; }
+        .btn-client-register:hover { background:#fff4d2; }
+        .btn-client-edit:hover { background:#f5f6f8; }
+
+        #client-form-dialog { width:min(900px, calc(100vw - 26px)); max-height:min(92vh, 960px); padding:0; overflow:hidden; color:var(--text); background:#fff; border:1px solid var(--border); border-radius:20px; box-shadow:0 30px 90px rgba(17,22,30,.28); }
+        #client-form-dialog::backdrop { background:rgba(17,22,30,.55); backdrop-filter:blur(2px); }
+        .client-dialog-header { padding:19px 22px; display:flex; align-items:flex-start; justify-content:space-between; gap:16px; border-bottom:1px solid var(--border); }
+        .client-dialog-title { margin:0; color:var(--adv-blue); font-size:1.14rem; font-weight:790; }
+        .client-dialog-subtitle { margin-top:4px; color:var(--text-muted); font-size:.78rem; }
+        .client-dialog-close { width:36px; height:36px; flex:0 0 36px; display:inline-flex; align-items:center; justify-content:center; color:#69727f; background:#f6f7f9; border:1px solid var(--border); border-radius:10px; }
+        .client-dialog-body { max-height:calc(92vh - 75px); padding:22px; overflow-y:auto; }
+        .client-form-section { margin-bottom:22px; }
+        .client-form-section-title { margin-bottom:12px; padding-bottom:8px; color:var(--adv-blue); border-bottom:1px solid #edf0f3; font-size:.80rem; font-weight:790; letter-spacing:.045em; text-transform:uppercase; }
+        .client-dialog-footer { margin-top:8px; padding-top:16px; display:flex; align-items:center; justify-content:space-between; gap:12px; border-top:1px solid var(--border); }
+        .client-form-status { min-height:20px; color:var(--text-muted); font-size:.80rem; font-weight:650; }
+
+        @media (max-width: 899.98px) {
+            .clients-toolbar { grid-template-columns:1fr 1fr; }
+            .clients-toolbar .clients-search { grid-column:1 / -1; }
+        }
+        @media (max-width: 575.98px) {
+            .clients-summary-grid { grid-template-columns:1fr; }
+            .clients-toolbar { grid-template-columns:1fr; }
+            .clients-toolbar .clients-search { grid-column:auto; }
+            .client-dialog-body { padding:16px; }
+            .client-dialog-footer { align-items:stretch; flex-direction:column; }
+            .client-dialog-footer .btn { width:100%; }
+        }
+
         /* Painel operacional de tickets */
         .tickets-summary-grid {
             display: grid;
@@ -2238,18 +2301,32 @@
         <div id="tab-clientes" class="content-section hidden">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                 <div>
-                    <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Clientes cadastrados</h4>
-                    <p class="text-muted mb-0">Consulte os clientes reconhecidos automaticamente pelo WhatsApp e remova cadastros quando necessário.</p>
+                    <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Clientes e contatos</h4>
+                    <p class="text-muted mb-0">Visualize clientes cadastrados e contatos do WhatsApp ainda sem cadastro. O advogado pode completar o cadastro manualmente, sempre vinculado ao número.</p>
                 </div>
-                <button class="btn btn-outline-secondary" onclick="carregarClientes(true)">↻ Atualizar</button>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button type="button" class="btn text-white fw-bold" style="background: var(--adv-blue)" onclick="abrirCadastroCliente()"><i class="bi bi-person-plus me-1"></i> Cadastrar cliente</button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="carregarClientes(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
+                </div>
             </div>
 
-            <div class="card-custom text-start p-4" style="max-width: 1100px; width: 100%;">
+            <div class="clients-summary-grid" aria-label="Resumo de clientes e contatos">
+                <div class="clients-summary-card"><div><div class="clients-summary-label">Contatos exibidos</div><div class="clients-summary-value" id="clients-metric-total">0</div></div><span class="clients-summary-icon"><i class="bi bi-people"></i></span></div>
+                <div class="clients-summary-card is-registered"><div><div class="clients-summary-label">Cadastrados</div><div class="clients-summary-value" id="clients-metric-registered">0</div></div><span class="clients-summary-icon"><i class="bi bi-person-check"></i></span></div>
+                <div class="clients-summary-card is-unregistered"><div><div class="clients-summary-label">Não cadastrados</div><div class="clients-summary-value" id="clients-metric-unregistered">0</div></div><span class="clients-summary-icon"><i class="bi bi-person-exclamation"></i></span></div>
+            </div>
+
+            <div class="card-custom text-start p-4" style="width: 100%;">
                 <div class="clients-toolbar">
                     <div class="clients-search">
-                        <span class="search-icon">🔍</span>
-                        <input type="text" id="clients-search-input" class="form-control" placeholder="Buscar por nome, CPF ou WhatsApp..." oninput="filtrarClientes()">
+                        <span class="search-icon"><i class="bi bi-search"></i></span>
+                        <input type="text" id="clients-search-input" class="form-control" placeholder="Buscar nome, CPF, WhatsApp, área ou responsável..." oninput="filtrarClientes()">
                     </div>
+                    <select id="clients-filter-status" class="form-select" onchange="filtrarClientes()" aria-label="Filtrar cadastro">
+                        <option value="">Todos os contatos</option>
+                        <option value="cadastrado">Somente cadastrados</option>
+                        <option value="nao_cadastrado">Somente não cadastrados</option>
+                    </select>
                     <div id="clients-count" class="clients-count">Carregando...</div>
                 </div>
 
@@ -2259,22 +2336,14 @@
                     <table class="table clients-table align-middle">
                         <thead>
                             <tr>
-                                <th>Nome</th>
-                                <th>CPF</th>
-                                <th>WhatsApp</th>
-                                <th>Último contato</th>
-                                <th class="text-end">Ação</th>
+                                <th>Status</th><th>Nome</th><th>CPF</th><th>WhatsApp</th><th>Advogado responsável</th><th>Último contato</th><th class="text-end">Ações</th>
                             </tr>
                         </thead>
-                        <tbody id="clients-table-body">
-                            <tr><td colspan="5" class="clients-empty">Carregando clientes...</td></tr>
-                        </tbody>
+                        <tbody id="clients-table-body"><tr><td colspan="7" class="clients-empty">Carregando clientes e contatos...</td></tr></tbody>
                     </table>
                 </div>
 
-                <div class="form-text mt-3">
-                    Ao remover um cliente, o cadastro de reconhecimento automático é excluído. O histórico dos tickets já existentes permanece preservado.
-                </div>
+                <div class="form-text mt-3">Os contatos não cadastrados são identificados pelos tickets ativos e pelo histórico recente do WhatsApp. Nome, CPF e dados complementares são opcionais; o número é o vínculo principal do cadastro manual.</div>
             </div>
         </div>
 
@@ -2344,6 +2413,68 @@
     </div>
 
 
+
+    <dialog id="client-form-dialog">
+        <div class="client-dialog-header">
+            <div>
+                <h5 class="client-dialog-title" id="client-form-title">Cadastrar cliente</h5>
+                <div class="client-dialog-subtitle" id="client-form-subtitle">O WhatsApp é obrigatório para manter o cadastro vinculado ao contato. Os demais dados podem ser preenchidos agora ou depois.</div>
+            </div>
+            <button type="button" class="client-dialog-close" onclick="fecharCadastroCliente()" aria-label="Fechar"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="client-dialog-body">
+            <form id="client-form" onsubmit="salvarClientePainel(event)">
+                <input type="hidden" id="client-form-id"><input type="hidden" id="client-source-ticket">
+
+                <div class="client-form-section">
+                    <div class="client-form-section-title">Identificação e contato</div>
+                    <div class="row g-3">
+                        <div class="col-md-6"><label class="form-label small fw-bold">WhatsApp *</label><input type="text" id="client-whatsapp" class="form-control" maxlength="30" placeholder="Ex: 19 99999-9999" required><div class="form-text">Obrigatório. É por este número que o sistema reconhecerá o cliente nos próximos atendimentos.</div></div>
+                        <div class="col-md-6"><label class="form-label small fw-bold">Nome completo</label><input type="text" id="client-nome-completo" class="form-control" maxlength="240"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">CPF</label><input type="text" id="client-cpf" class="form-control" maxlength="14" placeholder="000.000.000-00"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">RG</label><input type="text" id="client-rg" class="form-control" maxlength="40"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">E-mail</label><input type="email" id="client-email" class="form-control" maxlength="240"></div>
+                    </div>
+                </div>
+
+                <div class="client-form-section">
+                    <div class="client-form-section-title">Dados pessoais</div>
+                    <div class="row g-3">
+                        <div class="col-md-4"><label class="form-label small fw-bold">Data de nascimento</label><input type="date" id="client-data-nascimento" class="form-control"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Estado civil</label><input type="text" id="client-estado-civil" class="form-control" maxlength="80"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Profissão</label><input type="text" id="client-profissao" class="form-control" maxlength="160"></div>
+                    </div>
+                </div>
+
+                <div class="client-form-section">
+                    <div class="client-form-section-title">Endereço</div>
+                    <div class="row g-3">
+                        <div class="col-md-3"><label class="form-label small fw-bold">CEP</label><input type="text" id="client-cep" class="form-control" maxlength="9"></div>
+                        <div class="col-md-7"><label class="form-label small fw-bold">Logradouro</label><input type="text" id="client-logradouro" class="form-control" maxlength="300"></div>
+                        <div class="col-md-2"><label class="form-label small fw-bold">Número</label><input type="text" id="client-numero" class="form-control" maxlength="40"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Complemento</label><input type="text" id="client-complemento" class="form-control" maxlength="180"></div>
+                        <div class="col-md-3"><label class="form-label small fw-bold">Bairro</label><input type="text" id="client-bairro" class="form-control" maxlength="180"></div>
+                        <div class="col-md-3"><label class="form-label small fw-bold">Cidade</label><input type="text" id="client-cidade" class="form-control" maxlength="180"></div>
+                        <div class="col-md-2"><label class="form-label small fw-bold">UF</label><input type="text" id="client-uf" class="form-control text-uppercase" maxlength="2"></div>
+                    </div>
+                </div>
+
+                <div class="client-form-section">
+                    <div class="client-form-section-title">Controle interno</div>
+                    <div class="row g-3">
+                        <div class="col-md-5"><label class="form-label small fw-bold">Advogado responsável</label><input list="client-lawyers-list" type="text" id="client-advogado" class="form-control" maxlength="120" placeholder="Ex: Azevedo"><datalist id="client-lawyers-list"><option value="Azevedo"><option value="Juvencio"></datalist></div>
+                        <div class="col-md-7"><label class="form-label small fw-bold">Observações internas</label><textarea id="client-observacoes" class="form-control" rows="3" maxlength="6000" placeholder="Informações úteis para o atendimento."></textarea></div>
+                    </div>
+                </div>
+
+                <div id="client-form-status" class="client-form-status"></div>
+                <div class="client-dialog-footer">
+                    <div class="form-text m-0">Nome, CPF, endereço e demais dados são opcionais e podem ser alterados depois.</div>
+                    <div class="d-flex gap-2"><button type="button" class="btn btn-outline-secondary" onclick="fecharCadastroCliente()">Cancelar</button><button type="submit" id="client-save-btn" class="btn text-white" style="background: var(--adv-blue)"><i class="bi bi-check2 me-1"></i> Salvar cliente</button></div>
+                </div>
+            </form>
+        </div>
+    </dialog>
 
     <dialog id="ticket-detail-dialog">
         <div class="ticket-dialog-header">
@@ -2540,6 +2671,19 @@
                     carregarTicketsAtivos(true);
                 }
             }, 500);
+        });
+
+        socket.on('clients_updated', () => {
+            const tab = document.getElementById('tab-clientes');
+            if (!tab || tab.classList.contains('hidden')) {
+                window.clientsLoaded = false;
+                return;
+            }
+            clearTimeout(window.clientsSocketRefreshTimer);
+            window.clientsSocketRefreshTimer = setTimeout(() => {
+                window.clientsLoaded = false;
+                carregarClientes(true);
+            }, 300);
         });
 
         socket.on('crm_updated', () => {
@@ -4473,7 +4617,7 @@ function renderizarLista(itens) {
             return String(
                 cliente.nomeCompleto ||
                 [cliente.nome, cliente.sobrenome].filter(Boolean).join(' ') ||
-                'Cliente sem nome'
+                (cliente.cadastrado === false ? 'Contato sem cadastro' : 'Cliente sem nome')
             ).trim();
         }
 
@@ -4484,44 +4628,105 @@ function renderizarLista(itens) {
             return td;
         }
 
+        function idClientePainel(cliente = {}) {
+            return String(cliente.id || cliente._id || cliente.cpf || '').trim();
+        }
+
+        function atualizarMetricasClientes() {
+            const cadastrados = Array.isArray(window.clientsData) ? window.clientsData.length : 0;
+            const naoCadastrados = Array.isArray(window.unregisteredClientsData) ? window.unregisteredClientsData.length : 0;
+            const mapa = {
+                'clients-metric-total': cadastrados + naoCadastrados,
+                'clients-metric-registered': cadastrados,
+                'clients-metric-unregistered': naoCadastrados
+            };
+            Object.entries(mapa).forEach(([id, valor]) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = String(valor);
+            });
+        }
+
+        function criarStatusCliente(cadastrado) {
+            const span = document.createElement('span');
+            span.className = `client-status-pill ${cadastrado ? 'registered' : 'unregistered'}`;
+            span.textContent = cadastrado ? 'Cadastrado' : 'Não cadastrado';
+            return span;
+        }
+
         function renderizarClientes(clientes = []) {
             const tbody = document.getElementById('clients-table-body');
             const contador = document.getElementById('clients-count');
             if (!tbody || !contador) return;
 
             tbody.innerHTML = '';
-            contador.textContent = `${clientes.length} cliente${clientes.length === 1 ? '' : 's'}`;
+            contador.textContent = `${clientes.length} contato${clientes.length === 1 ? '' : 's'} exibido${clientes.length === 1 ? '' : 's'}`;
+            atualizarMetricasClientes();
 
             if (!clientes.length) {
                 const tr = document.createElement('tr');
                 const td = document.createElement('td');
-                td.colSpan = 5;
+                td.colSpan = 7;
                 td.className = 'clients-empty';
-                td.textContent = 'Nenhum cliente encontrado.';
+                td.textContent = 'Nenhum cliente ou contato encontrado com estes filtros.';
                 tr.appendChild(td);
                 tbody.appendChild(tr);
                 return;
             }
 
             clientes.forEach(cliente => {
+                const cadastrado = cliente.cadastrado !== false;
                 const tr = document.createElement('tr');
-                tr.dataset.cpf = String(cliente.cpf || cliente._id || '');
+                tr.dataset.clientId = idClientePainel(cliente);
 
-                const nomeTd = criarCelulaCliente(nomeCompletoCliente(cliente), 'client-name');
-                const cpfTd = criarCelulaCliente(formatarCPFCliente(cliente.cpf || cliente._id || ''));
+                const statusTd = document.createElement('td');
+                statusTd.appendChild(criarStatusCliente(cadastrado));
+
+                const nomeTd = document.createElement('td');
+                const nomeDiv = document.createElement('div');
+                nomeDiv.className = 'client-name';
+                nomeDiv.textContent = nomeCompletoCliente(cliente);
+                nomeTd.appendChild(nomeDiv);
+                const secundario = document.createElement('div');
+                secundario.className = 'client-secondary';
+                secundario.textContent = cadastrado
+                    ? (cliente.origemCadastro === 'painel_manual' ? 'Cadastro manual' : 'Cadastro pelo atendimento')
+                    : ([cliente.ultimoTicket, cliente.areaUltimoAtendimento].filter(Boolean).join(' • ') || 'Contato identificado no WhatsApp');
+                nomeTd.appendChild(secundario);
+
+                const cpfTd = criarCelulaCliente(cliente.cpf ? formatarCPFCliente(cliente.cpf) : '—');
                 const whatsappTd = criarCelulaCliente(formatarWhatsAppCliente(cliente.whatsapp || cliente.numeroReal || cliente.whatsappNumbers?.[0]), 'client-whatsapp');
+                const responsavelTd = criarCelulaCliente(cliente.advogadoResponsavel || '—', 'client-responsavel');
                 const contatoTd = criarCelulaCliente(formatarDataCliente(cliente.lastSeenAt || cliente.updatedAt || cliente.createdAt));
 
                 const acaoTd = document.createElement('td');
                 acaoTd.className = 'text-end';
-                const botao = document.createElement('button');
-                botao.type = 'button';
-                botao.className = 'btn-remove-client';
-                botao.textContent = '🗑️ Remover';
-                botao.onclick = () => removerCliente(cliente.cpf || cliente._id, nomeCompletoCliente(cliente));
-                acaoTd.appendChild(botao);
+                const wrap = document.createElement('div');
+                wrap.className = 'client-actions';
 
-                tr.append(nomeTd, cpfTd, whatsappTd, contatoTd, acaoTd);
+                if (!cadastrado) {
+                    const cadastrar = document.createElement('button');
+                    cadastrar.type = 'button';
+                    cadastrar.className = 'btn-client-register';
+                    cadastrar.innerHTML = '<i class="bi bi-person-plus"></i> Cadastrar';
+                    cadastrar.onclick = () => abrirCadastroCliente(cliente);
+                    wrap.appendChild(cadastrar);
+                } else {
+                    const editar = document.createElement('button');
+                    editar.type = 'button';
+                    editar.className = 'btn-client-edit';
+                    editar.innerHTML = '<i class="bi bi-pencil"></i> Editar';
+                    editar.onclick = () => abrirCadastroCliente(cliente);
+
+                    const remover = document.createElement('button');
+                    remover.type = 'button';
+                    remover.className = 'btn-remove-client';
+                    remover.innerHTML = '<i class="bi bi-trash"></i> Remover';
+                    remover.onclick = () => removerCliente(idClientePainel(cliente), nomeCompletoCliente(cliente));
+                    wrap.append(editar, remover);
+                }
+
+                acaoTd.appendChild(wrap);
+                tr.append(statusTd, nomeTd, cpfTd, whatsappTd, responsavelTd, contatoTd, acaoTd);
                 tbody.appendChild(tr);
             });
         }
@@ -4536,16 +4741,24 @@ function renderizarLista(itens) {
             const tbody = document.getElementById('clients-table-body');
             if (status) {
                 status.className = 'menu-save-status text-muted mb-2';
-                status.textContent = 'Carregando clientes...';
+                status.textContent = 'Carregando clientes e contatos do WhatsApp...';
             }
-            if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="clients-empty">Carregando clientes...</td></tr>';
+            if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="clients-empty">Carregando clientes e contatos...</td></tr>';
 
             try {
                 const res = await fetch('/api/clients');
-                const data = await res.json().catch(() => ([]));
+                const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar os clientes.');
 
-                window.clientsData = Array.isArray(data) ? data : [];
+                if (Array.isArray(data)) {
+                    // Compatibilidade caso somente o HTML seja publicado antes do backend novo.
+                    window.clientsData = data.map(item => ({ ...item, cadastrado: true, id: item.id || item._id || item.cpf }));
+                    window.unregisteredClientsData = [];
+                } else {
+                    window.clientsData = Array.isArray(data.clientes) ? data.clientes : [];
+                    window.unregisteredClientsData = Array.isArray(data.naoCadastrados) ? data.naoCadastrados : [];
+                }
+
                 window.clientsLoaded = true;
                 if (status) status.textContent = '';
                 filtrarClientes();
@@ -4555,71 +4768,188 @@ function renderizarLista(itens) {
                     status.className = 'menu-save-status text-danger mb-2';
                     status.textContent = err.message || 'Erro ao carregar clientes.';
                 }
+                window.clientsData = [];
+                window.unregisteredClientsData = [];
                 renderizarClientes([]);
             }
         }
 
-        function filtrarClientes() {
-            const termo = String(document.getElementById('clients-search-input')?.value || '')
-                .toLowerCase()
-                .normalize('NFD')
-                .replace(/[\u0300-\u036f]/g, '')
-                .trim();
+        function normalizarBuscaCliente(valor = '') {
+            return String(valor || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        }
 
-            const clientes = Array.isArray(window.clientsData) ? window.clientsData : [];
-            if (!termo) {
-                renderizarClientes(clientes);
+        function filtrarClientes() {
+            const termo = normalizarBuscaCliente(document.getElementById('clients-search-input')?.value || '');
+            const statusFiltro = String(document.getElementById('clients-filter-status')?.value || '');
+            const apenasNumeros = termo.replace(/\D/g, '');
+
+            let todos = [
+                ...(Array.isArray(window.clientsData) ? window.clientsData : []),
+                ...(Array.isArray(window.unregisteredClientsData) ? window.unregisteredClientsData : [])
+            ];
+
+            if (statusFiltro === 'cadastrado') todos = todos.filter(cliente => cliente.cadastrado !== false);
+            if (statusFiltro === 'nao_cadastrado') todos = todos.filter(cliente => cliente.cadastrado === false);
+
+            if (termo) {
+                todos = todos.filter(cliente => {
+                    const nome = normalizarBuscaCliente(nomeCompletoCliente(cliente));
+                    const cpf = String(cliente.cpf || '').replace(/\D/g, '');
+                    const whatsapp = String(cliente.whatsapp || cliente.numeroReal || cliente.whatsappNumbers?.[0] || '').replace(/\D/g, '');
+                    const responsavel = normalizarBuscaCliente(cliente.advogadoResponsavel || '');
+                    const area = normalizarBuscaCliente(cliente.areaUltimoAtendimento || '');
+                    const ticket = normalizarBuscaCliente(cliente.ultimoTicket || '');
+                    return nome.includes(termo) || responsavel.includes(termo) || area.includes(termo) || ticket.includes(termo) ||
+                        (!!apenasNumeros && (cpf.includes(apenasNumeros) || whatsapp.includes(apenasNumeros)));
+                });
+            }
+
+            todos.sort((a, b) => {
+                if ((a.cadastrado !== false) !== (b.cadastrado !== false)) return a.cadastrado === false ? 1 : -1;
+                if (a.cadastrado !== false) return nomeCompletoCliente(a).localeCompare(nomeCompletoCliente(b), 'pt-BR');
+                return Number(b.lastSeenAt || 0) - Number(a.lastSeenAt || 0);
+            });
+            renderizarClientes(todos);
+        }
+
+        function limparFormularioCliente() {
+            [
+                'client-form-id','client-source-ticket','client-whatsapp','client-nome-completo','client-cpf','client-rg','client-email',
+                'client-data-nascimento','client-estado-civil','client-profissao','client-cep','client-logradouro','client-numero',
+                'client-complemento','client-bairro','client-cidade','client-uf','client-advogado','client-observacoes'
+            ].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            const status = document.getElementById('client-form-status');
+            if (status) { status.className = 'client-form-status'; status.textContent = ''; }
+        }
+
+        function abrirCadastroCliente(cliente = null) {
+            const dialog = document.getElementById('client-form-dialog');
+            if (!dialog) return;
+            limparFormularioCliente();
+
+            const cadastrado = !!cliente && cliente.cadastrado !== false;
+            document.getElementById('client-form-title').textContent = cadastrado ? 'Editar cliente' : 'Cadastrar cliente';
+            document.getElementById('client-form-subtitle').textContent = cadastrado
+                ? 'Atualize os dados principais. O WhatsApp permanece como vínculo de reconhecimento do cliente.'
+                : 'O WhatsApp é obrigatório. Nome, CPF, endereço e demais informações são opcionais e podem ser preenchidos depois.';
+
+            if (cliente) {
+                document.getElementById('client-form-id').value = cadastrado ? idClientePainel(cliente) : '';
+                document.getElementById('client-source-ticket').value = cliente.ultimoTicket || '';
+                const numeroOriginal = String(cliente.whatsapp || cliente.numeroReal || cliente.whatsappNumbers?.[0] || '');
+                document.getElementById('client-whatsapp').value = formatarWhatsAppCliente(numeroOriginal).replace(/^\+/, '');
+                document.getElementById('client-nome-completo').value = cliente.nomeCompleto || [cliente.nome, cliente.sobrenome].filter(Boolean).join(' ') || '';
+                document.getElementById('client-cpf').value = cliente.cpf ? formatarCPFCliente(cliente.cpf) : '';
+                document.getElementById('client-rg').value = cliente.rg || '';
+                document.getElementById('client-email').value = cliente.email || '';
+                document.getElementById('client-data-nascimento').value = cliente.dataNascimento || '';
+                document.getElementById('client-estado-civil').value = cliente.estadoCivil || '';
+                document.getElementById('client-profissao').value = cliente.profissao || '';
+                document.getElementById('client-cep').value = cliente.endereco?.cep || '';
+                document.getElementById('client-logradouro').value = cliente.endereco?.logradouro || '';
+                document.getElementById('client-numero').value = cliente.endereco?.numero || '';
+                document.getElementById('client-complemento').value = cliente.endereco?.complemento || '';
+                document.getElementById('client-bairro').value = cliente.endereco?.bairro || '';
+                document.getElementById('client-cidade').value = cliente.endereco?.cidade || '';
+                document.getElementById('client-uf').value = cliente.endereco?.uf || '';
+                document.getElementById('client-advogado').value = cliente.advogadoResponsavel || '';
+                document.getElementById('client-observacoes').value = cliente.observacoes || '';
+            }
+
+            if (!dialog.open) dialog.showModal();
+            setTimeout(() => (cliente ? document.getElementById('client-nome-completo') : document.getElementById('client-whatsapp'))?.focus(), 40);
+        }
+
+        function fecharCadastroCliente() {
+            const dialog = document.getElementById('client-form-dialog');
+            if (dialog?.open) dialog.close();
+        }
+
+        function valorCampoCliente(id) {
+            return String(document.getElementById(id)?.value || '').trim();
+        }
+
+        async function salvarClientePainel(event) {
+            event?.preventDefault();
+            const id = valorCampoCliente('client-form-id');
+            const whatsapp = valorCampoCliente('client-whatsapp');
+            if (!whatsapp.replace(/\D/g, '')) {
+                const status = document.getElementById('client-form-status');
+                if (status) { status.className = 'client-form-status text-danger'; status.textContent = 'Informe o WhatsApp do cliente.'; }
                 return;
             }
 
-            const apenasNumeros = termo.replace(/\D/g, '');
-            const filtrados = clientes.filter(cliente => {
-                const nome = nomeCompletoCliente(cliente)
-                    .toLowerCase()
-                    .normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g, '');
-                const cpf = String(cliente.cpf || cliente._id || '').replace(/\D/g, '');
-                const whatsapp = String(cliente.whatsapp || cliente.numeroReal || cliente.whatsappNumbers?.[0] || '').replace(/\D/g, '');
+            const payload = {
+                whatsapp,
+                sourceTicketNumber: valorCampoCliente('client-source-ticket') || null,
+                nomeCompleto: valorCampoCliente('client-nome-completo') || null,
+                cpf: valorCampoCliente('client-cpf') || null,
+                rg: valorCampoCliente('client-rg') || null,
+                email: valorCampoCliente('client-email') || null,
+                dataNascimento: valorCampoCliente('client-data-nascimento') || null,
+                estadoCivil: valorCampoCliente('client-estado-civil') || null,
+                profissao: valorCampoCliente('client-profissao') || null,
+                advogadoResponsavel: valorCampoCliente('client-advogado') || null,
+                observacoes: valorCampoCliente('client-observacoes') || null,
+                endereco: {
+                    cep: valorCampoCliente('client-cep') || null,
+                    logradouro: valorCampoCliente('client-logradouro') || null,
+                    numero: valorCampoCliente('client-numero') || null,
+                    complemento: valorCampoCliente('client-complemento') || null,
+                    bairro: valorCampoCliente('client-bairro') || null,
+                    cidade: valorCampoCliente('client-cidade') || null,
+                    uf: valorCampoCliente('client-uf') || null
+                }
+            };
 
-                return nome.includes(termo) ||
-                    (!!apenasNumeros && (cpf.includes(apenasNumeros) || whatsapp.includes(apenasNumeros)));
-            });
-
-            renderizarClientes(filtrados);
-        }
-
-        async function removerCliente(cpf, nome) {
-            const cpfLimpo = String(cpf || '').replace(/\D/g, '');
-            if (!cpfLimpo) return;
-
-            if (!confirm(`Deseja realmente remover o cadastro de ${nome}?\n\nO histórico dos tickets será preservado.`)) return;
-
-            const status = document.getElementById('clients-status');
-            if (status) {
-                status.className = 'menu-save-status text-muted mb-2';
-                status.textContent = 'Removendo cliente...';
-            }
+            const status = document.getElementById('client-form-status');
+            const btn = document.getElementById('client-save-btn');
+            if (status) { status.className = 'client-form-status text-muted'; status.textContent = id ? 'Salvando alterações...' : 'Cadastrando cliente...'; }
+            if (btn) btn.disabled = true;
 
             try {
-                const res = await fetch(`/api/clients/${encodeURIComponent(cpfLimpo)}`, { method: 'DELETE' });
+                const url = id ? `/api/clients/${encodeURIComponent(id)}` : '/api/clients/manual';
+                const res = await fetch(url, {
+                    method: id ? 'PUT' : 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
                 const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.erro || 'Não foi possível remover o cliente.');
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível salvar o cliente.');
 
-                window.clientsData = (window.clientsData || []).filter(cliente =>
-                    String(cliente.cpf || cliente._id || '').replace(/\D/g, '') !== cpfLimpo
-                );
-                filtrarClientes();
-
-                if (status) {
-                    status.className = 'menu-save-status text-success mb-2';
-                    status.textContent = '✓ Cliente removido do cadastro.';
-                }
+                if (status) { status.className = 'client-form-status text-success'; status.textContent = '✓ Cliente salvo com sucesso.'; }
+                window.clientsLoaded = false;
+                await carregarClientes(true);
+                setTimeout(() => fecharCadastroCliente(), 350);
             } catch (err) {
                 console.error(err);
-                if (status) {
-                    status.className = 'menu-save-status text-danger mb-2';
-                    status.textContent = err.message || 'Erro ao remover cliente.';
-                }
+                if (status) { status.className = 'client-form-status text-danger'; status.textContent = err.message || 'Erro ao salvar cliente.'; }
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function removerCliente(id, nome) {
+            const clientId = String(id || '').trim();
+            if (!clientId) return;
+            if (!confirm(`Deseja realmente remover o cadastro de ${nome}?\n\nO histórico dos tickets será preservado e o número voltará a aparecer como não cadastrado.`)) return;
+
+            const status = document.getElementById('clients-status');
+            if (status) { status.className = 'menu-save-status text-muted mb-2'; status.textContent = 'Removendo cliente...'; }
+
+            try {
+                const res = await fetch(`/api/clients/${encodeURIComponent(clientId)}`, { method: 'DELETE' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível remover o cliente.');
+                window.clientsLoaded = false;
+                await carregarClientes(true);
+                if (status) { status.className = 'menu-save-status text-success mb-2'; status.textContent = '✓ Cadastro removido. O histórico foi preservado.'; }
+            } catch (err) {
+                console.error(err);
+                if (status) { status.className = 'menu-save-status text-danger mb-2'; status.textContent = err.message || 'Erro ao remover cliente.'; }
             }
         }
 

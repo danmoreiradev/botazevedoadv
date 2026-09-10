@@ -2130,18 +2130,21 @@ async function buscarClientePorContato(contato) {
     if (contato.whatsappNumbers.length) {
         filtros.push({ whatsappNumbers: { $in: contato.whatsappNumbers } });
         filtros.push({ numeroReal: { $in: contato.whatsappNumbers } });
+        filtros.push({ whatsapp: { $in: contato.whatsappNumbers } });
     }
 
     if (!filtros.length) return null;
 
-    const cliente = await clientsColl.findOne({ $or: filtros });
-    if (!cliente) return null;
+    const cliente = await clientsColl.findOne({
+        $and: [
+            { $or: filtros },
+            { ativo: { $ne: false } }
+        ]
+    });
 
-    // Cadastros da versão anterior possuíam apenas CPF. Para a saudação nominal,
-    // consideramos cliente identificado apenas quando nome + sobrenome já existem.
-    if (!cliente.cpf || !cliente.nome || !cliente.sobrenome) return null;
-
-    return cliente;
+    // No cadastro manual o WhatsApp é o vínculo principal. Nome e CPF podem ficar
+    // em branco e ser completados depois pelo advogado no painel.
+    return cliente || null;
 }
 
 async function buscarTicketAtivo(contato) {
@@ -2192,8 +2195,9 @@ async function gerarNumeroTicket() {
 async function mensagemRecepcao(cliente, ticketNumber) {
     const menuTexto = await gerarMenuTexto();
 
-    if (cliente?.nome) {
-        return `Olá, ${primeiroNome(cliente.nome)}! Seja bem-vindo de volta à *Azevedo & Juvencio Advogados*. 👋
+    if (cliente) {
+        const nomeSaudacao = primeiroNome(cliente.nome || cliente.nomeCompleto || '');
+        return `Olá${nomeSaudacao ? `, ${nomeSaudacao}` : ''}! Seja bem-vindo de volta à *Azevedo & Juvencio Advogados*. 👋
 
 Seu novo atendimento é o ticket *${ticketNumber}*.
 
@@ -2509,6 +2513,8 @@ async function startBot() {
             clientsColl.createIndex({ cpf: 1 }, { unique: true, sparse: true }),
             clientsColl.createIndex({ identificadores: 1 }),
             clientsColl.createIndex({ whatsappNumbers: 1 }),
+            clientsColl.createIndex({ numeroReal: 1 }),
+            clientsColl.createIndex({ advogadoResponsavel: 1 }),
             ticketHistoryColl.createIndex({ ticketNumber: 1 }, { unique: true }),
             ticketHistoryColl.createIndex({ identificadores: 1 }),
             ticketsColl.createIndex({ ticketNumber: 1 }, { unique: true, sparse: true }),
@@ -3860,13 +3866,15 @@ async function resolverWhatsAppCliente(cliente) {
         cliente.lastRawJid
     );
 
-    const cpf = String(cliente.cpf || cliente._id || '').replace(/\D/g, '');
+    const cpf = String(cliente.cpf || '').replace(/\D/g, '');
+    const clienteId = cliente._id !== null && cliente._id !== undefined ? String(cliente._id) : null;
     const ticketNumbers = Array.isArray(cliente.ticketNumbers) ? cliente.ticketNumbers.filter(Boolean) : [];
     const registrosAuxiliares = [];
 
     if (!numero && ticketsColl) {
         const filtros = [];
-        if (cpf) filtros.push({ clienteId: cpf }, { cpf });
+        if (clienteId) filtros.push({ clienteId });
+        if (cpf) filtros.push({ cpf });
         if (ticketNumbers.length) filtros.push({ ticketNumber: { $in: ticketNumbers } });
 
         if (filtros.length) {
@@ -3888,7 +3896,8 @@ async function resolverWhatsAppCliente(cliente) {
 
     if (!numero && ticketHistoryColl) {
         const filtros = [];
-        if (cpf) filtros.push({ clienteId: cpf }, { cpf });
+        if (clienteId) filtros.push({ clienteId });
+        if (cpf) filtros.push({ cpf });
         if (ticketNumbers.length) filtros.push({ ticketNumber: { $in: ticketNumbers } }, { _id: { $in: ticketNumbers } });
 
         if (filtros.length) {
@@ -3933,10 +3942,10 @@ async function resolverWhatsAppCliente(cliente) {
 
     // Se conseguimos recuperar o número de um cadastro antigo, corrige o MongoDB
     // para que as próximas consultas não dependam novamente dos fallbacks.
-    if (numero && cpf && clientsColl) {
+    if (numero && cliente?._id !== undefined && cliente?._id !== null && clientsColl) {
         const pnJid = `${numero}@s.whatsapp.net`;
         await clientsColl.updateOne(
-            { $or: [{ _id: cliente._id }, { cpf }] },
+            { _id: cliente._id },
             {
                 $set: {
                     numeroReal: numero,
@@ -4939,72 +4948,496 @@ app.delete('/api/crm/leads/:id', async (req, res) => {
     }
 });
 
-// Clientes cadastrados no atendimento.
+// -----------------------------------------------------------------------------
+// CLIENTES E CONTATOS DO WHATSAPP
+// -----------------------------------------------------------------------------
+// O cadastro manual é sempre vinculado a um número de WhatsApp. Nome, CPF e os
+// demais dados são opcionais. A lista de não cadastrados usa apenas metadados de
+// tickets ativos e do histórico recente: não baixa mensagens, documentos ou mídias.
+const CLIENTS_HISTORY_CONTACT_LIMIT = 1500;
+const CLIENTS_MAX_OBSERVACOES = 6000;
+
+function textoClientePainel(valor, max = 500) {
+    return String(valor ?? '').trim().slice(0, max);
+}
+
+function valorEditavelCliente(body, chave, existente, padrao = '') {
+    return Object.prototype.hasOwnProperty.call(body || {}, chave)
+        ? body[chave]
+        : (existente?.[chave] ?? padrao);
+}
+
+function cpfClientePainel(valor = '') {
+    const cpf = String(valor || '').replace(/\D/g, '');
+    if (!cpf) return null;
+    if (!validarCPF(cpf)) {
+        const erro = new Error('CPF inválido. Corrija o número ou deixe o campo em branco.');
+        erro.statusCode = 400;
+        throw erro;
+    }
+    return cpf;
+}
+
+function emailClientePainel(valor = '') {
+    const email = textoClientePainel(valor, 240).toLowerCase();
+    if (!email) return null;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        const erro = new Error('E-mail inválido.');
+        erro.statusCode = 400;
+        throw erro;
+    }
+    return email;
+}
+
+function nomePartesCliente(nomeCompleto = '') {
+    const completo = textoClientePainel(nomeCompleto, 240).replace(/\s+/g, ' ');
+    if (!completo) return { nomeCompleto: null, nome: null, sobrenome: null };
+    const partes = completo.split(' ').filter(Boolean);
+    return {
+        nomeCompleto: completo,
+        nome: partes[0] || completo,
+        sobrenome: partes.length > 1 ? partes.slice(1).join(' ') : null
+    };
+}
+
+function normalizarEnderecoCliente(endereco = {}) {
+    const obj = endereco && typeof endereco === 'object' ? endereco : {};
+    return {
+        cep: String(obj.cep || '').replace(/\D/g, '').slice(0, 8) || null,
+        logradouro: textoClientePainel(obj.logradouro, 300) || null,
+        numero: textoClientePainel(obj.numero, 40) || null,
+        complemento: textoClientePainel(obj.complemento, 180) || null,
+        bairro: textoClientePainel(obj.bairro, 180) || null,
+        cidade: textoClientePainel(obj.cidade, 180) || null,
+        uf: textoClientePainel(obj.uf, 2).toUpperCase() || null
+    };
+}
+
+function normalizarCadastroClientePainel(body = {}, existente = null) {
+    const numeroBruto = valorEditavelCliente(body, 'whatsapp', existente, existente?.numeroReal || existente?.whatsapp || '');
+    const numero = normalizarNumeroDigitadoCliente(numeroBruto);
+    if (!numero) {
+        const erro = new Error('Informe um número de WhatsApp válido com DDD.');
+        erro.statusCode = 400;
+        throw erro;
+    }
+
+    const nomePartes = nomePartesCliente(valorEditavelCliente(body, 'nomeCompleto', existente, existente?.nomeCompleto || ''));
+    const cpf = cpfClientePainel(valorEditavelCliente(body, 'cpf', existente, existente?.cpf || ''));
+    const enderecoEntrada = Object.prototype.hasOwnProperty.call(body || {}, 'endereco')
+        ? body.endereco
+        : (existente?.endereco || {});
+
+    return {
+        ...nomePartes,
+        cpf,
+        rg: textoClientePainel(valorEditavelCliente(body, 'rg', existente), 40) || null,
+        email: emailClientePainel(valorEditavelCliente(body, 'email', existente)),
+        dataNascimento: textoClientePainel(valorEditavelCliente(body, 'dataNascimento', existente), 10) || null,
+        estadoCivil: textoClientePainel(valorEditavelCliente(body, 'estadoCivil', existente), 80) || null,
+        profissao: textoClientePainel(valorEditavelCliente(body, 'profissao', existente), 160) || null,
+        numeroReal: numero,
+        whatsapp: numero,
+        advogadoResponsavel: textoClientePainel(valorEditavelCliente(body, 'advogadoResponsavel', existente), 120) || null,
+        endereco: normalizarEnderecoCliente(enderecoEntrada),
+        observacoes: textoClientePainel(valorEditavelCliente(body, 'observacoes', existente), CLIENTS_MAX_OBSERVACOES) || null
+    };
+}
+
+function filtrosDocumentoPorWhatsApp(numero, identificadoresExtras = []) {
+    const pnJid = numero ? `${numero}@s.whatsapp.net` : null;
+    const identificadores = [...new Set([
+        pnJid,
+        ...(Array.isArray(identificadoresExtras) ? identificadoresExtras : [])
+    ].filter(Boolean))];
+
+    const filtros = [];
+    if (numero) {
+        filtros.push({ numeroReal: numero });
+        filtros.push({ whatsappNumbers: numero });
+    }
+    if (identificadores.length) {
+        filtros.push({ identificadores: { $in: identificadores } });
+        filtros.push({ lastRawJid: { $in: identificadores } });
+    }
+    return filtros;
+}
+
+function clienteIdParaResposta(cliente) {
+    return cliente?._id !== undefined && cliente?._id !== null ? String(cliente._id) : '';
+}
+
+async function buscarClientePorIdPainel(id = '') {
+    const bruto = String(id || '').trim();
+    if (!bruto) return null;
+    const cpf = bruto.replace(/\D/g, '');
+    const filtros = [{ _id: bruto }];
+    if (cpf.length === 11) filtros.push({ cpf });
+    return clientsColl.findOne({ $or: filtros });
+}
+
+async function buscarDadosContatoPorNumero(numero, sourceTicketNumber = null) {
+    const filtros = filtrosDocumentoPorWhatsApp(numero);
+    if (sourceTicketNumber) filtros.push({ ticketNumber: textoClientePainel(sourceTicketNumber, 80) });
+    if (!filtros.length) {
+        return { identificadores: [], whatsappNumbers: [numero], ticketNumbers: [], lastSeenAt: null };
+    }
+
+    const projection = {
+        ticketNumber: 1,
+        identificadores: 1,
+        whatsappNumbers: 1,
+        numeroReal: 1,
+        lastRawJid: 1,
+        lastActivity: 1,
+        createdAt: 1,
+        updatedAt: 1
+    };
+
+    const [ativos, historicos] = await Promise.all([
+        ticketsColl ? ticketsColl.find({ $or: filtros }, { projection }).limit(100).toArray() : [],
+        ticketHistoryColl ? ticketHistoryColl.find({ $or: filtros }, { projection }).sort({ updatedAt: -1 }).limit(100).toArray() : []
+    ]);
+
+    const todos = [...ativos, ...historicos];
+    const identificadores = new Set([`${numero}@s.whatsapp.net`]);
+    const numeros = new Set([numero]);
+    const ticketNumbers = new Set();
+    let lastSeenAt = null;
+
+    for (const registro of todos) {
+        if (registro.ticketNumber) ticketNumbers.add(String(registro.ticketNumber));
+        for (const id of Array.isArray(registro.identificadores) ? registro.identificadores : []) {
+            if (id) identificadores.add(String(id));
+        }
+        if (registro.lastRawJid) identificadores.add(String(registro.lastRawJid));
+        for (const n of Array.isArray(registro.whatsappNumbers) ? registro.whatsappNumbers : []) {
+            const normalizado = normalizarNumeroWhatsApp(n);
+            if (normalizado) numeros.add(normalizado);
+        }
+        const real = normalizarNumeroWhatsApp(registro.numeroReal);
+        if (real) numeros.add(real);
+        const data = Number(registro.lastActivity || registro.updatedAt || registro.createdAt || 0) || 0;
+        if (data && (!lastSeenAt || data > lastSeenAt)) lastSeenAt = data;
+    }
+
+    return {
+        identificadores: [...identificadores],
+        whatsappNumbers: [...numeros],
+        ticketNumbers: [...ticketNumbers],
+        lastSeenAt
+    };
+}
+
+async function vincularClienteAosTickets(cliente) {
+    if (!cliente) return;
+    const numero = normalizarNumeroWhatsApp(cliente.numeroReal || cliente.whatsapp);
+    const identificadores = Array.isArray(cliente.identificadores) ? cliente.identificadores : [];
+    const filtros = filtrosDocumentoPorWhatsApp(numero, identificadores);
+    if (!filtros.length) return;
+
+    const clienteId = clienteIdParaResposta(cliente);
+    const sets = {
+        clienteId,
+        clienteCadastrado: true,
+        numeroReal: numero || cliente.numeroReal || null,
+        updatedAt: Date.now()
+    };
+    if (cliente.nomeCompleto) sets.clienteNome = cliente.nomeCompleto;
+    if (cliente.cpf) sets.cpf = cliente.cpf;
+    if (cliente.advogadoResponsavel) sets.advogadoResponsavel = cliente.advogadoResponsavel;
+
+    const tarefas = [];
+    if (ticketsColl) tarefas.push(ticketsColl.updateMany({ $or: filtros }, { $set: sets }));
+    if (ticketHistoryColl) tarefas.push(ticketHistoryColl.updateMany({ $or: filtros }, { $set: sets }));
+    await Promise.allSettled(tarefas);
+}
+
+async function listarContatosNaoCadastrados(clientes = []) {
+    const numerosCadastrados = new Set();
+    const idsCadastrados = new Set();
+
+    for (const cliente of clientes) {
+        const numero = normalizarNumeroWhatsApp(cliente.whatsapp || cliente.numeroReal || cliente.whatsappNumbers?.[0]);
+        if (numero) numerosCadastrados.add(numero);
+        for (const n of Array.isArray(cliente.whatsappNumbers) ? cliente.whatsappNumbers : []) {
+            const normalizado = normalizarNumeroWhatsApp(n);
+            if (normalizado) numerosCadastrados.add(normalizado);
+        }
+        for (const id of Array.isArray(cliente.identificadores) ? cliente.identificadores : []) {
+            if (id) idsCadastrados.add(String(id));
+        }
+        if (cliente.lastRawJid) idsCadastrados.add(String(cliente.lastRawJid));
+    }
+
+    const projection = {
+        ticketNumber: 1,
+        clienteNome: 1,
+        cpf: 1,
+        numeroReal: 1,
+        whatsappNumbers: 1,
+        identificadores: 1,
+        lastRawJid: 1,
+        area: 1,
+        createdAt: 1,
+        lastActivity: 1,
+        updatedAt: 1
+    };
+
+    const [ativos, historicos] = await Promise.all([
+        ticketsColl ? ticketsColl.find({}, { projection }).sort({ lastActivity: -1 }).toArray() : [],
+        ticketHistoryColl ? ticketHistoryColl.find({}, { projection }).sort({ updatedAt: -1 }).limit(CLIENTS_HISTORY_CONTACT_LIMIT).toArray() : []
+    ]);
+
+    const porNumero = new Map();
+    for (const registro of [...ativos, ...historicos]) {
+        const numero = whatsappDoTicket(registro);
+        if (!numero || numerosCadastrados.has(numero)) continue;
+
+        const idsRegistro = [
+            ...(Array.isArray(registro.identificadores) ? registro.identificadores : []),
+            registro.lastRawJid
+        ].filter(Boolean).map(String);
+        if (idsRegistro.some(id => idsCadastrados.has(id))) continue;
+
+        const dataContato = Number(registro.lastActivity || registro.updatedAt || registro.createdAt || 0) || 0;
+        const atual = porNumero.get(numero);
+        if (!atual) {
+            porNumero.set(numero, {
+                id: `unregistered_${numero}`,
+                cadastrado: false,
+                origemCadastro: 'whatsapp_nao_cadastrado',
+                nomeCompleto: registro.clienteNome || null,
+                cpf: registro.cpf || null,
+                whatsapp: numero,
+                numeroReal: numero,
+                advogadoResponsavel: null,
+                areaUltimoAtendimento: registro.area || null,
+                ultimoTicket: registro.ticketNumber || null,
+                ticketNumbers: registro.ticketNumber ? [registro.ticketNumber] : [],
+                lastSeenAt: dataContato || null
+            });
+        } else {
+            if (registro.ticketNumber && !atual.ticketNumbers.includes(registro.ticketNumber)) {
+                atual.ticketNumbers.push(registro.ticketNumber);
+            }
+            if (dataContato > Number(atual.lastSeenAt || 0)) {
+                atual.lastSeenAt = dataContato;
+                atual.ultimoTicket = registro.ticketNumber || atual.ultimoTicket;
+                atual.areaUltimoAtendimento = registro.area || atual.areaUltimoAtendimento;
+                if (!atual.nomeCompleto && registro.clienteNome) atual.nomeCompleto = registro.clienteNome;
+                if (!atual.cpf && registro.cpf) atual.cpf = registro.cpf;
+            }
+        }
+    }
+
+    return [...porNumero.values()]
+        .sort((a, b) => Number(b.lastSeenAt || 0) - Number(a.lastSeenAt || 0));
+}
+
+function projecaoClientePainel() {
+    return {
+        cpf: 1,
+        nome: 1,
+        sobrenome: 1,
+        nomeCompleto: 1,
+        rg: 1,
+        email: 1,
+        dataNascimento: 1,
+        estadoCivil: 1,
+        profissao: 1,
+        numeroReal: 1,
+        whatsapp: 1,
+        whatsappNumbers: 1,
+        identificadores: 1,
+        lastRawJid: 1,
+        ticketNumbers: 1,
+        endereco: 1,
+        advogadoResponsavel: 1,
+        observacoes: 1,
+        cadastroManual: 1,
+        origemCadastro: 1,
+        ativo: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        lastSeenAt: 1
+    };
+}
+
+// Lista os cadastros e também os números que já falaram com o escritório, mas
+// ainda não possuem registro em client_registry.
 app.get('/api/clients', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
     if (!clientsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
 
     try {
         const clientes = await clientsColl.find(
-            {},
-            {
-                projection: {
-                    cpf: 1,
-                    nome: 1,
-                    sobrenome: 1,
-                    nomeCompleto: 1,
-                    numeroReal: 1,
-                    whatsapp: 1,
-                    whatsappNumbers: 1,
-                    identificadores: 1,
-                    lastRawJid: 1,
-                    ticketNumbers: 1,
-                    createdAt: 1,
-                    updatedAt: 1,
-                    lastSeenAt: 1
-                }
-            }
+            { ativo: { $ne: false } },
+            { projection: projecaoClientePainel() }
         ).sort({ nomeCompleto: 1, nome: 1, createdAt: -1 }).toArray();
 
         const clientesComWhatsApp = await Promise.all(
             clientes.map(async cliente => ({
                 ...cliente,
+                id: clienteIdParaResposta(cliente),
+                cadastrado: true,
                 whatsapp: await resolverWhatsAppCliente(cliente)
             }))
         );
 
-        res.json(clientesComWhatsApp);
+        const naoCadastrados = await listarContatosNaoCadastrados(clientesComWhatsApp);
+        res.json({
+            clientes: clientesComWhatsApp,
+            naoCadastrados,
+            resumo: {
+                cadastrados: clientesComWhatsApp.length,
+                naoCadastrados: naoCadastrados.length,
+                total: clientesComWhatsApp.length + naoCadastrados.length
+            }
+        });
     } catch (err) {
         console.error('[Clientes] Erro ao carregar clientes:', err);
-        res.status(500).json({ erro: 'Não foi possível carregar os clientes cadastrados.' });
+        res.status(500).json({ erro: 'Não foi possível carregar clientes e contatos.' });
     }
 });
 
-app.delete('/api/clients/:cpf', async (req, res) => {
+// Cadastro manual a partir de um número já visto ou de um número digitado pelo advogado.
+app.post('/api/clients/manual', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
     if (!clientsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
 
     try {
-        const cpf = String(req.params.cpf || '').replace(/\D/g, '');
-        if (cpf.length !== 11) {
-            return res.status(400).json({ erro: 'CPF inválido.' });
+        const dados = normalizarCadastroClientePainel(req.body || {});
+        const numero = dados.numeroReal;
+        const filtrosNumero = filtrosDocumentoPorWhatsApp(numero);
+        const existenteNumero = filtrosNumero.length ? await clientsColl.findOne({ $or: filtrosNumero }) : null;
+        if (existenteNumero) {
+            return res.status(409).json({ erro: 'Este WhatsApp já está vinculado a um cliente cadastrado.' });
         }
 
-        const existente = await clientsColl.findOne({ $or: [{ _id: cpf }, { cpf }] });
-        if (!existente) {
-            return res.status(404).json({ erro: 'Cliente não encontrado.' });
+        if (dados.cpf) {
+            const existenteCPF = await clientsColl.findOne({ cpf: dados.cpf });
+            if (existenteCPF) return res.status(409).json({ erro: 'Este CPF já está vinculado a outro cliente cadastrado.' });
         }
+
+        const origem = await buscarDadosContatoPorNumero(numero, req.body?.sourceTicketNumber || null);
+        const agora = Date.now();
+        const documento = {
+            _id: `cli_${new ObjectId().toString()}`,
+            ...dados,
+            cadastroManual: true,
+            origemCadastro: 'painel_manual',
+            ativo: true,
+            identificadores: origem.identificadores,
+            whatsappNumbers: origem.whatsappNumbers,
+            ticketNumbers: origem.ticketNumbers,
+            lastRawJid: origem.identificadores.find(id => String(id).includes('@')) || `${numero}@s.whatsapp.net`,
+            createdAt: agora,
+            updatedAt: agora,
+            lastSeenAt: origem.lastSeenAt || agora
+        };
+        // O índice de CPF é unique+sparse. Campo ausente é permitido em vários
+        // clientes; cpf:null não é seguro em versões/configurações antigas do MongoDB.
+        if (!documento.cpf) delete documento.cpf;
+
+        await clientsColl.insertOne(documento);
+        await vincularClienteAosTickets(documento);
+        io.emit('clients_updated', { action: 'created', id: String(documento._id) });
+
+        res.status(201).json({
+            ok: true,
+            cliente: { ...documento, id: String(documento._id), cadastrado: true, whatsapp: numero }
+        });
+    } catch (err) {
+        console.error('[Clientes] Erro ao cadastrar cliente manualmente:', err);
+        res.status(err.statusCode || (err?.code === 11000 ? 409 : 500)).json({
+            erro: err?.code === 11000 ? 'CPF ou identificador já vinculado a outro cadastro.' : (err.message || 'Não foi possível cadastrar o cliente.')
+        });
+    }
+});
+
+// Atualiza dados cadastrais. Todos os campos, exceto WhatsApp, podem ser esvaziados.
+app.put('/api/clients/:id', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!clientsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
+
+    try {
+        const existente = await buscarClientePorIdPainel(req.params.id);
+        if (!existente) return res.status(404).json({ erro: 'Cliente não encontrado.' });
+
+        const dados = normalizarCadastroClientePainel(req.body || {}, existente);
+        const filtrosNumero = filtrosDocumentoPorWhatsApp(dados.numeroReal);
+        if (filtrosNumero.length) {
+            const duplicadoNumero = await clientsColl.findOne({
+                $and: [{ _id: { $ne: existente._id } }, { $or: filtrosNumero }]
+            });
+            if (duplicadoNumero) return res.status(409).json({ erro: 'Este WhatsApp já está vinculado a outro cliente cadastrado.' });
+        }
+
+        if (dados.cpf) {
+            const duplicadoCPF = await clientsColl.findOne({ cpf: dados.cpf, _id: { $ne: existente._id } });
+            if (duplicadoCPF) return res.status(409).json({ erro: 'Este CPF já está vinculado a outro cliente cadastrado.' });
+        }
+
+        const origem = await buscarDadosContatoPorNumero(dados.numeroReal, req.body?.sourceTicketNumber || null);
+        const agora = Date.now();
+        const sets = {
+            ...dados,
+            cadastroManual: existente.cadastroManual === true || existente.origemCadastro === 'painel_manual',
+            origemCadastro: existente.origemCadastro || 'whatsapp',
+            ativo: true,
+            updatedAt: agora
+        };
+        const update = {
+            $set: sets,
+            $addToSet: {
+                identificadores: { $each: origem.identificadores },
+                whatsappNumbers: { $each: origem.whatsappNumbers },
+                ticketNumbers: { $each: origem.ticketNumbers }
+            }
+        };
+        if (!dados.cpf) {
+            delete sets.cpf;
+            update.$unset = { cpf: '' };
+        }
+
+        await clientsColl.updateOne({ _id: existente._id }, update);
+        const atualizado = await clientsColl.findOne({ _id: existente._id }, { projection: projecaoClientePainel() });
+        await vincularClienteAosTickets(atualizado);
+        io.emit('clients_updated', { action: 'updated', id: String(existente._id) });
+
+        res.json({
+            ok: true,
+            cliente: { ...atualizado, id: String(atualizado._id), cadastrado: true, whatsapp: await resolverWhatsAppCliente(atualizado) }
+        });
+    } catch (err) {
+        console.error('[Clientes] Erro ao atualizar cliente:', err);
+        res.status(err.statusCode || (err?.code === 11000 ? 409 : 500)).json({
+            erro: err?.code === 11000 ? 'CPF ou identificador já vinculado a outro cadastro.' : (err.message || 'Não foi possível atualizar o cliente.')
+        });
+    }
+});
+
+// Exclui o cadastro, preservando o histórico dos atendimentos.
+app.delete('/api/clients/:id', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!clientsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
+
+    try {
+        const existente = await buscarClientePorIdPainel(req.params.id);
+        if (!existente) return res.status(404).json({ erro: 'Cliente não encontrado.' });
 
         const result = await clientsColl.deleteOne({ _id: existente._id });
-        if (!result.deletedCount) {
-            return res.status(404).json({ erro: 'Cliente não encontrado.' });
-        }
+        if (!result.deletedCount) return res.status(404).json({ erro: 'Cliente não encontrado.' });
 
-        // Remove apenas o vínculo de cadastro dos tickets ativos. O histórico do atendimento
-        // é preservado para não apagar registros jurídicos/operacionais já existentes.
         if (ticketsColl) {
+            const filtros = [{ clienteId: String(existente._id) }];
+            if (existente.cpf) filtros.push({ cpf: existente.cpf });
+            const numero = normalizarNumeroWhatsApp(existente.numeroReal || existente.whatsapp);
+            if (numero) filtros.push(...filtrosDocumentoPorWhatsApp(numero, existente.identificadores || []));
+
             await ticketsColl.updateMany(
-                { $or: [{ clienteId: cpf }, { cpf }] },
+                { $or: filtros },
                 {
                     $set: {
                         clienteId: null,
@@ -5017,6 +5450,7 @@ app.delete('/api/clients/:cpf', async (req, res) => {
             );
         }
 
+        io.emit('clients_updated', { action: 'deleted', id: String(existente._id) });
         res.json({ ok: true });
     } catch (err) {
         console.error('[Clientes] Erro ao remover cliente:', err);
