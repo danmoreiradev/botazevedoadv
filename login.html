@@ -3,110 +3,668 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>Login | Azevedo & Juvencio</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="icon" type="image/png" sizes="32x32" href="https://azevedoejuvencioadvogados.com.br/wp-content/uploads/2024/01/cropped-Prancheta-4-e1706712675977-32x32.png">
+
+    <link
+        rel="icon"
+        type="image/png"
+        sizes="32x32"
+        href="https://azevedoejuvencioadvogados.com.br/wp-content/uploads/2024/01/cropped-Prancheta-4-e1706712675977-32x32.png"
+    >
+
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+    >
+
     <style>
-        body { 
-            background: #094360; 
-            min-height: 100vh; 
-            display: flex; 
-            align-items: center; 
-            justify-content: center; 
-            padding: 20px;
-        }
-        
-        .login-card { 
-            background: white; 
-            padding: 40px; 
-            border-radius: 20px; 
-            width: 100%; 
-            max-width: 450px; /* Card levemente mais largo para acomodar o logo maior */
-            text-align: center;
-            box-shadow: 0 15px 35px rgba(0,0,0,0.3);
+        :root {
+            --adv-blue: #292d38;
+            --adv-blue-strong: #1b202a;
+            --adv-blue-soft: #3d4352;
+            --adv-gold: #c5a059;
+
+            --bg-light: #f5f6f8;
+            --surface: #ffffff;
+            --surface-soft: #f8f9fb;
+
+            --border: #e2e6eb;
+            --border-strong: #d4dae1;
+
+            --text: #20242d;
+            --text-soft: #606976;
+            --text-muted: #7b8490;
+
+            --shadow-lg: 0 24px 65px rgba(20, 27, 38, 0.14);
+            --shadow-sm: 0 4px 14px rgba(20, 27, 38, 0.06);
+
+            --transition: 180ms ease;
         }
 
-        .logo-container {
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
             width: 100%;
-            margin-bottom: 10px; /* Reduzi a margem pois o logo já ocupa bastante espaço */
+            min-height: 100%;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100dvh;
             display: flex;
+            align-items: center;
             justify-content: center;
+            padding: 32px;
+            overflow-x: hidden;
+
+            background:
+                radial-gradient(circle at 100% 0%, rgba(197, 160, 89, 0.09), transparent 28rem),
+                radial-gradient(circle at 0% 100%, rgba(41, 45, 56, 0.05), transparent 30rem),
+                var(--bg-light);
+
+            color: var(--text);
+            font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
         }
 
-        .logo-adv {
-            /* Aumentado para 280px para dar destaque e clareza */
-            width: 280px; 
-            height: auto;
-            
-            /* Hacks de nitidez para imagens de alta resolução redimensionadas */
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: high-quality;
-            
-            /* Garante que a proporção 1:1 seja respeitada */
+        .login-shell {
+            width: min(1040px, 100%);
+            min-height: 650px;
+            display: grid;
+            grid-template-columns: 0.92fr 1.08fr;
+            overflow: hidden;
+
+            background: var(--surface);
+            border: 1px solid rgba(212, 218, 225, 0.9);
+            border-radius: 28px;
+            box-shadow: var(--shadow-lg);
+        }
+
+        /* LADO INSTITUCIONAL */
+        .brand-panel {
+            position: relative;
+            min-height: 650px;
+            padding: 48px 44px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+
+            background:
+                linear-gradient(155deg, rgba(255, 255, 255, 0.025), transparent 42%),
+                var(--adv-blue-strong);
+
+            color: #fff;
+        }
+
+        .brand-panel::before {
+            content: "";
+            position: absolute;
+            width: 330px;
+            height: 330px;
+            right: -155px;
+            top: -145px;
+            border: 1px solid rgba(197, 160, 89, 0.14);
+            border-radius: 50%;
+        }
+
+        .brand-panel::after {
+            content: "";
+            position: absolute;
+            width: 230px;
+            height: 230px;
+            right: -95px;
+            top: -95px;
+            border: 1px solid rgba(197, 160, 89, 0.10);
+            border-radius: 50%;
+        }
+
+        .brand-logo-wrap {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            margin-bottom: 52px;
+        }
+
+        .brand-logo {
+            display: block;
+            width: 100%;
+            max-width: 315px;
+            height: 140px;
             object-fit: contain;
+            object-position: left center;
+
+            transform: scale(1.45);
+            transform-origin: left center;
+
+            filter: brightness(0) invert(1);
         }
 
-        .btn-adv { 
-            background: #c5a059; 
-            color: white; 
-            border: none; 
-            font-weight: bold; 
-            padding: 14px;
-            border-radius: 8px;
-            transition: 0.3s;
+        .brand-content {
+            position: relative;
+            z-index: 2;
+            margin-top: auto;
+            margin-bottom: auto;
+        }
+
+        .brand-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 9px;
+            margin-bottom: 20px;
+
+            color: rgba(255, 255, 255, 0.58);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.11em;
             text-transform: uppercase;
         }
 
-        .btn-adv:hover {
-            background: #a8874a;
-            color: white;
-            box-shadow: 0 4px 12px rgba(197, 160, 89, 0.3);
+        .brand-kicker::before {
+            content: "";
+            width: 24px;
+            height: 2px;
+            border-radius: 999px;
+            background: var(--adv-gold);
+        }
+
+        .brand-title {
+            max-width: 360px;
+            margin: 0 0 18px;
+
+            color: #fff;
+            font-size: clamp(2rem, 3.3vw, 2.75rem);
+            line-height: 1.08;
+            font-weight: 720;
+            letter-spacing: -0.045em;
+        }
+
+        .brand-description {
+            max-width: 350px;
+            margin: 0;
+
+            color: rgba(255, 255, 255, 0.58);
+            font-size: 0.96rem;
+            line-height: 1.7;
+        }
+
+        .brand-footer {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+
+            color: rgba(255, 255, 255, 0.44);
+            font-size: 0.76rem;
+            font-weight: 600;
+        }
+
+        .brand-footer-dot {
+            width: 7px;
+            height: 7px;
+            flex: 0 0 7px;
+            border-radius: 50%;
+            background: var(--adv-gold);
+            box-shadow: 0 0 0 4px rgba(197, 160, 89, 0.10);
+        }
+
+        /* ÁREA DO LOGIN */
+        .login-panel {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 56px 64px;
+            background: var(--surface);
+        }
+
+        .login-content {
+            width: 100%;
+            max-width: 390px;
+        }
+
+        .login-eyebrow {
+            margin-bottom: 10px;
+
+            color: var(--adv-gold);
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 0.11em;
+            text-transform: uppercase;
+        }
+
+        .login-title {
+            margin: 0 0 10px;
+
+            color: var(--adv-blue);
+            font-size: 2rem;
+            line-height: 1.15;
+            font-weight: 750;
+            letter-spacing: -0.035em;
+        }
+
+        .login-subtitle {
+            margin: 0 0 34px;
+
+            color: var(--text-soft);
+            font-size: 0.93rem;
+            line-height: 1.55;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            margin-bottom: 8px;
+
+            color: var(--adv-blue);
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
+        .input-wrap {
+            position: relative;
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            width: 19px;
+            height: 19px;
+            transform: translateY(-50%);
+            color: #98a0aa;
+            pointer-events: none;
         }
 
         .form-control {
-            padding: 12px;
-            border-radius: 8px;
-            border: 1px solid #ced4da;
+            min-height: 52px;
+            padding: 12px 16px 12px 48px;
+
+            color: var(--text);
+            background: #fff;
+            border: 1px solid var(--border-strong);
+            border-radius: 12px;
+
+            font-size: 0.92rem;
+            box-shadow: none;
+            transition:
+                border-color var(--transition),
+                box-shadow var(--transition),
+                background var(--transition);
+        }
+
+        .form-control::placeholder {
+            color: #a2a9b2;
+        }
+
+        .form-control:hover {
+            border-color: #c5cbd3;
         }
 
         .form-control:focus {
-            border-color: #c5a059;
-            box-shadow: 0 0 0 0.25rem rgba(197, 160, 89, 0.2);
+            color: var(--text);
+            background: #fff;
+            border-color: rgba(197, 160, 89, 0.95);
+            box-shadow: 0 0 0 4px rgba(197, 160, 89, 0.12);
         }
 
-        .footer-text {
-            margin-top: 20px;
-            color: #6c757d;
-            font-size: 0.85rem;
+        .btn-adv {
+            width: 100%;
+            min-height: 52px;
+            margin-top: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+
+            color: #fff;
+            background: var(--adv-blue);
+            border: 1px solid var(--adv-blue);
+            border-radius: 12px;
+
+            font-size: 0.83rem;
+            font-weight: 750;
+            letter-spacing: 0.035em;
+            text-transform: uppercase;
+
+            box-shadow: 0 8px 20px rgba(41, 45, 56, 0.13);
+            transition:
+                transform var(--transition),
+                background var(--transition),
+                border-color var(--transition),
+                box-shadow var(--transition);
+        }
+
+        .btn-adv:hover,
+        .btn-adv:focus {
+            color: #fff;
+            background: var(--adv-blue-strong);
+            border-color: var(--adv-blue-strong);
+            box-shadow: 0 10px 24px rgba(27, 32, 42, 0.18);
+            transform: translateY(-1px);
+        }
+
+        .btn-adv:active {
+            transform: translateY(0);
+        }
+
+        .security-note {
+            margin-top: 24px;
+            padding: 15px 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 11px;
+
+            color: var(--text-muted);
+            background: var(--surface-soft);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+
+        .security-icon {
+            width: 18px;
+            height: 18px;
+            flex: 0 0 18px;
+            margin-top: 1px;
+            color: var(--adv-gold);
+        }
+
+        .login-footer {
+            margin-top: 28px;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            text-align: center;
+        }
+
+        .login-footer strong {
+            color: var(--adv-blue);
+            font-weight: 700;
+        }
+
+        /* TABLETS */
+        @media (max-width: 900px) {
+            body {
+                padding: 22px;
+            }
+
+            .login-shell {
+                grid-template-columns: 0.82fr 1.18fr;
+                min-height: 610px;
+            }
+
+            .brand-panel {
+                min-height: 610px;
+                padding: 38px 30px;
+            }
+
+            .brand-logo {
+                max-width: 270px;
+                height: 120px;
+                transform: scale(1.35);
+            }
+
+            .login-panel {
+                padding: 48px 42px;
+            }
+        }
+
+        /* MOBILE */
+        @media (max-width: 720px) {
+            body {
+                align-items: flex-start;
+                padding: 0;
+                background: var(--surface);
+            }
+
+            .login-shell {
+                width: 100%;
+                min-height: 100dvh;
+                grid-template-columns: 1fr;
+                border: 0;
+                border-radius: 0;
+                box-shadow: none;
+            }
+
+            .brand-panel {
+                min-height: auto;
+                padding: 24px 24px 26px;
+                border-radius: 0 0 24px 24px;
+            }
+
+            .brand-panel::before,
+            .brand-panel::after {
+                display: none;
+            }
+
+            .brand-logo-wrap {
+                margin-bottom: 10px;
+            }
+
+            .brand-logo {
+                width: 250px;
+                max-width: 78vw;
+                height: 94px;
+                object-position: left center;
+                transform: scale(1.28);
+            }
+
+            .brand-content {
+                margin: 8px 0 0;
+            }
+
+            .brand-kicker,
+            .brand-description,
+            .brand-footer {
+                display: none;
+            }
+
+            .brand-title {
+                max-width: none;
+                margin: 0;
+                font-size: 1.38rem;
+                line-height: 1.25;
+                letter-spacing: -0.025em;
+            }
+
+            .login-panel {
+                align-items: flex-start;
+                padding: 36px 24px 42px;
+            }
+
+            .login-content {
+                max-width: 100%;
+            }
+
+            .login-title {
+                font-size: 1.75rem;
+            }
+
+            .login-subtitle {
+                margin-bottom: 28px;
+            }
+        }
+
+        @media (max-width: 420px) {
+            .brand-panel {
+                padding-inline: 20px;
+            }
+
+            .login-panel {
+                padding-inline: 20px;
+            }
+
+            .brand-logo {
+                width: 225px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
+                transition: none !important;
+            }
         }
     </style>
 </head>
+
 <body>
-
-    <div class="login-card">
-        <div class="logo-container">
-            <img src="https://azevedoejuvencioadvogados.com.br/wp-content/uploads/2026/01/Logo-Alta-Resolucao-copy@azul-SEM-SOMBRA-1024x1024.png" 
-                 alt="Azevedo & Juvencio" 
-                 class="logo-adv">
-        </div>
-
-        <h5 class="mb-4" style="color:#094360; font-weight: 700; letter-spacing: 1px;">PAINEL JURÍDICO</h5>
-        
-        <form action="/login" method="POST">
-            <div class="mb-3">
-                <input type="text" name="user" class="form-control" placeholder="Usuário" required>
+    <main class="login-shell">
+        <section class="brand-panel" aria-label="Azevedo & Juvencio">
+            <div class="brand-logo-wrap">
+                <img
+                    src="https://azevedoejuvencioadvogados.com.br/wp-content/uploads/2026/01/Logo-Alta-Resolucao-copy@azul-SEM-SOMBRA-1024x1024.png"
+                    alt="Azevedo & Juvencio Advogados"
+                    class="brand-logo"
+                >
             </div>
-            <div class="mb-3">
-                <input type="password" name="pass" class="form-control" placeholder="Senha" required>
+
+            <div class="brand-content">
+                <div class="brand-kicker">Painel Jurídico</div>
+
+                <h1 class="brand-title">
+                    Gestão do atendimento em um único ambiente.
+                </h1>
+
+                <p class="brand-description">
+                    Acesso interno ao painel de gestão do chatbot, clientes,
+                    inteligência artificial e configurações de atendimento.
+                </p>
             </div>
-            <button type="submit" class="btn btn-adv w-100">Entrar no Sistema</button>
-        </form>
 
-        <div class="footer-text">
-            <strong>Azevedo & Juvencio Advogados</strong><br>
-            Acesso Restrito
-        </div>
-    </div>
+            <div class="brand-footer">
+                <span class="brand-footer-dot"></span>
+                <span>Azevedo & Juvencio Advogados</span>
+            </div>
+        </section>
 
+        <section class="login-panel">
+            <div class="login-content">
+                <div class="login-eyebrow">Acesso restrito</div>
+
+                <h2 class="login-title">Bem-vindo.</h2>
+
+                <p class="login-subtitle">
+                    Entre com suas credenciais para acessar o painel administrativo.
+                </p>
+
+                <form action="/login" method="POST">
+                    <div class="form-group">
+                        <label class="form-label" for="user">Usuário</label>
+
+                        <div class="input-wrap">
+                            <svg
+                                class="input-icon"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.8"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                aria-hidden="true"
+                            >
+                                <path d="M20 21a8 8 0 0 0-16 0"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+
+                            <input
+                                type="text"
+                                id="user"
+                                name="user"
+                                class="form-control"
+                                placeholder="Digite seu usuário"
+                                autocomplete="username"
+                                required
+                            >
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="pass">Senha</label>
+
+                        <div class="input-wrap">
+                            <svg
+                                class="input-icon"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.8"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                aria-hidden="true"
+                            >
+                                <rect x="4" y="10" width="16" height="10" rx="2"></rect>
+                                <path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+                            </svg>
+
+                            <input
+                                type="password"
+                                id="pass"
+                                name="pass"
+                                class="form-control"
+                                placeholder="Digite sua senha"
+                                autocomplete="current-password"
+                                required
+                            >
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-adv">
+                        Entrar no sistema
+                        <svg
+                            width="17"
+                            height="17"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.8"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M5 12h14"></path>
+                            <path d="m13 6 6 6-6 6"></path>
+                        </svg>
+                    </button>
+                </form>
+
+                <div class="security-note">
+                    <svg
+                        class="security-icon"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                    >
+                        <rect x="4" y="10" width="16" height="10" rx="2"></rect>
+                        <path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+                    </svg>
+
+                    <span>
+                        Ambiente de uso interno. O acesso é destinado exclusivamente
+                        a usuários autorizados.
+                    </span>
+                </div>
+
+                <div class="login-footer">
+                    <strong>Azevedo & Juvencio Advogados</strong><br>
+                    Painel administrativo
+                </div>
+            </div>
+        </section>
+    </main>
 </body>
 </html>
