@@ -2147,8 +2147,15 @@ async function encaminharAutomaticamenteForaDoHorario(ticket, jid, { texto = '',
         }
     });
 
+    const mensagemForaHorarioHumanizada = await gerarRespostaHumanizadaIA({
+        tipo: 'fora_horario',
+        mensagemCliente: texto,
+        ticket,
+        mensagemBase: montarMensagemForaHorario(config || DEFAULT_BUSINESS_HOURS)
+    });
+
     await sendBotMsg(jid, {
-        text: montarMensagemForaHorario(config || DEFAULT_BUSINESS_HOURS)
+        text: mensagemForaHorarioHumanizada
     });
 
     console.log(`[Ticket ${ticket.ticketNumber}] Fluxo fora do horário iniciado; aguardando relato do cliente.`);
@@ -2160,6 +2167,180 @@ function normalizarTexto(texto = '') {
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .trim();
+}
+
+// -----------------------------------------------------------------------------
+// HUMANIZAÇÃO CONTEXTUAL DAS RESPOSTAS AUTOMÁTICAS
+// -----------------------------------------------------------------------------
+// A IA melhora somente a forma da mensagem. Dados operacionais (como número do
+// ticket e horários) são validados antes do envio. Se o Gemini estiver indisponível
+// ou ultrapassar o tempo limite, o texto-base humanizado é usado sem interromper o fluxo.
+const HUMANIZACAO_IA_TIMEOUT_MS = 6500;
+const HUMANIZACAO_IA_MAX_CHARS = 1200;
+
+function detectarCortesiaMensagem(texto = '') {
+    const valor = normalizarTexto(texto)
+        .replace(/[!?.,;:]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    let saudacao = null;
+    if (/\bbom dia\b/.test(valor)) saudacao = 'Bom dia';
+    else if (/\bboa tarde\b/.test(valor)) saudacao = 'Boa tarde';
+    else if (/\bboa noite\b/.test(valor)) saudacao = 'Boa noite';
+    else if (/^(oi|ola|opa)\b/.test(valor)) saudacao = 'Olá';
+
+    const agradecimento = /\b(obrigado|obrigada|muito obrigado|muito obrigada|agradeco|agradecemos|grato|grata|valeu)\b/.test(valor);
+
+    let restante = ` ${valor} `;
+    const expressoesCortesia = [
+        /\b(bom dia|boa tarde|boa noite)\b/g,
+        /\b(oi|ola|opa)\b/g,
+        /\b(muito obrigado|muito obrigada|obrigado|obrigada)\b/g,
+        /\b(agradeco|agradecemos|grato|grata|valeu)\b/g,
+        /\b(pela ajuda|pelo retorno|pela atencao|pelo atendimento|pela resposta)\b/g,
+        /\b(tudo bem|td bem|como vai|como voce esta|como voces estao)\b/g,
+        /\b(por favor)\b/g
+    ];
+    for (const regex of expressoesCortesia) restante = restante.replace(regex, ' ');
+    restante = restante.replace(/\s+/g, ' ').trim();
+
+    return {
+        saudacao,
+        agradecimento,
+        somenteCortesia: !!(saudacao || agradecimento) && restante.length === 0
+    };
+}
+
+function aplicarCortesiaAoFallback(mensagemBase = '', mensagemCliente = '') {
+    let resposta = String(mensagemBase || '').trim();
+    if (!resposta) return resposta;
+
+    const cortesia = detectarCortesiaMensagem(mensagemCliente);
+    const prefixos = [];
+
+    if (cortesia.saudacao && !normalizarTexto(resposta).startsWith(normalizarTexto(cortesia.saudacao))) {
+        prefixos.push(`${cortesia.saudacao}!`);
+    }
+
+    if (cortesia.agradecimento && !/agradec|obrigad|por nada|disposicao/i.test(normalizarTexto(resposta))) {
+        prefixos.push('Nós que agradecemos pelo retorno.');
+    }
+
+    return [...prefixos, resposta].filter(Boolean).join(' ');
+}
+
+function literaisProtegidosDaMensagem(mensagemBase = '', ticket = null) {
+    const texto = String(mensagemBase || '');
+    const literais = new Set();
+
+    if (ticket?.ticketNumber && texto.includes(ticket.ticketNumber)) {
+        literais.add(String(ticket.ticketNumber));
+    }
+
+    // Horários explícitos não podem ser alterados pela IA.
+    for (const match of texto.matchAll(/\b(?:[01]\d|2[0-3]):[0-5]\d\b/g)) {
+        literais.add(match[0]);
+    }
+
+    return [...literais];
+}
+
+function limparRespostaHumanizadaIA(raw = '') {
+    let texto = String(raw || '')
+        .trim()
+        .replace(/^```(?:text|markdown)?\s*/i, '')
+        .replace(/```$/i, '')
+        .trim();
+
+    if ((texto.startsWith('"') && texto.endsWith('"')) || (texto.startsWith('“') && texto.endsWith('”'))) {
+        texto = texto.slice(1, -1).trim();
+    }
+
+    return texto.slice(0, HUMANIZACAO_IA_MAX_CHARS).trim();
+}
+
+async function gerarRespostaHumanizadaIA({
+    tipo = 'mensagem_operacional',
+    mensagemCliente = '',
+    ticket = null,
+    mensagemBase = '',
+    nomeCliente = ''
+} = {}) {
+    const base = String(mensagemBase || '').trim();
+    if (!base) return '';
+
+    const fallback = aplicarCortesiaAoFallback(base, mensagemCliente);
+    if (!geminiModel) return fallback;
+
+    const literaisProtegidos = literaisProtegidosDaMensagem(base, ticket);
+    const cortesia = detectarCortesiaMensagem(mensagemCliente);
+    const nome = String(nomeCliente || ticket?.clienteNome || '').trim().slice(0, 120);
+
+    const prompt = `Você revisa mensagens automáticas de WhatsApp de um escritório de advocacia brasileiro.
+
+OBJETIVO:
+Reescreva a MENSAGEM-BASE para soar humana, cordial, profissional, segura e natural, como se tivesse sido escrita por uma recepcionista jurídica experiente.
+
+TIPO DA MENSAGEM: ${JSON.stringify(tipo)}
+MENSAGEM ATUAL DO CLIENTE: ${JSON.stringify(String(mensagemCliente || '').slice(0, 1800))}
+NOME DO CLIENTE, SE CONHECIDO: ${JSON.stringify(nome || null)}
+NÚMERO DO TICKET: ${JSON.stringify(ticket?.ticketNumber || null)}
+MENSAGEM-BASE: ${JSON.stringify(base)}
+
+SINAIS DE CORTESIA IDENTIFICADOS:
+- saudação: ${JSON.stringify(cortesia.saudacao)}
+- agradecimento: ${cortesia.agradecimento ? 'sim' : 'não'}
+
+REGRAS OBRIGATÓRIAS:
+1. Preserve integralmente o sentido operacional da MENSAGEM-BASE. Não remova informação importante.
+2. Preserve EXATAMENTE números de ticket, horários, nomes e demais dados concretos presentes na MENSAGEM-BASE.
+3. Se o cliente disser "Bom dia", "Boa tarde" ou "Boa noite", responda com a mesma saudação. Se agradecer, retribua o agradecimento de forma natural.
+4. Não invente prazo, data, valor, análise jurídica, resultado, prioridade, urgência, disponibilidade de advogado ou promessa de retorno.
+5. Não diga "em breve", "logo", "aguarde um momento" ou equivalentes, salvo se essas expressões já estiverem na MENSAGEM-BASE.
+6. Não dê orientação jurídica e não acrescente fatos sobre o caso.
+7. Evite linguagem robótica como "um especialista dará continuidade ao atendimento". Prefira construções humanas como "nossa equipe seguirá com o atendimento por aqui", desde que mantenha o sentido da base.
+8. Use de 1 a 3 frases curtas. Pode usar no máximo 1 emoji, apenas se ficar natural. Não exagere em exclamações.
+9. O WhatsApp aceita *negrito*; mantenha o número do ticket destacado se ele já estiver destacado na base.
+10. Retorne SOMENTE a mensagem final, sem aspas, JSON, explicações ou markdown em bloco.`;
+
+    try {
+        const timeout = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Timeout da humanização por IA.')), HUMANIZACAO_IA_TIMEOUT_MS);
+        });
+
+        const result = await Promise.race([
+            geminiModel.generateContent(prompt),
+            timeout
+        ]);
+        const response = await result.response;
+        const humanizada = limparRespostaHumanizadaIA(response.text());
+
+        if (!humanizada) return fallback;
+        if (literaisProtegidos.some(literal => !humanizada.includes(literal))) {
+            console.warn('[Humanização IA] Resposta descartada por alterar/remover dado protegido.');
+            return fallback;
+        }
+
+        // Última proteção contra promessas que não existiam no texto-base.
+        const baseNormalizada = normalizarTexto(base);
+        const respostaNormalizada = normalizarTexto(humanizada);
+        const adicionouPromessaTemporal = /\b(em breve|logo|aguarde um momento|ainda hoje|nas proximas horas)\b/.test(respostaNormalizada) &&
+            !/\b(em breve|logo|aguarde um momento|ainda hoje|nas proximas horas)\b/.test(baseNormalizada);
+        if (adicionouPromessaTemporal) {
+            console.warn('[Humanização IA] Resposta descartada por adicionar promessa temporal.');
+            return fallback;
+        }
+
+        return humanizada;
+    } catch (err) {
+        console.warn('[Humanização IA] Usando fallback seguro:', err?.message || err);
+        return fallback;
+    }
+}
+
+function saudacaoContextualDaMensagem(texto = '') {
+    return detectarCortesiaMensagem(texto).saudacao || 'Olá';
 }
 
 function respostaPositiva(texto = '') {
@@ -2404,12 +2585,21 @@ async function analisarMensagemComIA(texto, ticket) {
         return { acao: 'ENCERRAR', origem: 'regra' };
     }
 
+    const atendimentoHumanoAtivo = ticket.status === 'em_atendimento_humano';
+    const cortesia = detectarCortesiaMensagem(texto);
+
+    // Cumprimentos e agradecimentos isolados não são tratados como erro de menu/cadastro.
+    // O bot responde a cortesia e retoma exatamente o ponto em que o cliente estava.
+    // Se um advogado já assumiu a conversa, o bot permanece silencioso para não disputar o diálogo.
+    if (!atendimentoHumanoAtivo && cortesia.somenteCortesia) {
+        return { acao: 'CORTESIA', origem: 'regra', cortesia };
+    }
+
     // Respostas das perguntas sequenciais são dados do caso e não devem ser consumidas pela IA.
     if (entradaEstruturadaDoFluxo(ticket, texto)) return null;
 
     // Quando um atendente humano já assumiu a conversa, a IA não responde FAQs para não
     // disputar o diálogo. Ainda permitimos a análise semântica de encerramento logo abaixo.
-    const atendimentoHumanoAtivo = ticket.status === 'em_atendimento_humano';
     if (atendimentoHumanoAtivo && !possuiSinalDeEncerramento(texto)) {
         return null;
     }
@@ -2507,12 +2697,17 @@ REGRAS OBRIGATÓRIAS:
     }
 }
 
-async function encerrarTicketPorCliente(ticket, jid) {
+async function encerrarTicketPorCliente(ticket, jid, mensagemCliente = '') {
     if (!ticket) return;
 
-    await sendBotMsg(jid, {
-        text: `Atendimento *${ticket.ticketNumber}* encerrado. Obrigado pelo contato! Ficamos à disposição. 👋`
+    const mensagemFinal = await gerarRespostaHumanizadaIA({
+        tipo: 'encerramento_solicitado_cliente',
+        mensagemCliente,
+        ticket,
+        mensagemBase: `Certo. O ticket *${ticket.ticketNumber}* foi encerrado conforme solicitado. Agradecemos pelo contato e permanecemos à disposição quando precisar.`
     });
+
+    await sendBotMsg(jid, { text: mensagemFinal });
 
     await atualizarHistorico(ticket.ticketNumber, {
         status: 'encerrado',
@@ -2523,18 +2718,64 @@ async function encerrarTicketPorCliente(ticket, jid) {
     await ticketsColl.deleteOne({ _id: ticket._id });
 }
 
-async function responderInterrupcaoIA(ticket, jid, analiseIA) {
+async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = '') {
     if (!analiseIA) return false;
 
     if (analiseIA.acao === 'ENCERRAR') {
-        await encerrarTicketPorCliente(ticket, jid);
+        await encerrarTicketPorCliente(ticket, jid, mensagemCliente);
+        return true;
+    }
+
+    if (analiseIA.acao === 'CORTESIA') {
+        const cortesia = analiseIA.cortesia || detectarCortesiaMensagem(mensagemCliente);
+        const aguardandoEquipe = ticket?.paused || ticket?.status === 'aguardando_especialista';
+
+        let baseCortesia = 'Olá!';
+        if (cortesia.saudacao && cortesia.agradecimento) {
+            baseCortesia = `${cortesia.saudacao}! Nós que agradecemos pelo contato.`;
+        } else if (cortesia.saudacao) {
+            baseCortesia = `${cortesia.saudacao}!`;
+        } else if (cortesia.agradecimento) {
+            baseCortesia = 'Nós que agradecemos pelo contato!';
+        }
+
+        if (aguardandoEquipe) {
+            baseCortesia += ` Seu ticket *${ticket.ticketNumber}* segue com nossa equipe, e o atendimento continuará por aqui.`;
+        }
+
+        const respostaCortesia = await gerarRespostaHumanizadaIA({
+            tipo: 'cortesia_cliente',
+            mensagemCliente,
+            ticket,
+            mensagemBase: baseCortesia
+        });
+
+        const deveRetomarFluxo = !aguardandoEquipe && ticket?.status !== 'em_atendimento_humano';
+        const retomada = deveRetomarFluxo ? await mensagemRetomadaFluxo(ticket) : '';
+
+        await sendBotMsg(jid, { text: `${respostaCortesia}${retomada}` });
+        await ticketsColl.updateOne(
+            { _id: ticket._id },
+            { $set: { lastActivity: Date.now() } }
+        );
+        await atualizarHistorico(ticket.ticketNumber, {
+            ultimaRespostaCortesiaEm: Date.now()
+        });
         return true;
     }
 
     if (analiseIA.acao === 'RESPONDER_BASE') {
         const retomada = await mensagemRetomadaFluxo(ticket);
+        const cortesia = detectarCortesiaMensagem(mensagemCliente);
+        const prefixos = [];
+        if (cortesia.saudacao) prefixos.push(`${cortesia.saudacao}!`);
+        if (cortesia.agradecimento) prefixos.push('Nós que agradecemos pelo contato.');
+        const prefixo = prefixos.length ? `${prefixos.join(' ')}\n\n` : '';
+
+        // A resposta jurídica/aprovada da knowledge_base não é reescrita pela IA.
+        // Humanizamos apenas a abertura, preservando integralmente o conteúdo cadastrado.
         await sendBotMsg(jid, {
-            text: `${analiseIA.resposta}${retomada}`
+            text: `${prefixo}${analiseIA.resposta}${retomada}`
         });
 
         await ticketsColl.updateOne(
@@ -2553,16 +2794,21 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA) {
     return false;
 }
 
-async function confirmarMensagemAguardandoEspecialista(ticket, jid) {
+async function confirmarMensagemAguardandoEspecialista(ticket, jid, mensagemCliente = '') {
     if (!ticket || ticket.status !== 'aguardando_especialista') return;
 
     const agora = Date.now();
     const intervaloMinimo = 15 * 60 * 1000;
     if (agora - (ticket.lastAutoAckAt || 0) < intervaloMinimo) return;
 
-    await sendBotMsg(jid, {
-        text: `📩 Recebemos sua mensagem e ela foi adicionada ao ticket *${ticket.ticketNumber}*. Nossa equipe dará continuidade ao atendimento.`
+    const mensagemConfirmacao = await gerarRespostaHumanizadaIA({
+        tipo: 'confirmacao_mensagem_ticket_em_espera',
+        mensagemCliente,
+        ticket,
+        mensagemBase: `Recebemos sua mensagem e ela já foi adicionada ao ticket *${ticket.ticketNumber}*. Nossa equipe terá acesso a essa informação na continuidade do atendimento.`
     });
+
+    await sendBotMsg(jid, { text: mensagemConfirmacao });
 
     await ticketsColl.updateOne(
         { _id: ticket._id },
@@ -2887,25 +3133,26 @@ async function gerarNumeroTicket() {
     };
 }
 
-async function mensagemRecepcao(cliente, ticketNumber) {
+async function mensagemRecepcao(cliente, ticketNumber, mensagemCliente = '') {
     const menuTexto = await gerarMenuTexto();
+    const saudacao = saudacaoContextualDaMensagem(mensagemCliente);
 
     if (cliente) {
         const nomeSaudacao = primeiroNome(cliente.nome || cliente.nomeCompleto || '');
-        return `Olá${nomeSaudacao ? `, ${nomeSaudacao}` : ''}! Seja bem-vindo de volta à *Azevedo & Juvencio Advogados*. 👋
+        return `${saudacao}${nomeSaudacao ? `, ${nomeSaudacao}` : ''}! Que bom falar com você novamente. 👋
 
-Seu novo atendimento é o ticket *${ticketNumber}*.
+Abrimos o ticket *${ticketNumber}* para este atendimento.
 
-Segue as opções. Digite apenas o número:
+Para direcionarmos corretamente, escolha uma das opções abaixo e envie apenas o número:
 
 ${menuTexto}`;
     }
 
-    return `Olá! Seja bem-vindo à *Azevedo & Juvencio Advogados*. 👋
+    return `${saudacao}! Seja bem-vindo à *Azevedo & Juvencio Advogados*. 👋
 
-Seu atendimento é o ticket *${ticketNumber}*.
+Abrimos o ticket *${ticketNumber}* para acompanhar seu atendimento.
 
-Para começar, escolha uma opção digitando apenas o número:
+Para começarmos, escolha uma das opções abaixo e envie apenas o número:
 
 ${menuTexto}`;
 }
@@ -3070,12 +3317,18 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
     return ticket;
 }
 
-async function encaminharParaEspecialista(ticket, jid, mensagem = null) {
+async function encaminharParaEspecialista(ticket, jid, mensagem = null, { mensagemCliente = '', tipo = 'encaminhamento_especialista' } = {}) {
     const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
     const agora = Date.now();
 
     if (mensagem) {
-        await sendBotMsg(jid, { text: mensagem });
+        const mensagemHumanizada = await gerarRespostaHumanizadaIA({
+            tipo,
+            mensagemCliente,
+            ticket,
+            mensagemBase: mensagem
+        });
+        await sendBotMsg(jid, { text: mensagemHumanizada });
     }
 
     await ticketsColl.updateOne(
@@ -3101,7 +3354,7 @@ async function encaminharParaEspecialista(ticket, jid, mensagem = null) {
     });
 }
 
-async function concluirTriagemEAvancar(ticket, jid) {
+async function concluirTriagemEAvancar(ticket, jid, mensagemCliente = '') {
     const agora = Date.now();
 
     await ticketsColl.updateOne(
@@ -3120,13 +3373,21 @@ async function concluirTriagemEAvancar(ticket, jid) {
         await encaminharParaEspecialista(
             ticket,
             jid,
-            `✅ Obrigado pelas informações. Seu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
+            `Perfeito, recebemos as informações. O ticket *${ticket.ticketNumber}* já foi encaminhado à nossa equipe jurídica, que seguirá com o atendimento por aqui.`,
+            { mensagemCliente, tipo: 'triagem_concluida_cliente_cadastrado' }
         );
         return;
     }
 
+    const confirmacaoTriagem = await gerarRespostaHumanizadaIA({
+        tipo: 'triagem_concluida_antes_cadastro',
+        mensagemCliente,
+        ticket,
+        mensagemBase: `Perfeito, recebemos as informações. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.`
+    });
+
     await sendBotMsg(jid, {
-        text: `✅ Obrigado pelas informações. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.\n\n${PERGUNTA_CADASTRO_CLIENTE}`
+        text: `${confirmacaoTriagem}\n\n${PERGUNTA_CADASTRO_CLIENTE}`
     });
 
     await ticketsColl.updateOne(
@@ -3506,8 +3767,8 @@ sock.ev.on('messages.upsert', async m => {
             ? await analisarMensagemComIA(texto, ticket)
             : null;
 
-        if (analiseIAPrevia?.acao === 'ENCERRAR') {
-            await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia);
+        if (['ENCERRAR', 'CORTESIA'].includes(analiseIAPrevia?.acao)) {
+            await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia, texto);
             return;
         }
 
@@ -3525,13 +3786,13 @@ sock.ev.on('messages.upsert', async m => {
                     ticket.status !== 'em_atendimento_humano' &&
                     analiseIAPrevia?.acao === 'RESPONDER_BASE'
                 ) {
-                    await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia);
+                    await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia, texto);
                     return;
                 }
 
                 // Se apenas está aguardando a equipe e a pergunta não existe na base,
                 // ao menos confirma o recebimento. Durante conversa humana ativa, fica silencioso.
-                await confirmarMensagemAguardandoEspecialista(ticket, rawJid);
+                await confirmarMensagemAguardandoEspecialista(ticket, rawJid, texto);
 
                 console.log(`[Ticket ${ticket.ticketNumber}] Bot pausado (${ticket.status}).`);
                 return;
@@ -3569,7 +3830,7 @@ sock.ev.on('messages.upsert', async m => {
             dispararAnaliseArquivo(ticket);
 
             await sendBotMsg(rawJid, {
-                text: await mensagemRecepcao(cliente, ticket.ticketNumber)
+                text: await mensagemRecepcao(cliente, ticket.ticketNumber, texto)
             });
 
             console.log(`[Ticket ${ticket.ticketNumber}] Novo atendimento aberto${cliente ? ` para ${cliente.nome}` : ''}.`);
@@ -3595,7 +3856,7 @@ sock.ev.on('messages.upsert', async m => {
         // Se a mensagem atual era uma dúvida respondível pela base, responde agora e mantém
         // exatamente o mesmo passo do fluxo para a próxima mensagem do cliente.
         if (analiseIAPrevia?.acao === 'RESPONDER_BASE') {
-            await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia);
+            await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia, texto);
             return;
         }
 
@@ -3631,13 +3892,21 @@ sock.ev.on('messages.upsert', async m => {
                 await encaminharParaEspecialista(
                     ticket,
                     rawJid,
-                    `✅ Recebido! Seu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento no próximo período de atendimento.`
+                    `Recebemos as informações. O ticket *${ticket.ticketNumber}* ficou registrado com nossa equipe e terá continuidade no próximo período de atendimento.`,
+                    { mensagemCliente: texto, tipo: 'encaminhamento_fora_horario' }
                 );
                 return;
             }
 
+            const confirmacaoForaHorario = await gerarRespostaHumanizadaIA({
+                tipo: 'relato_fora_horario_recebido_antes_cadastro',
+                mensagemCliente: texto,
+                ticket,
+                mensagemBase: `Recebemos as informações do seu caso. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.`
+            });
+
             await sendBotMsg(rawJid, {
-                text: `✅ Recebemos as informações do seu caso. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.\n\n${PERGUNTA_CADASTRO_CLIENTE}`
+                text: `${confirmacaoForaHorario}\n\n${PERGUNTA_CADASTRO_CLIENTE}`
             });
 
             await ticketsColl.updateOne(
@@ -3762,7 +4031,7 @@ sock.ev.on('messages.upsert', async m => {
 
             // Proteção contra tickets inconsistentes.
             if (!perguntaAtual) {
-                await concluirTriagemEAvancar(ticket, rawJid);
+                await concluirTriagemEAvancar(ticket, rawJid, texto);
                 return;
             }
 
@@ -3866,7 +4135,7 @@ sock.ev.on('messages.upsert', async m => {
             ticket.indicePerguntaFluxo = proximoIndice;
             ticket.tentativasInvalidasPerguntaFluxo = 0;
             ticket.aguardandoPerguntaFluxo = false;
-            await concluirTriagemEAvancar(ticket, rawJid);
+            await concluirTriagemEAvancar(ticket, rawJid, texto);
             return;
         }
 
@@ -3894,13 +4163,21 @@ sock.ev.on('messages.upsert', async m => {
                 await encaminharParaEspecialista(
                     ticket,
                     rawJid,
-                    `✅ Recebido! Seu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
+                    `Perfeito, recebemos seu relato. O ticket *${ticket.ticketNumber}* já está com nossa equipe jurídica, que seguirá com o atendimento por aqui.`,
+                    { mensagemCliente: texto, tipo: 'relato_recebido_cliente_cadastrado' }
                 );
                 return;
             }
 
+            const confirmacaoRelato = await gerarRespostaHumanizadaIA({
+                tipo: 'relato_recebido_antes_cadastro',
+                mensagemCliente: texto,
+                ticket,
+                mensagemBase: `Perfeito, recebemos seu relato. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.`
+            });
+
             await sendBotMsg(rawJid, {
-                text: `✅ Recebido! Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.\n\n${PERGUNTA_CADASTRO_CLIENTE}`
+                text: `${confirmacaoRelato}\n\n${PERGUNTA_CADASTRO_CLIENTE}`
             });
 
             await ticketsColl.updateOne(
@@ -3927,7 +4204,8 @@ sock.ev.on('messages.upsert', async m => {
                 await encaminharParaEspecialista(
                     ticket,
                     rawJid,
-                    `Sem problemas! Seu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
+                    `Sem problema, o cadastro é opcional. Seu ticket *${ticket.ticketNumber}* já foi encaminhado à nossa equipe, e o atendimento seguirá por aqui.`,
+                    { mensagemCliente: texto, tipo: 'cadastro_opcional_recusado' }
                 );
                 return;
             }
@@ -4054,9 +4332,15 @@ sock.ev.on('messages.upsert', async m => {
                 throw new Error('Não foi possível identificar o WhatsApp para concluir o cadastro.');
             }
 
-            await sendBotMsg(rawJid, {
-                text: `✅ Cadastro realizado, ${nomeInfo.nome}! Nos próximos atendimentos vamos reconhecer você automaticamente.\n\nSeu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
+            const mensagemCadastroConcluido = await gerarRespostaHumanizadaIA({
+                tipo: 'cadastro_concluido_e_encaminhamento',
+                mensagemCliente: texto,
+                ticket,
+                nomeCliente: nomeInfo.nome,
+                mensagemBase: `Perfeito, ${nomeInfo.nome}. Seu cadastro foi concluído e, nos próximos atendimentos, conseguiremos identificá-lo automaticamente. O ticket *${ticket.ticketNumber}* já está com nossa equipe, que seguirá com o atendimento por aqui.`
             });
+
+            await sendBotMsg(rawJid, { text: mensagemCadastroConcluido });
 
             ticket.clienteCadastrado = true;
             ticket.clienteNome = nomeInfo.nomeCompleto;
@@ -4115,9 +4399,15 @@ sock.ev.on('messages.upsert', async m => {
                 return;
             }
 
-            await sendBotMsg(rawJid, {
-                text: `✅ Cadastro realizado, ${nomeInfo.nome}! Nos próximos atendimentos vamos reconhecer você automaticamente.\n\nSeu ticket *${ticket.ticketNumber}* foi encaminhado para nossa equipe. Um especialista dará continuidade ao atendimento.`
+            const mensagemCadastroConcluido = await gerarRespostaHumanizadaIA({
+                tipo: 'cadastro_concluido_e_encaminhamento',
+                mensagemCliente: texto,
+                ticket,
+                nomeCliente: nomeInfo.nome,
+                mensagemBase: `Perfeito, ${nomeInfo.nome}. Seu cadastro foi concluído e, nos próximos atendimentos, conseguiremos identificá-lo automaticamente. O ticket *${ticket.ticketNumber}* já está com nossa equipe, que seguirá com o atendimento por aqui.`
             });
+
+            await sendBotMsg(rawJid, { text: mensagemCadastroConcluido });
 
             ticket.clienteCadastrado = true;
             ticket.clienteNome = nomeInfo.nomeCompleto;
