@@ -854,8 +854,8 @@ const PERMISSOES_PAINEL = [
 const PERMISSOES_ADVOGADO_PADRAO = ['tickets', 'clients', 'chat'];
 
 // O MongoDB gratuito é protegido de duas formas: retenção temporal e limite por ticket.
-// Somente texto e metadados são persistidos. Arquivos, imagens, áudios e vídeos NÃO
-// são armazenados na coleção de chat.
+// Somente texto, metadados e referências criptográficas leves são persistidos.
+// Arquivos, imagens, áudios e vídeos NÃO são armazenados como binário no MongoDB.
 const CHAT_RETENTION_DAYS = 60;
 const CHAT_MAX_MESSAGES_PER_TICKET = 500;
 const CHAT_TRIM_TRIGGER = 540;
@@ -864,7 +864,14 @@ const CHAT_LIST_LIMIT_MAX = 100;
 const CHAT_MAX_TEXT_CHARS = 12000;
 const CHAT_MAX_CAPTION_CHARS = 2000;
 const CHAT_MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+const CHAT_MEDIA_REF_MAX_CHARS = 150_000;
+const CHAT_MEDIA_CACHE_TTL_MS = 10 * 60 * 1000;
+const CHAT_MEDIA_CACHE_MAX_BYTES = 40 * 1024 * 1024;
+const BAILEYS_DEVICE_REFRESH_TTL_MS = 10 * 60 * 1000;
 const chatLastTrimAt = new Map();
+const chatMediaCache = new Map();
+let chatMediaCacheBytes = 0;
+const baileysDeviceRefreshAt = new Map();
 
 // Cache efêmero de mensagens enviadas pelo Baileys. Não ocupa MongoDB e permite
 // que a biblioteca recupere a mensagem original caso o WhatsApp solicite retry.
@@ -907,19 +914,33 @@ function obterMensagemEnviadaBaileys(key = {}) {
 async function enviarMensagemBaileys(jid, content, options = {}) {
     if (!sock?.user) throw new Error('WhatsApp não conectado.');
 
-    // Em versões 6.x do Baileys, a lista de dispositivos do destinatário pode
-    // ficar desatualizada e provocar mensagens que chegam como "Aguardando mensagem".
-    // Forçamos uma consulta fresca dos dispositivos em cada envio. Como o volume
-    // do escritório é pequeno/moderado, o custo adicional é preferível à falha
-    // intermitente de criptografia. O chamador ainda pode sobrescrever a opção.
-    const sendOptions = {
-        useUserDevicesCache: false,
-        ...options
-    };
+    // PERFORMANCE: evita uma consulta de dispositivos em toda mensagem. Para contatos
+    // que acabaram de falar conosco, o cache do Baileys é usado imediatamente. Em
+    // conversas antigas, uma consulta fresca é feita no primeiro envio e reutilizada
+    // por alguns minutos. Se o envio com cache falhar, há um retry fresco automático.
+    const jidNormalizado = normalizarJid(jid) || String(jid || '');
+    const agora = Date.now();
+    const ultimaAtualizacao = baileysDeviceRefreshAt.get(jidNormalizado) || 0;
+    const opcaoExplicita = Object.prototype.hasOwnProperty.call(options, 'useUserDevicesCache');
+    const usarCacheDispositivos = opcaoExplicita
+        ? options.useUserDevicesCache
+        : (agora - ultimaAtualizacao) < BAILEYS_DEVICE_REFRESH_TTL_MS;
 
-    const sent = await sock.sendMessage(jid, content, sendOptions);
-    guardarMensagemEnviadaBaileys(sent);
-    return sent;
+    try {
+        const sent = await sock.sendMessage(jid, content, { ...options, useUserDevicesCache: usarCacheDispositivos });
+        if (!usarCacheDispositivos) baileysDeviceRefreshAt.set(jidNormalizado, Date.now());
+        guardarMensagemEnviadaBaileys(sent);
+        return sent;
+    } catch (err) {
+        if (!opcaoExplicita && usarCacheDispositivos) {
+            console.warn(`[WhatsApp] Cache de dispositivos falhou para ${jidNormalizado}; repetindo com atualização fresca.`);
+            const sent = await sock.sendMessage(jid, content, { ...options, useUserDevicesCache: false });
+            baileysDeviceRefreshAt.set(jidNormalizado, Date.now());
+            guardarMensagemEnviadaBaileys(sent);
+            return sent;
+        }
+        throw err;
+    }
 }
 
 function normalizarUsuarioLogin(valor = '') {
@@ -1023,6 +1044,148 @@ function limitarTextoChat(valor, max = CHAT_MAX_TEXT_CHARS) {
 }
 
 
+function extrairMidiaChat(msg) {
+    const conteudo = conteudoMensagemDesembrulhado(msg);
+    let payload = null;
+    let tipo = null;
+    let nomeArquivo = null;
+
+    if (conteudo.imageMessage) {
+        payload = conteudo.imageMessage; tipo = 'image'; nomeArquivo = payload.fileName || 'imagem.jpg';
+    } else if (conteudo.videoMessage) {
+        payload = conteudo.videoMessage; tipo = 'video'; nomeArquivo = payload.fileName || 'video.mp4';
+    } else if (conteudo.audioMessage) {
+        payload = conteudo.audioMessage; tipo = 'audio'; nomeArquivo = payload.fileName || 'audio';
+    } else if (conteudo.documentMessage) {
+        payload = conteudo.documentMessage; tipo = 'document'; nomeArquivo = payload.fileName || payload.title || 'documento';
+    } else if (conteudo.stickerMessage) {
+        payload = conteudo.stickerMessage; tipo = 'sticker'; nomeArquivo = 'figurinha.webp';
+    }
+
+    if (!payload || !tipo) return null;
+    const mimeDeclarado = limitarTextoChat(payload.mimetype || '', 120).toLowerCase().split(';')[0].trim();
+    const mimeType = mimeDeclarado || mimePorExtensao(nomeArquivo) || (
+        tipo === 'image' ? 'image/jpeg' : tipo === 'video' ? 'video/mp4' :
+        tipo === 'audio' ? 'audio/ogg' : tipo === 'sticker' ? 'image/webp' : 'application/octet-stream'
+    );
+
+    return {
+        payload, tipo,
+        nomeArquivo: limitarTextoChat(nomeArquivo, 240),
+        mimeType,
+        tamanhoDeclarado: numeroSeguroDeLong(payload.fileLength)
+    };
+}
+
+function criarReferenciaMidiaChat(msg) {
+    const media = extrairMidiaChat(msg);
+    if (!msg || !media?.payload) return null;
+    const camposPermitidos = [
+        'url', 'directPath', 'mediaKey', 'fileEncSha256', 'fileSha256', 'fileLength',
+        'mediaKeyTimestamp', 'mimetype', 'fileName', 'title', 'caption', 'seconds',
+        'ptt', 'gifPlayback', 'isAnimated', 'width', 'height'
+    ];
+    const payloadMinimo = {};
+    for (const campo of camposPermitidos) {
+        if (media.payload[campo] !== undefined && media.payload[campo] !== null) payloadMinimo[campo] = media.payload[campo];
+    }
+    try {
+        const serializado = JSON.stringify({
+            tipo: media.tipo,
+            remoteJid: msg?.key?.remoteJid || null,
+            remoteJidAlt: msg?.key?.remoteJidAlt || null,
+            payload: payloadMinimo
+        }, BufferJSON.replacer);
+        if (!serializado || serializado.length > CHAT_MEDIA_REF_MAX_CHARS) return null;
+        return serializado;
+    } catch (err) {
+        console.warn('[Chat] Não foi possível criar referência do anexo:', err?.message || err);
+        return null;
+    }
+}
+
+function reconstruirMensagemMidiaChat(mediaRef, messageId, direction = 'in') {
+    if (!mediaRef || !messageId) return null;
+    try {
+        const dados = JSON.parse(String(mediaRef), BufferJSON.reviver);
+        const campoPorTipo = {
+            image: 'imageMessage', video: 'videoMessage', audio: 'audioMessage',
+            document: 'documentMessage', sticker: 'stickerMessage'
+        };
+        const campo = campoPorTipo[dados?.tipo];
+        if (!campo || !dados?.payload) return null;
+        return {
+            key: {
+                id: String(messageId),
+                remoteJid: dados.remoteJid || dados.remoteJidAlt || null,
+                remoteJidAlt: dados.remoteJidAlt || null,
+                fromMe: direction === 'out'
+            },
+            message: { [campo]: dados.payload }
+        };
+    } catch (err) {
+        console.warn('[Chat] Referência de mídia inválida:', err?.message || err);
+        return null;
+    }
+}
+
+function obterMidiaCacheChat(chave) {
+    const item = chatMediaCache.get(chave);
+    if (!item) return null;
+    if ((Date.now() - item.savedAt) > CHAT_MEDIA_CACHE_TTL_MS) {
+        chatMediaCache.delete(chave);
+        chatMediaCacheBytes = Math.max(0, chatMediaCacheBytes - item.buffer.length);
+        return null;
+    }
+    chatMediaCache.delete(chave);
+    chatMediaCache.set(chave, item);
+    return item;
+}
+
+function salvarMidiaCacheChat(chave, buffer, mimeType, fileName) {
+    if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > CHAT_MEDIA_CACHE_MAX_BYTES) return;
+    const anterior = chatMediaCache.get(chave);
+    if (anterior) chatMediaCacheBytes = Math.max(0, chatMediaCacheBytes - anterior.buffer.length);
+    chatMediaCache.set(chave, { buffer, mimeType, fileName, savedAt: Date.now() });
+    chatMediaCacheBytes += buffer.length;
+    while (chatMediaCacheBytes > CHAT_MEDIA_CACHE_MAX_BYTES && chatMediaCache.size) {
+        const primeiraChave = chatMediaCache.keys().next().value;
+        const item = chatMediaCache.get(primeiraChave);
+        chatMediaCache.delete(primeiraChave);
+        if (item?.buffer) chatMediaCacheBytes = Math.max(0, chatMediaCacheBytes - item.buffer.length);
+    }
+}
+
+function nomeArquivoSeguroHeader(valor = 'arquivo') {
+    return String(valor || 'arquivo').replace(/[\r\n"]/g, '_').slice(0, 180) || 'arquivo';
+}
+
+function enviarBufferMidiaChat(req, res, buffer, mimeType, fileName, download = false) {
+    const tamanho = buffer.length;
+    const disposition = download ? 'attachment' : 'inline';
+    res.setHeader('Content-Type', mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `${disposition}; filename="${nomeArquivoSeguroHeader(fileName)}"`);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    const range = req.headers.range;
+    if (range) {
+        const match = String(range).match(/bytes=(\d*)-(\d*)/);
+        if (match) {
+            const start = match[1] ? Number(match[1]) : 0;
+            const end = match[2] ? Math.min(Number(match[2]), tamanho - 1) : tamanho - 1;
+            if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && start <= end && start < tamanho) {
+                res.status(206);
+                res.setHeader('Content-Range', `bytes ${start}-${end}/${tamanho}`);
+                res.setHeader('Content-Length', end - start + 1);
+                return res.end(buffer.subarray(start, end + 1));
+            }
+        }
+    }
+    res.setHeader('Content-Length', tamanho);
+    return res.end(buffer);
+}
+
 function serializarMensagemChat(doc = {}) {
     return {
         id: String(doc._id || `${doc.ticketNumber || ''}:${doc.messageId || ''}`),
@@ -1035,6 +1198,7 @@ function serializarMensagemChat(doc = {}) {
         fileName: doc.fileName || null,
         mimeType: doc.mimeType || null,
         fileSize: Number(doc.fileSize || 0) || null,
+        hasMedia: !!doc.mediaRef || ['image', 'audio', 'video', 'document', 'sticker'].includes(doc.tipo),
         senderId: doc.senderId || null,
         senderName: doc.senderName || null,
         createdAt: doc.createdAt instanceof Date ? doc.createdAt.getTime() : Number(doc.createdAt || Date.now())
@@ -1078,6 +1242,7 @@ async function registrarMensagemChat(documento = {}) {
         fileName: documento.fileName ? limitarTextoChat(documento.fileName, 240) : null,
         mimeType: documento.mimeType ? limitarTextoChat(documento.mimeType, 120) : null,
         fileSize: Number(documento.fileSize || 0) || null,
+        mediaRef: documento.mediaRef ? String(documento.mediaRef).slice(0, CHAT_MEDIA_REF_MAX_CHARS) : null,
         senderId: documento.senderId ? String(documento.senderId).slice(0, 120) : null,
         senderName: documento.senderName ? limitarTextoChat(documento.senderName, 180) : null,
         createdAt: documento.createdAt instanceof Date ? documento.createdAt : new Date(Number(documento.createdAt || Date.now()))
@@ -1087,6 +1252,7 @@ async function registrarMensagemChat(documento = {}) {
     if (!registro.fileName) delete registro.fileName;
     if (!registro.mimeType) delete registro.mimeType;
     if (!registro.fileSize) delete registro.fileSize;
+    if (!registro.mediaRef) delete registro.mediaRef;
     if (!registro.senderId) delete registro.senderId;
     if (!registro.senderName) delete registro.senderName;
 
@@ -1126,7 +1292,8 @@ function dadosMensagemChatWhatsApp(msg) {
         texto,
         fileName: media?.nomeArquivo || (tipo !== 'text' ? tipo : null),
         mimeType: media?.mimeType || null,
-        fileSize: media?.tamanhoDeclarado || null
+        fileSize: media?.tamanhoDeclarado || null,
+        mediaRef: tipo !== 'text' ? criarReferenciaMidiaChat(msg) : null
     };
 }
 
@@ -3649,6 +3816,18 @@ sock.ev.on('messages.upsert', async m => {
 
     try {
         const contato = await obterIdentificadoresContato(msg, rawJid);
+        if (!isMe) {
+            const cacheAgora = Date.now();
+            const candidatosCache = [
+                rawJid,
+                ...(Array.isArray(contato?.identificadores) ? contato.identificadores : []),
+                ...(Array.isArray(contato?.whatsappNumbers) ? contato.whatsappNumbers.map(n => `${n}@s.whatsapp.net`) : [])
+            ];
+            for (const candidato of candidatosCache) {
+                const jidCache = normalizarJid(candidato) || candidato;
+                if (jidCache) baileysDeviceRefreshAt.set(String(jidCache), cacheAgora);
+            }
+        }
         let ticket = await buscarTicketAtivo(contato);
 
         // Tickets criados pelo fluxo antigo não possuem ticketNumber.
@@ -5932,6 +6111,40 @@ function resumoDocumentosIATicket(documentosIA = []) {
 }
 
 
+function atualizarEstadoPosEnvioChatSemBloquear({ ticket, ticketNumber, advogado, acessoTicket, agora = Date.now() }) {
+    setImmediate(async () => {
+        try {
+            const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+            const responsavelId = acessoTicket?.responsavel?.id || ticket?.advogadoResponsavelId || advogado?.id || null;
+            const responsavelNome = acessoTicket?.responsavel?.nome || ticket?.advogadoResponsavelNome || advogado?.nome || null;
+            const tarefas = [
+                ticketsColl.updateOne({ _id: ticket._id }, { $set: {
+                    status: 'em_atendimento_humano', paused: true, until: agora + tresDiasEmMs, lastActivity: agora
+                } }),
+                atualizarHistorico(ticketNumber, {
+                    status: 'em_atendimento_humano', advogadoResponsavelId: responsavelId,
+                    advogadoResponsavelNome: responsavelNome, ultimaMensagemPainelEm: agora,
+                    ultimoAdvogadoMensagemId: advogado?.id || null,
+                    ultimoAdvogadoMensagemNome: advogado?.nome || advogado?.assinatura || null
+                })
+            ];
+            if (ticket?.clienteId && clientsColl && responsavelNome) {
+                tarefas.push(clientsColl.updateOne(
+                    { _id: ticket.clienteId, $or: [{ advogadoResponsavel: { $exists: false } }, { advogadoResponsavel: null }, { advogadoResponsavel: '' }] },
+                    { $set: { advogadoResponsavel: responsavelNome, updatedAt: agora } }
+                ));
+            }
+            await Promise.allSettled(tarefas);
+            io.emit('ticket_activity_updated', {
+                ticketNumber, direction: 'out', status: 'em_atendimento_humano', lastActivity: agora,
+                advogadoResponsavelId: responsavelId, advogadoResponsavelNome: responsavelNome
+            });
+        } catch (err) {
+            console.warn('[Chat] Falha ao atualizar estado pós-envio:', err?.message || err);
+        }
+    });
+}
+
 // -----------------------------------------------------------------------------
 // CHAT INTERNO DO TICKET
 // -----------------------------------------------------------------------------
@@ -5969,6 +6182,66 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
     } catch (err) {
         console.error('[Chat] Erro ao carregar mensagens:', err);
         res.status(500).json({ erro: 'Não foi possível carregar o chat.' });
+    }
+});
+
+// Proxy autenticado de anexos. O arquivo é baixado do WhatsApp somente quando necessário
+// e mantido em cache efêmero; o binário não é salvo no MongoDB.
+app.get('/api/tickets/:ticketNumber/chat/media/:messageId', async (req, res) => {
+    if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
+    if (!ticketMessagesColl || !ticketsColl) return res.status(503).json({ erro: 'Chat ainda não está disponível.' });
+    if (!sock?.user) return res.status(503).json({ erro: 'O WhatsApp do escritório não está conectado.' });
+    try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        const messageId = String(req.params.messageId || '').trim();
+        const doc = await ticketMessagesColl.findOne(
+            { ticketNumber, messageId },
+            { projection: { messageId: 1, direction: 1, tipo: 1, fileName: 1, mimeType: 1, mediaRef: 1 } }
+        );
+        if (!doc) return res.status(404).json({ erro: 'Anexo não encontrado no histórico.' });
+
+        const chaveCache = `${ticketNumber}:${messageId}`;
+        const cache = obterMidiaCacheChat(chaveCache);
+        if (cache) return enviarBufferMidiaChat(req, res, cache.buffer, cache.mimeType, cache.fileName, req.query.download === '1');
+
+        let mediaRef = doc.mediaRef || null;
+        if (!mediaRef) {
+            const ticket = await ticketsColl.findOne(
+                { ticketNumber, 'documentosIA.messageId': messageId },
+                { projection: { documentosIA: { $elemMatch: { messageId } } } }
+            );
+            const retryRef = ticket?.documentosIA?.[0]?.retryRef || null;
+            if (retryRef) {
+                try {
+                    const dadosAntigos = JSON.parse(String(retryRef), BufferJSON.reviver);
+                    const mapaTipo = { imagem: 'image', video: 'video', audio: 'audio', documento: 'document' };
+                    mediaRef = JSON.stringify({
+                        tipo: mapaTipo[dadosAntigos?.tipo] || dadosAntigos?.tipo,
+                        remoteJid: dadosAntigos?.remoteJid || null,
+                        remoteJidAlt: dadosAntigos?.remoteJidAlt || null,
+                        payload: dadosAntigos?.payload || null
+                    }, BufferJSON.replacer);
+                } catch (_) {}
+            }
+        }
+        if (!mediaRef) return res.status(404).json({ erro: 'Este anexo antigo não possui referência para visualização.' });
+
+        const waMsg = reconstruirMensagemMidiaChat(mediaRef, messageId, doc.direction || 'in');
+        if (!waMsg) return res.status(410).json({ erro: 'A referência deste anexo não está mais disponível.' });
+        const buffer = await downloadMediaMessage(waMsg, 'buffer', {}, {
+            logger: P({ level: 'silent' }),
+            reuploadRequest: sock?.updateMediaMessage ? sock.updateMediaMessage.bind(sock) : undefined
+        });
+        if (!Buffer.isBuffer(buffer) || !buffer.length) return res.status(410).json({ erro: 'O WhatsApp não disponibilizou mais este anexo.' });
+
+        const mediaInfo = extrairMidiaChat(waMsg);
+        const mimeType = doc.mimeType || mediaInfo?.mimeType || 'application/octet-stream';
+        const fileName = doc.fileName || mediaInfo?.nomeArquivo || 'arquivo';
+        salvarMidiaCacheChat(chaveCache, buffer, mimeType, fileName);
+        return enviarBufferMidiaChat(req, res, buffer, mimeType, fileName, req.query.download === '1');
+    } catch (err) {
+        console.warn('[Chat] Falha ao carregar anexo:', err?.message || err);
+        return res.status(500).json({ erro: 'Não foi possível carregar este anexo do WhatsApp.' });
     }
 });
 
@@ -6056,41 +6329,8 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
         });
 
         const agora = Date.now();
-        const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
-        const responsavelId = acessoTicket.responsavel?.id || ticket.advogadoResponsavelId || advogado.id || null;
-        const responsavelNome = acessoTicket.responsavel?.nome || ticket.advogadoResponsavelNome || advogado.nome || null;
-
-        // Responder não transfere a atribuição. O remetente da mensagem fica registrado
-        // em ticket_messages, enquanto o responsável operacional continua sendo o primeiro.
-        await ticketsColl.updateOne({ _id: ticket._id }, { $set: {
-            status: 'em_atendimento_humano',
-            paused: true,
-            until: agora + tresDiasEmMs,
-            lastActivity: agora
-        } });
-        await atualizarHistorico(ticketNumber, {
-            status: 'em_atendimento_humano',
-            advogadoResponsavelId: responsavelId,
-            advogadoResponsavelNome: responsavelNome,
-            ultimaMensagemPainelEm: agora,
-            ultimoAdvogadoMensagemId: advogado.id || null,
-            ultimoAdvogadoMensagemNome: advogado.nome || advogado.assinatura || null
-        });
-        if (ticket.clienteId && clientsColl && responsavelNome) {
-            await clientsColl.updateOne(
-                { _id: ticket.clienteId, $or: [{ advogadoResponsavel: { $exists: false } }, { advogadoResponsavel: null }, { advogadoResponsavel: '' }] },
-                { $set: { advogadoResponsavel: responsavelNome, updatedAt: agora } }
-            );
-        }
-        io.emit('ticket_activity_updated', {
-            ticketNumber,
-            direction: 'out',
-            status: 'em_atendimento_humano',
-            lastActivity: agora,
-            advogadoResponsavelId: responsavelId,
-            advogadoResponsavelNome: responsavelNome
-        });
         res.status(201).json({ ok: true, message: registrada });
+        atualizarEstadoPosEnvioChatSemBloquear({ ticket, ticketNumber, advogado, acessoTicket, agora });
     } catch (err) {
         console.error('[Chat] Erro ao enviar mensagem:', err);
         res.status(500).json({ erro: err?.message || 'Não foi possível enviar a mensagem.' });
@@ -6121,7 +6361,8 @@ app.post(
             if (!jid) return res.status(409).json({ erro: 'Não foi possível identificar o WhatsApp deste ticket.' });
 
             const nomeArquivo = limitarTextoChat(req.query.name || 'arquivo', 240);
-            const mimeType = limitarTextoChat(req.query.mimeType || 'application/octet-stream', 120).toLowerCase();
+            const mimeInformado = limitarTextoChat(req.query.mimeType || 'application/octet-stream', 120).toLowerCase().split(';')[0].trim();
+            const mimeType = (!mimeInformado || mimeInformado === 'application/octet-stream' ? mimePorExtensao(nomeArquivo) : mimeInformado) || 'application/octet-stream';
             const legenda = limitarTextoChat(req.query.caption || '', CHAT_MAX_CAPTION_CHARS);
             const captionAssinada = legenda ? `${advogado.assinatura}: ${legenda}` : `${advogado.assinatura}:`;
             const jidNormalizadoPainel = normalizarJid(jid) || jid;
@@ -6164,6 +6405,7 @@ app.post(
                 panelMessageIds.add(sent.key.id);
                 setTimeout(() => panelMessageIds.delete(sent.key.id), 2 * 60 * 1000);
             }
+            const mediaRefEnviada = sent ? criarReferenciaMidiaChat(sent) : null;
             const registrada = await registrarMensagemChat({
                 ticketNumber,
                 messageId,
@@ -6174,33 +6416,15 @@ app.post(
                 fileName: nomeArquivo,
                 mimeType,
                 fileSize: req.body.length,
+                mediaRef: mediaRefEnviada,
                 senderId: advogado.id,
                 senderName: advogado.assinatura,
                 createdAt: Date.now()
             });
 
             const agora = Date.now();
-            const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
-            const responsavelId = acessoTicket.responsavel?.id || ticket.advogadoResponsavelId || advogado.id || null;
-            const responsavelNome = acessoTicket.responsavel?.nome || ticket.advogadoResponsavelNome || advogado.nome || null;
-            await ticketsColl.updateOne({ _id: ticket._id }, { $set: {
-                status: 'em_atendimento_humano', paused: true, until: agora + tresDiasEmMs, lastActivity: agora
-            } });
-            await atualizarHistorico(ticketNumber, {
-                status: 'em_atendimento_humano', advogadoResponsavelId: responsavelId,
-                advogadoResponsavelNome: responsavelNome, ultimaMensagemPainelEm: agora,
-                ultimoAdvogadoMensagemId: advogado.id || null,
-                ultimoAdvogadoMensagemNome: advogado.nome || advogado.assinatura || null
-            });
-            io.emit('ticket_activity_updated', {
-                ticketNumber,
-                direction: 'out',
-                status: 'em_atendimento_humano',
-                lastActivity: agora,
-                advogadoResponsavelId: responsavelId,
-                advogadoResponsavelNome: responsavelNome
-            });
             res.status(201).json({ ok: true, message: registrada });
+            atualizarEstadoPosEnvioChatSemBloquear({ ticket, ticketNumber, advogado, acessoTicket, agora });
         } catch (err) {
             console.error('[Chat] Erro ao enviar arquivo:', err);
             const status = err?.type === 'entity.too.large' ? 413 : 500;

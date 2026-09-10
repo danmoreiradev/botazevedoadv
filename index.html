@@ -2199,6 +2199,17 @@
         .chat-text { color:#303842; font-size:.84rem; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
         .chat-media-card { margin-bottom:5px; padding:8px 9px; display:flex; align-items:center; gap:8px; color:#4e5864; background:rgba(255,255,255,.55); border:1px solid rgba(150,160,170,.25); border-radius:9px; font-size:.77rem; }
         .chat-media-card i { color:var(--adv-gold); font-size:1rem; }
+        .chat-media-preview { margin-bottom:7px; overflow:hidden; border:1px solid rgba(140,150,160,.22); border-radius:11px; background:#eef1f4; }
+        .chat-media-preview img { display:block; width:100%; max-width:360px; max-height:360px; object-fit:cover; cursor:pointer; background:#eef1f4; }
+        .chat-media-preview video { display:block; width:min(420px,100%); max-height:360px; background:#111; }
+        .chat-media-preview audio { display:block; width:min(360px,100%); min-height:42px; }
+        .chat-media-link { display:flex; align-items:center; gap:8px; padding:9px 10px; color:#46515d; text-decoration:none; background:rgba(255,255,255,.72); border:1px solid rgba(150,160,170,.25); border-radius:9px; font-size:.76rem; font-weight:700; }
+        .chat-media-link:hover { color:var(--adv-blue); background:#fff; }
+        .chat-media-loading { padding:18px; color:#7c8590; text-align:center; font-size:.73rem; }
+        .chat-message-row.pending .chat-bubble { opacity:.72; }
+        .chat-message-row.failed .chat-bubble { border-color:#e8b8b5; background:#fff4f3; opacity:1; }
+        .chat-pending-label { margin-top:4px; color:#8d96a1; font-size:.62rem; text-align:right; }
+        .chat-message-row.failed .chat-pending-label { color:#a13f39; font-weight:700; }
         .chat-time { margin-top:4px; color:#8d96a1; font-size:.62rem; text-align:right; }
         .ticket-chat-composer { padding:12px 14px; display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:9px; align-items:end; background:#fff; border-top:1px solid var(--border); }
         .chat-attach-btn { width:43px; height:43px; display:inline-flex; align-items:center; justify-content:center; color:#65707c; background:#f7f8fa; border:1px solid var(--border); border-radius:11px; }
@@ -2863,7 +2874,7 @@
                 <div class="chat-empty">Carregando conversa...</div>
             </div>
             <form class="ticket-chat-composer" onsubmit="enviarMensagemChat(event)">
-                <input type="file" id="ticket-chat-file" class="hidden" onchange="enviarArquivoChat(this)">
+                <input type="file" id="ticket-chat-file" class="hidden" onchange="enviarArquivoChat(this)" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv">
                 <button type="button" class="chat-attach-btn" id="ticket-chat-attach" onclick="document.getElementById('ticket-chat-file').click()" title="Enviar arquivo (máx. 15 MB)"><i class="bi bi-paperclip"></i></button>
                 <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem..." onkeydown="atalhoEnviarChat(event)"></textarea>
                 <button type="submit" class="chat-send-btn" id="ticket-chat-send"><i class="bi bi-send me-1"></i> Enviar</button>
@@ -6020,6 +6031,7 @@ function renderizarLista(itens) {
         window.activeChatMessages = [];
         window.activeChatHasMore = false;
         window.activeChatOldest = null;
+        window.chatSendQueue = Promise.resolve();
 
         function formatarHoraChat(valor) {
             const d = new Date(Number(valor) || valor || Date.now());
@@ -6036,22 +6048,52 @@ function renderizarLista(itens) {
         function nomeTipoChat(tipo='document') {
             return ({image:'Imagem',audio:'Áudio',video:'Vídeo',document:'Documento',sticker:'Figurinha'})[tipo] || 'Arquivo';
         }
+        function urlMidiaChat(msg, download=false) {
+            const ticket = encodeURIComponent(msg.ticketNumber || window.activeChatTicketNumber || '');
+            const id = encodeURIComponent(msg.messageId || '');
+            if (!ticket || !id) return '';
+            return `/api/tickets/${ticket}/chat/media/${id}${download ? '?download=1' : ''}`;
+        }
+        function abrirImagemChat(url) {
+            if (url) window.open(url, '_blank', 'noopener,noreferrer');
+        }
         function criarElementoMensagemChat(msg) {
             const row = document.createElement('div');
-            row.className = `chat-message-row ${msg.direction === 'out' ? 'out' : 'in'}${msg.source === 'bot' ? ' bot' : ''}`;
+            row.className = `chat-message-row ${msg.direction === 'out' ? 'out' : 'in'}${msg.source === 'bot' ? ' bot' : ''}${msg.pending ? ' pending' : ''}${msg.failed ? ' failed' : ''}`;
             row.dataset.messageId = msg.messageId || msg.id || '';
             const bubble = document.createElement('div'); bubble.className='chat-bubble';
             const sender = document.createElement('div'); sender.className='chat-sender';
             sender.textContent = msg.direction === 'in' ? 'Cliente' : (msg.senderName || (msg.source === 'bot' ? 'Assistente automático' : 'Escritório'));
             bubble.appendChild(sender);
+
             if (msg.tipo && msg.tipo !== 'text') {
-                const media = document.createElement('div'); media.className='chat-media-card';
-                media.innerHTML = `<i class="bi ${iconeTipoChat(msg.tipo)}"></i><span></span>`;
+                const mediaUrl = msg.localPreviewUrl || (msg.hasMedia ? urlMidiaChat(msg, false) : '');
+                const downloadUrl = msg.hasMedia ? urlMidiaChat(msg, true) : '';
+
+                if ((msg.tipo === 'image' || msg.tipo === 'sticker') && mediaUrl) {
+                    const wrap=document.createElement('div'); wrap.className='chat-media-preview';
+                    const img=document.createElement('img'); img.loading='lazy'; img.decoding='async'; img.alt=msg.fileName||'Imagem recebida'; img.src=mediaUrl;
+                    img.onclick=()=>abrirImagemChat(mediaUrl);
+                    img.onerror=()=>{ wrap.innerHTML=''; const e=document.createElement('div'); e.className='chat-media-loading'; e.textContent='Não foi possível carregar a prévia da imagem.'; wrap.appendChild(e); };
+                    wrap.appendChild(img); bubble.appendChild(wrap);
+                } else if (msg.tipo === 'video' && mediaUrl) {
+                    const wrap=document.createElement('div'); wrap.className='chat-media-preview';
+                    const video=document.createElement('video'); video.controls=true; video.preload='metadata'; video.src=mediaUrl; wrap.appendChild(video); bubble.appendChild(wrap);
+                } else if (msg.tipo === 'audio' && mediaUrl) {
+                    const wrap=document.createElement('div'); wrap.className='chat-media-preview';
+                    const audio=document.createElement('audio'); audio.controls=true; audio.preload='metadata'; audio.src=mediaUrl; wrap.appendChild(audio); bubble.appendChild(wrap);
+                }
+
+                const media = document.createElement(downloadUrl ? 'a' : 'div');
+                media.className=downloadUrl?'chat-media-link':'chat-media-card';
+                if (downloadUrl) { media.href=downloadUrl; media.target='_blank'; media.rel='noopener'; }
+                media.innerHTML = `<i class="bi ${iconeTipoChat(msg.tipo)}"></i><span></span>${downloadUrl ? '<i class="bi bi-download ms-auto"></i>' : ''}`;
                 media.querySelector('span').textContent = msg.fileName || nomeTipoChat(msg.tipo);
                 bubble.appendChild(media);
             }
             if (msg.texto) { const t=document.createElement('div'); t.className='chat-text'; t.textContent=msg.texto; bubble.appendChild(t); }
             const time=document.createElement('div'); time.className='chat-time'; time.textContent=formatarHoraChat(msg.createdAt); bubble.appendChild(time);
+            if (msg.pending || msg.failed) { const p=document.createElement('div'); p.className='chat-pending-label'; p.textContent=msg.failed ? 'Falha no envio' : 'Enviando…'; bubble.appendChild(p); }
             row.appendChild(bubble); return row;
         }
         function adicionarMensagemChatNaTela(msg, rolar=false, prepend=false) {
@@ -6065,6 +6107,36 @@ function renderizarLista(itens) {
             else history.appendChild(el);
             if(rolar) history.scrollTop=history.scrollHeight;
         }
+        function removerMensagemChatDaTela(messageId) {
+            if (!messageId) return;
+            const history=document.getElementById('ticket-chat-history');
+            history?.querySelector(`[data-message-id="${CSS.escape(String(messageId))}"]`)?.remove();
+        }
+        function marcarMensagemChatFalhou(messageId) {
+            const history=document.getElementById('ticket-chat-history');
+            const row=history?.querySelector(`[data-message-id="${CSS.escape(String(messageId))}"]`);
+            if(!row) return;
+            row.classList.remove('pending'); row.classList.add('failed');
+            const label=row.querySelector('.chat-pending-label'); if(label) label.textContent='Falha no envio';
+        }
+        function mensagemOtimistaChat({texto='',tipo='text',file=null,localPreviewUrl=null}) {
+            const pendingId=`pending_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+            return {
+                id:pendingId, messageId:pendingId,
+                ticketNumber:window.activeChatTicketNumber,
+                direction:'out', source:'painel', tipo, texto,
+                fileName:file?.name||null, mimeType:file?.type||null, fileSize:file?.size||null,
+                senderName:window.panelSessionUser?.assinatura||window.panelSessionUser?.nome||'Escritório',
+                createdAt:Date.now(), pending:true, localPreviewUrl
+            };
+        }
+        function inferirMimeArquivoChat(file) {
+            if (file?.type) return String(file.type).toLowerCase();
+            const ext=String(file?.name||'').toLowerCase().split('.').pop();
+            const mapa={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',heic:'image/heic',heif:'image/heif',mp4:'video/mp4',mov:'video/quicktime',webm:'video/webm',mp3:'audio/mpeg',m4a:'audio/mp4',wav:'audio/wav',ogg:'audio/ogg',pdf:'application/pdf'};
+            return mapa[ext]||'application/octet-stream';
+        }
+
         function renderizarChat(messages=[], hasMore=false, preserveScroll=false) {
             const history=document.getElementById('ticket-chat-history'); if(!history) return;
             const oldHeight=history.scrollHeight;
@@ -6079,83 +6151,46 @@ function renderizarLista(itens) {
         }
         async function abrirChatTicket(ticketNumber, triggerButton = null) {
             if(!temPermissaoPainel('chat') || !ticketNumber) return;
-
             const meuId = idUsuarioPainelAtual();
             const local = (window.activeTicketsData || []).find(item => String(item.ticketNumber) === String(ticketNumber));
             const responsavelLocal = String(local?.advogadoResponsavelId || '').trim();
-
             const originalButtonHtml = triggerButton?.innerHTML || '';
-            if (triggerButton) {
-                triggerButton.disabled = true;
-                triggerButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> Abrindo...';
-            }
+
+            const dialog=document.getElementById('ticket-chat-dialog');
+            const history=document.getElementById('ticket-chat-history');
+            window.activeChatTicketNumber=String(ticketNumber||''); window.activeChatMessages=[]; window.activeChatOldest=null;
+            if(history) history.innerHTML='<div class="chat-empty">Carregando conversa...</div>';
+            if(dialog && !dialog.open) { if(typeof dialog.showModal==='function') dialog.showModal(); else dialog.setAttribute('open',''); }
+            if (triggerButton) { triggerButton.disabled=true; triggerButton.innerHTML='<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> Abrindo...'; }
 
             try {
-                // Se o ticket ainda estiver sem responsável, o primeiro clique em Atender
-                // faz a atribuição atômica. Se já houver responsável, o endpoint apenas
-                // devolve a atribuição existente e o chat continua acessível normalmente.
-                const claimRes = await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/claim`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                const claimData = await claimRes.json().catch(() => ({}));
-                if (!claimRes.ok) {
-                    const erro = new Error(claimData.erro || 'Não foi possível abrir este atendimento.');
-                    erro.status = claimRes.status;
-                    throw erro;
-                }
+                const claimPromise=fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/claim`,{method:'POST',headers:{'Content-Type':'application/json'}});
+                const chatPromise=fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/chat?limit=60`,{cache:'no-store'});
+                const [claimRes,res]=await Promise.all([claimPromise,chatPromise]);
+                const [claimData,data]=await Promise.all([claimRes.json().catch(()=>({})),res.json().catch(()=>({}))]);
+                if(!claimRes.ok){const erro=new Error(claimData.erro||'Não foi possível abrir este atendimento.');erro.status=claimRes.status;throw erro;}
+                if(!res.ok)throw new Error(data.erro||'Não foi possível carregar o chat.');
 
                 aplicarAtribuicaoTicketLocal({
-                    ticketNumber,
-                    status: claimData.ticket?.status || 'em_atendimento_humano',
-                    statusLabel: 'Em atendimento humano',
-                    pendenciaTipo: 'atendimento',
-                    pendenciaLabel: 'Em atendimento',
-                    advogadoResponsavelId: claimData.responsavel?.id || responsavelLocal || meuId,
-                    advogadoResponsavelNome: claimData.responsavel?.nome || local?.advogadoResponsavelNome || window.panelSessionUser?.nome || null,
-                    atendimentoAssumidoEm: claimData.ticket?.atendimentoAssumidoEm || local?.atendimentoAssumidoEm || Date.now()
+                    ticketNumber,status:claimData.ticket?.status||'em_atendimento_humano',statusLabel:'Em atendimento humano',pendenciaTipo:'atendimento',pendenciaLabel:'Em atendimento',
+                    advogadoResponsavelId:claimData.responsavel?.id||responsavelLocal||meuId,
+                    advogadoResponsavelNome:claimData.responsavel?.nome||local?.advogadoResponsavelNome||window.panelSessionUser?.nome||null,
+                    atendimentoAssumidoEm:claimData.ticket?.atendimentoAssumidoEm||local?.atendimentoAssumidoEm||Date.now()
                 });
-                recalcularResumoTicketsLocal();
-                filtrarTicketsAtivos();
-
-                const dialog=document.getElementById('ticket-chat-dialog');
-                const history=document.getElementById('ticket-chat-history');
-                window.activeChatTicketNumber=String(ticketNumber||''); window.activeChatMessages=[]; window.activeChatOldest=null;
-                if(history) history.innerHTML='<div class="chat-empty">Carregando conversa...</div>';
-                if(!dialog.open) { if(typeof dialog.showModal==='function') dialog.showModal(); else dialog.setAttribute('open',''); }
-
-                const res=await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/chat?limit=60`, {cache:'no-store'});
-                const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.erro||'Não foi possível carregar o chat.');
+                recalcularResumoTicketsLocal(); filtrarTicketsAtivos();
                 document.getElementById('ticket-chat-title').textContent=`${data.ticket?.ticketNumber||ticketNumber} · ${data.ticket?.clienteNome||'Cliente não cadastrado'}`;
-                document.getElementById('ticket-chat-subtitle').textContent=[data.ticket?.area, data.ticket?.whatsapp ? formatarWhatsAppCliente(data.ticket.whatsapp) : null].filter(Boolean).join(' • ');
-                const responsavelNomeChat = data.ticket?.advogadoResponsavelNome || claimData.responsavel?.nome || null;
-                const usuarioAtualChat = window.panelSessionUser?.assinatura || window.panelSessionUser?.nome || 'usuário conectado';
-                document.getElementById('ticket-chat-current-user').textContent = responsavelNomeChat
-                    ? `Responsável: ${responsavelNomeChat} • Você: ${usuarioAtualChat}`
-                    : `Você: ${usuarioAtualChat}`;
-                document.getElementById('ticket-chat-storage').textContent=`Histórico leve: até ${data.maxMessagesPerTicket||500} mensagens por ticket / ${data.retentionDays||60} dias.`;
-                window.activeChatMessages=Array.isArray(data.messages)?data.messages:[]; window.activeChatHasMore=data.hasMore===true;
-                window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
-                renderizarChat(window.activeChatMessages,window.activeChatHasMore);
-                document.getElementById('ticket-chat-input')?.focus();
+                document.getElementById('ticket-chat-subtitle').textContent=[data.ticket?.area,data.ticket?.whatsapp?formatarWhatsAppCliente(data.ticket.whatsapp):null].filter(Boolean).join(' • ');
+                const responsavelNomeChat=data.ticket?.advogadoResponsavelNome||claimData.responsavel?.nome||null;
+                const usuarioAtualChat=window.panelSessionUser?.assinatura||window.panelSessionUser?.nome||'usuário conectado';
+                document.getElementById('ticket-chat-current-user').textContent=responsavelNomeChat?`Responsável: ${responsavelNomeChat} • Você: ${usuarioAtualChat}`:`Você: ${usuarioAtualChat}`;
+                document.getElementById('ticket-chat-storage').textContent=`Histórico leve: até ${data.maxMessagesPerTicket||500} mensagens por ticket / ${data.retentionDays||60} dias. Anexos são carregados sob demanda.`;
+                window.activeChatMessages=Array.isArray(data.messages)?data.messages:[];window.activeChatHasMore=data.hasMore===true;window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
+                renderizarChat(window.activeChatMessages,window.activeChatHasMore);document.getElementById('ticket-chat-input')?.focus();
             } catch(err) {
-                const dialog=document.getElementById('ticket-chat-dialog');
-                const history=document.getElementById('ticket-chat-history');
-                if (dialog?.open && history) {
-                    history.innerHTML=`<div class="chat-empty">${escapeHtmlChat(err.message||'Erro ao carregar chat.')}</div>`;
-                } else {
-                    alert(err.message || 'Não foi possível abrir o atendimento.');
-                }
-                // Em conflito, recarrega a lista para mostrar imediatamente quem venceu a assunção.
-                if (Number(err.status) === 409) {
-                    window.activeTicketsLoaded = false;
-                    carregarTicketsAtivos(true);
-                }
+                if(dialog?.open&&history)history.innerHTML=`<div class="chat-empty">${escapeHtmlChat(err.message||'Erro ao carregar chat.')}</div>`;else alert(err.message||'Não foi possível abrir o atendimento.');
+                if(Number(err.status)===409){window.activeTicketsLoaded=false;carregarTicketsAtivos(true);}
             } finally {
-                if (triggerButton && triggerButton.isConnected) {
-                    triggerButton.disabled = false;
-                    triggerButton.innerHTML = originalButtonHtml;
-                }
+                if(triggerButton&&triggerButton.isConnected){triggerButton.disabled=false;triggerButton.innerHTML=originalButtonHtml;}
             }
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
@@ -6175,17 +6210,43 @@ function renderizarLista(itens) {
         }
         function atalhoEnviarChat(event) { if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemChat(event);} }
         async function enviarMensagemChat(event) {
-            event?.preventDefault?.(); const ticket=window.activeChatTicketNumber; const input=document.getElementById('ticket-chat-input'); const btn=document.getElementById('ticket-chat-send'); const status=document.getElementById('ticket-chat-status'); const texto=String(input?.value||'').trim();
-            if(!ticket||!texto) return; btn.disabled=true; if(status)status.textContent='Enviando...';
-            try { const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:texto})}); const data=await res.json().catch(()=>({})); if(!res.ok)throw new Error(data.erro||'Não foi possível enviar.'); input.value=''; if(data.message)adicionarMensagemChatNaTela(data.message,true); if(status)status.textContent=''; }
-            catch(err){if(status)status.textContent=err.message||'Falha no envio.';} finally{btn.disabled=false;input?.focus();}
+            event?.preventDefault?.();
+            const ticket=window.activeChatTicketNumber;
+            const input=document.getElementById('ticket-chat-input');
+            const status=document.getElementById('ticket-chat-status');
+            const texto=String(input?.value||'').trim();
+            if(!ticket||!texto)return;
+
+            const otimista=mensagemOtimistaChat({texto,tipo:'text'});
+            input.value='';adicionarMensagemChatNaTela(otimista,true);if(status)status.textContent='';input?.focus();
+
+            window.chatSendQueue=window.chatSendQueue.then(async()=>{
+                try{
+                    const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:texto})});
+                    const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível enviar.');
+                    removerMensagemChatDaTela(otimista.messageId);if(data.message)adicionarMensagemChatNaTela(data.message,true);
+                }catch(err){marcarMensagemChatFalhou(otimista.messageId);if(status)status.textContent=err.message||'Falha no envio.';}
+            }).catch(()=>{});
         }
         async function enviarArquivoChat(inputFile) {
-            const file=inputFile?.files?.[0]; const ticket=window.activeChatTicketNumber; if(!file||!ticket)return; const status=document.getElementById('ticket-chat-status'); const attach=document.getElementById('ticket-chat-attach');
+            const file=inputFile?.files?.[0];const ticket=window.activeChatTicketNumber;if(!file||!ticket)return;
+            const status=document.getElementById('ticket-chat-status');
             if(file.size>15*1024*1024){if(status)status.textContent='O arquivo ultrapassa o limite de 15 MB do chat.';inputFile.value='';return;}
-            const caption=String(document.getElementById('ticket-chat-input')?.value||'').trim().slice(0,2000); attach.disabled=true; if(status)status.textContent=`Enviando ${file.name}...`;
-            try { const q=new URLSearchParams({name:file.name,mimeType:file.type||'application/octet-stream'}); if(caption)q.set('caption',caption); const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/files?${q.toString()}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file}); const data=await res.json().catch(()=>({})); if(!res.ok)throw new Error(data.erro||'Não foi possível enviar o arquivo.'); if(caption)document.getElementById('ticket-chat-input').value=''; if(data.message)adicionarMensagemChatNaTela(data.message,true); if(status)status.textContent=''; }
-            catch(err){if(status)status.textContent=err.message||'Falha no envio do arquivo.';} finally{attach.disabled=false;inputFile.value='';}
+            const input=document.getElementById('ticket-chat-input');const caption=String(input?.value||'').trim().slice(0,2000);
+            const mime=inferirMimeArquivoChat(file);const tipo=mime.startsWith('image/')?'image':mime.startsWith('video/')?'video':mime.startsWith('audio/')?'audio':'document';
+            const localPreviewUrl=['image','video','audio'].includes(tipo)?URL.createObjectURL(file):null;
+            const otimista=mensagemOtimistaChat({texto:tipo==='audio'?'':caption,tipo,file,localPreviewUrl});
+            adicionarMensagemChatNaTela(otimista,true);if(caption)input.value='';inputFile.value='';if(status)status.textContent='';input?.focus();
+
+            window.chatSendQueue=window.chatSendQueue.then(async()=>{
+                try{
+                    const q=new URLSearchParams({name:file.name,mimeType:mime});if(caption)q.set('caption',caption);
+                    const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/files?${q.toString()}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});
+                    const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível enviar o arquivo.');
+                    removerMensagemChatDaTela(otimista.messageId);if(data.message)adicionarMensagemChatNaTela(data.message,true);
+                }catch(err){marcarMensagemChatFalhou(otimista.messageId);if(status)status.textContent=err.message||'Falha no envio do arquivo.';}
+                finally{if(localPreviewUrl)setTimeout(()=>URL.revokeObjectURL(localPreviewUrl),30000);}
+            }).catch(()=>{});
         }
 
         // ---------------------------------------------------------------------
