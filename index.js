@@ -2222,6 +2222,7 @@ async function startBot() {
             crmLeadsColl.createIndex({ ticketNumber: 1 }, { unique: true, sparse: true }),
             crmLeadsColl.createIndex({ status: 1, dataProximaAcao: 1 }),
             crmLeadsColl.createIndex({ responsavel: 1, status: 1 }),
+            crmLeadsColl.createIndex({ origemTipo: 1, status: 1 }),
             crmLeadsColl.createIndex({ updatedAt: -1 })
         ]);
         
@@ -3674,8 +3675,21 @@ const CRM_STATUS = [
 
 const CRM_MODELOS_COBRANCA = ['Consulta', 'Fixo', 'Parcelado', 'Êxito', 'Misto'];
 const CRM_MOTIVOS_PERDA = ['Sem resposta', 'Sem orçamento', 'Fechou com outro', 'Não é o perfil do caso', 'Outro'];
+const CRM_ORIGENS_ANUNCIO = ['Meta Ads', 'Instagram Ads', 'Facebook Ads', 'Google Ads', 'TikTok Ads', 'YouTube Ads', 'LinkedIn Ads', 'Outro anúncio'];
 const CRM_STATUS_ENCERRADOS = new Set(['Encerrado - ganho', 'Encerrado - perdido']);
 const CRM_STATUS_GANHOS = new Set(['Contrato assinado', 'Em andamento', 'Encerrado - ganho']);
+
+function origemCRMDeAnuncioValida(origem = '') {
+    return CRM_ORIGENS_ANUNCIO.includes(String(origem || '').trim());
+}
+
+function leadCRMDeAnuncio(lead = {}) {
+    // Campos técnicos novos garantem a separação entre mídia paga e atendimento orgânico.
+    // A checagem da origem textual mantém compatibilidade com leads de anúncio já criados
+    // pela primeira versão do CRM, antes da inclusão de origemTipo/origemTecnica.
+    if (lead?.origemTipo === 'anuncio' || lead?.origemTecnica === 'lead_anuncio') return true;
+    return origemCRMDeAnuncioValida(lead?.origem);
+}
 
 function dataHojeCRM() {
     const partes = new Intl.DateTimeFormat('en-CA', {
@@ -3818,6 +3832,8 @@ function serializarLeadCRM(lead = {}) {
         ticketNumber: lead.ticketNumber || null,
         dataEntrada: lead.dataEntrada || null,
         origem: lead.origem || '',
+        origemTipo: lead.origemTipo || (leadCRMDeAnuncio(lead) ? 'anuncio' : ''),
+        origemTecnica: lead.origemTecnica || '',
         cliente: lead.cliente || '',
         telefone: lead.telefone || '',
         email: lead.email || '',
@@ -4067,12 +4083,13 @@ app.get('/api/tickets/active', async (req, res) => {
             historicos.map(item => [String(item.ticketNumber || item._id), item])
         );
 
-        const leadsCRMRelacionados = crmLeadsColl && ticketNumbers.length
+        const leadsCRMRelacionadosBrutos = crmLeadsColl && ticketNumbers.length
             ? await crmLeadsColl.find(
                 { ticketNumber: { $in: ticketNumbers } },
-                { projection: { _id: 1, crmNumber: 1, ticketNumber: 1, status: 1 } }
+                { projection: { _id: 1, crmNumber: 1, ticketNumber: 1, status: 1, origem: 1, origemTipo: 1, origemTecnica: 1 } }
             ).toArray()
             : [];
+        const leadsCRMRelacionados = leadsCRMRelacionadosBrutos.filter(leadCRMDeAnuncio);
         const crmPorTicket = new Map(
             leadsCRMRelacionados.map(lead => [String(lead.ticketNumber), {
                 id: String(lead._id),
@@ -4216,14 +4233,19 @@ app.get('/api/crm/leads', async (req, res) => {
     if (!crmLeadsColl) return res.status(503).json({ erro: 'CRM ainda não está disponível.' });
 
     try {
-        const leads = await crmLeadsColl.find({}).sort({ updatedAt: -1 }).limit(3000).toArray();
+        const leadsBrutos = await crmLeadsColl.find({}).sort({ updatedAt: -1 }).limit(3000).toArray();
+        // O CRM é exclusivamente de leads originados de mídia paga/anúncios.
+        // Registros orgânicos eventualmente criados por versões anteriores permanecem
+        // preservados no MongoDB, mas não entram na listagem nem nas métricas comerciais.
+        const leads = leadsBrutos.filter(leadCRMDeAnuncio);
         res.json({
             generatedAt: Date.now(),
             resumo: resumoCRM(leads),
             options: {
                 status: CRM_STATUS,
                 modelosCobranca: CRM_MODELOS_COBRANCA,
-                motivosPerda: CRM_MOTIVOS_PERDA
+                motivosPerda: CRM_MOTIVOS_PERDA,
+                origensAnuncio: CRM_ORIGENS_ANUNCIO
             },
             leads: leads.map(serializarLeadCRM)
         });
@@ -4240,10 +4262,15 @@ app.post('/api/crm/leads', async (req, res) => {
     try {
         const dados = normalizarLeadCRM(req.body || {});
         if (!dados.cliente) return res.status(400).json({ erro: 'Informe o nome do cliente/lead.' });
+        if (!origemCRMDeAnuncioValida(dados.origem)) {
+            return res.status(400).json({ erro: 'O CRM aceita somente leads originados de anúncios/mídia paga.' });
+        }
 
         const agora = Date.now();
         const doc = {
             ...dados,
+            origemTipo: 'anuncio',
+            origemTecnica: 'manual_anuncio',
             crmNumber: await gerarNumeroCRM(),
             createdAt: agora,
             updatedAt: agora
@@ -4264,19 +4291,22 @@ app.post('/api/crm/leads/from-ticket/:ticketNumber', async (req, res) => {
 
     try {
         const ticketNumber = textoCRM(req.params.ticketNumber, 80);
-        const existente = await crmLeadsColl.findOne({ ticketNumber });
-        if (existente) {
-            return res.json({ ok: true, created: false, lead: serializarLeadCRM(existente) });
-        }
-
         const ticket = await ticketsColl.findOne({ ticketNumber });
         if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+        if (ticket.origem !== 'lead_anuncio') {
+            return res.status(400).json({ erro: 'Somente tickets originados de anúncio podem ser adicionados ao CRM.' });
+        }
+
+        const existente = await crmLeadsColl.findOne({ ticketNumber });
+        if (existente && leadCRMDeAnuncio(existente)) {
+            return res.json({ ok: true, created: false, lead: serializarLeadCRM(existente) });
+        }
 
         const historico = ticketHistoryColl
             ? (await ticketHistoryColl.findOne({ _id: ticketNumber })) || {}
             : {};
 
-        const origem = ticket.origem === 'lead_anuncio' ? 'Meta Ads' : 'WhatsApp / Orgânico';
+        const origem = 'Meta Ads';
         const telefone = whatsappDoTicket(ticket) || '';
         const base = normalizarLeadCRM({
             dataEntrada: dataTimestampParaCRM(ticket.createdAt),
@@ -4294,6 +4324,8 @@ app.post('/api/crm/leads/from-ticket/:ticketNumber', async (req, res) => {
         const agora = Date.now();
         const doc = {
             ...base,
+            origemTipo: 'anuncio',
+            origemTecnica: 'lead_anuncio',
             crmNumber: await gerarNumeroCRM(),
             ticketNumber,
             createdAt: agora,
@@ -4324,12 +4356,19 @@ app.put('/api/crm/leads/:id', async (req, res) => {
         const existente = await crmLeadsColl.findOne({ _id: new ObjectId(id) });
         if (!existente) return res.status(404).json({ erro: 'Lead não encontrado.' });
 
+        if (!leadCRMDeAnuncio(existente)) {
+            return res.status(403).json({ erro: 'Este registro não pertence ao CRM de leads de anúncios.' });
+        }
+
         const dados = normalizarLeadCRM(req.body || {}, existente);
         if (!dados.cliente) return res.status(400).json({ erro: 'Informe o nome do cliente/lead.' });
+        if (!origemCRMDeAnuncioValida(dados.origem)) {
+            return res.status(400).json({ erro: 'O CRM aceita somente origens de anúncios/mídia paga.' });
+        }
 
         await crmLeadsColl.updateOne(
             { _id: existente._id },
-            { $set: { ...dados, updatedAt: Date.now() } }
+            { $set: { ...dados, origemTipo: 'anuncio', updatedAt: Date.now() } }
         );
         const atualizado = await crmLeadsColl.findOne({ _id: existente._id });
         io.emit('crm_updated', { action: 'updated', id });

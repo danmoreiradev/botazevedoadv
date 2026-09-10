@@ -2123,7 +2123,7 @@
                 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                     <div>
                         <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Controle CRM</h4>
-                        <p class="text-muted mb-0">Controle comercial de leads, follow-ups, propostas e contratos. Estrutura baseada na planilha de CRM do escritório.</p>
+                        <p class="text-muted mb-0">Controle comercial exclusivo para leads originados de anúncios e mídia paga. Atendimentos orgânicos permanecem somente em Tickets ativos.</p>
                     </div>
                     <div class="d-flex align-items-center gap-2 flex-wrap">
                         <button type="button" class="btn btn-outline-secondary" onclick="carregarCRM(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
@@ -2160,7 +2160,7 @@
 
                 <div class="card-custom text-start crm-panel-card" style="width:100%;">
                     <div class="crm-helper-strip">
-                        <span><strong>Regra prática:</strong> todo lead aberto deve ter uma próxima ação e uma data.</span>
+                        <span><strong>CRM de anúncios:</strong> somente leads de mídia paga entram nesta base. Todo lead aberto deve ter próxima ação e data.</span>
                         <span id="crm-helper-conversion">Conversão: 0%</span>
                         <span id="crm-helper-no-action">Sem próxima ação: 0</span>
                     </div>
@@ -2345,7 +2345,7 @@
                     <div class="crm-form-section-title">Lead e contato</div>
                     <div class="row g-3">
                         <div class="col-md-3"><label class="form-label small fw-bold">Data de entrada</label><input type="date" id="crm-data-entrada" class="form-control" required></div>
-                        <div class="col-md-3"><label class="form-label small fw-bold">Origem</label><input list="crm-origens-list" id="crm-origem" class="form-control" placeholder="Ex: Indicação"></div>
+                        <div class="col-md-3"><label class="form-label small fw-bold">Origem do anúncio *</label><select id="crm-origem" class="form-select" required></select></div>
                         <div class="col-md-6"><label class="form-label small fw-bold">Cliente / lead *</label><input type="text" id="crm-cliente" class="form-control" maxlength="240" required></div>
                         <div class="col-md-4"><label class="form-label small fw-bold">Telefone / WhatsApp</label><input type="text" id="crm-telefone" class="form-control" maxlength="40"></div>
                         <div class="col-md-4"><label class="form-label small fw-bold">E-mail</label><input type="email" id="crm-email" class="form-control" maxlength="240"></div>
@@ -2389,9 +2389,6 @@
                     </div>
                 </div>
 
-                <datalist id="crm-origens-list">
-                    <option value="Indicação"><option value="Instagram"><option value="Meta Ads"><option value="Google"><option value="Site"><option value="Parceria"><option value="WhatsApp / Orgânico"><option value="Outro">
-                </datalist>
                 <datalist id="crm-responsaveis-list"><option value="Azevedo"><option value="Juvencio"></datalist>
                 <datalist id="crm-areas-list">
                     <option value="Cível"><option value="Consumidor"><option value="Família"><option value="Trabalhista"><option value="Imobiliário"><option value="Empresarial"><option value="Penal"><option value="Previdenciário"><option value="Direito Digital"><option value="Tributário"><option value="Outro">
@@ -3838,17 +3835,21 @@ function renderizarLista(itens) {
                 actions.appendChild(link);
             }
 
-            const crmBtn = document.createElement('button');
-            crmBtn.type = 'button';
-            crmBtn.className = 'ticket-crm-btn';
-            if (ticket.crm?.id) {
-                crmBtn.innerHTML = `<i class="bi bi-kanban"></i> Abrir ${ticket.crm.crmNumber || 'lead'} no CRM`;
-                crmBtn.onclick = () => abrirCRMDoTicket(ticket);
-            } else {
-                crmBtn.innerHTML = '<i class="bi bi-person-plus"></i> Adicionar ao CRM';
-                crmBtn.onclick = () => adicionarTicketAoCRM(ticket, crmBtn);
+            // O CRM é exclusivo para leads vindos de anúncio. Tickets orgânicos
+            // continuam no painel operacional, mas não exibem qualquer ação comercial.
+            if (ticket.origem === 'lead_anuncio') {
+                const crmBtn = document.createElement('button');
+                crmBtn.type = 'button';
+                crmBtn.className = 'ticket-crm-btn';
+                if (ticket.crm?.id) {
+                    crmBtn.innerHTML = `<i class="bi bi-kanban"></i> Abrir ${ticket.crm.crmNumber || 'lead'} no CRM`;
+                    crmBtn.onclick = () => abrirCRMDoTicket(ticket);
+                } else {
+                    crmBtn.innerHTML = '<i class="bi bi-person-plus"></i> Adicionar lead ao CRM';
+                    crmBtn.onclick = () => adicionarTicketAoCRM(ticket, crmBtn);
+                }
+                actions.appendChild(crmBtn);
             }
-            actions.appendChild(crmBtn);
             body.appendChild(actions);
 
             if (!dialog.open) {
@@ -3884,6 +3885,7 @@ function renderizarLista(itens) {
         const CRM_STATUS_FALLBACK = ['Novo lead','Contato feito','Reunião agendada','Reunião realizada','Proposta enviada','Negociando','Contrato assinado','Em andamento','Aguardando cliente','Encerrado - ganho','Encerrado - perdido'];
         const CRM_MODELOS_FALLBACK = ['Consulta','Fixo','Parcelado','Êxito','Misto'];
         const CRM_MOTIVOS_FALLBACK = ['Sem resposta','Sem orçamento','Fechou com outro','Não é o perfil do caso','Outro'];
+        const CRM_ORIGENS_ANUNCIO_FALLBACK = ['Meta Ads','Instagram Ads','Facebook Ads','Google Ads','TikTok Ads','YouTube Ads','LinkedIn Ads','Outro anúncio'];
         const CRM_STATUS_ENCERRADOS_JS = new Set(['Encerrado - ganho','Encerrado - perdido']);
         const CRM_STATUS_GANHOS_JS = new Set(['Contrato assinado','Em andamento','Encerrado - ganho']);
 
@@ -4169,13 +4171,14 @@ function renderizarLista(itens) {
             const statusOptions = window.crmOptions?.status || CRM_STATUS_FALLBACK;
             const modelos = window.crmOptions?.modelosCobranca || CRM_MODELOS_FALLBACK;
             const motivos = window.crmOptions?.motivosPerda || CRM_MOTIVOS_FALLBACK;
+            const origensAnuncio = window.crmOptions?.origensAnuncio || CRM_ORIGENS_ANUNCIO_FALLBACK;
             preencherSelectCRM(document.getElementById('crm-status-lead'), statusOptions, null, lead?.status || 'Novo lead');
             preencherSelectCRM(document.getElementById('crm-modelo-cobranca'), modelos, 'Selecione...', lead?.modeloCobranca || '');
             preencherSelectCRM(document.getElementById('crm-motivo-perda'), motivos, 'Selecione...', lead?.motivoPerda || '');
+            preencherSelectCRM(document.getElementById('crm-origem'), origensAnuncio, 'Selecione a mídia paga...', lead?.origem || 'Meta Ads');
 
             setValorCRM('crm-lead-id', lead?.id || '');
             setValorCRM('crm-data-entrada', lead?.dataEntrada || hojeCRMJS());
-            setValorCRM('crm-origem', lead?.origem || '');
             setValorCRM('crm-cliente', lead?.cliente || '');
             setValorCRM('crm-telefone', lead?.telefone || '');
             setValorCRM('crm-email', lead?.email || '');
@@ -4247,6 +4250,11 @@ function renderizarLista(itens) {
             const status = document.getElementById('crm-form-status');
             const btn = document.getElementById('crm-btn-save');
             if (!dados.cliente) { status.className='crm-form-status text-danger'; status.textContent='Informe o nome do cliente/lead.'; return; }
+            if (!CRM_ORIGENS_ANUNCIO_FALLBACK.includes(dados.origem)) {
+                status.className='crm-form-status text-danger';
+                status.textContent='Selecione a origem do anúncio/mídia paga.';
+                return;
+            }
             if (dados.status === 'Encerrado - perdido' && !dados.motivoPerda) {
                 status.className='crm-form-status text-danger';
                 status.textContent='Selecione o motivo da perda antes de encerrar o lead.';
@@ -4295,6 +4303,10 @@ function renderizarLista(itens) {
 
         async function adicionarTicketAoCRM(ticket, btn) {
             if (!ticket?.ticketNumber || !btn) return;
+            if (ticket.origem !== 'lead_anuncio') {
+                alert('Somente leads originados de anúncio podem ser adicionados ao CRM.');
+                return;
+            }
             const textoOriginal = btn.innerHTML;
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Adicionando...';
