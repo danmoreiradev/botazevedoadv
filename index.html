@@ -1390,6 +1390,280 @@
             .tickets-summary-grid { grid-template-columns: 1fr; }
         }
 
+        /* Submenu interno de Tickets + CRM */
+        .tickets-subnav {
+            width: fit-content;
+            max-width: 100%;
+            margin-bottom: 22px;
+            padding: 5px;
+            display: inline-flex;
+            gap: 5px;
+            background: #eceff3;
+            border: 1px solid var(--border);
+            border-radius: 13px;
+        }
+        .tickets-subnav-btn {
+            min-height: 39px;
+            padding: 8px 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #66707d;
+            background: transparent;
+            border: 0;
+            border-radius: 9px;
+            font-size: .82rem;
+            font-weight: 750;
+            transition: var(--transition);
+        }
+        .tickets-subnav-btn:hover { color: var(--adv-blue); background: rgba(255,255,255,.65); }
+        .tickets-subnav-btn.active {
+            color: var(--adv-blue);
+            background: #fff;
+            box-shadow: 0 2px 8px rgba(20,27,38,.08);
+        }
+        .tickets-subview.hidden { display: none !important; }
+
+        .crm-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(145px, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+        .crm-summary-card {
+            min-height: 104px;
+            padding: 16px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 15px;
+            box-shadow: var(--shadow-sm);
+        }
+        .crm-summary-label {
+            margin-bottom: 7px;
+            color: var(--text-muted);
+            font-size: .67rem;
+            font-weight: 760;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+        }
+        .crm-summary-value {
+            color: var(--adv-blue);
+            font-size: 1.45rem;
+            line-height: 1.05;
+            font-weight: 790;
+            letter-spacing: -.03em;
+        }
+        .crm-summary-value.money { font-size: 1.15rem; line-height: 1.25; }
+        .crm-summary-icon {
+            width: 38px;
+            height: 38px;
+            flex: 0 0 38px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--adv-blue);
+            background: #f1f3f6;
+            border-radius: 11px;
+        }
+        .crm-summary-card.alerta .crm-summary-icon { color: var(--danger-red); background: #fff3f2; }
+        .crm-summary-card.hoje .crm-summary-icon { color: #946a12; background: #fff8e7; }
+        .crm-summary-card.ganho .crm-summary-icon { color: #167541; background: #ecfaf2; }
+
+        .crm-panel-card { padding: 22px !important; }
+        .crm-toolbar {
+            display: grid;
+            grid-template-columns: minmax(250px,1.35fr) repeat(4,minmax(155px,.62fr)) auto;
+            gap: 9px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .crm-search { position: relative; }
+        .crm-search input { padding-left: 42px; }
+        .crm-table-wrap {
+            overflow-x: auto;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+        }
+        .crm-table { min-width: 1280px; margin-bottom: 0; }
+        .crm-table thead th {
+            padding: 13px 14px;
+            color: #6a7280;
+            background: #f8f9fb;
+            border-color: var(--border);
+            font-size: .67rem;
+            font-weight: 760;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .crm-table tbody td { padding: 13px 14px; color: #4f5865; border-color: #edf0f3; vertical-align: middle; }
+        .crm-table tbody tr:hover { background: #fbfcfd; }
+        .crm-number { color: var(--adv-blue); font-weight: 790; white-space: nowrap; }
+        .crm-ticket-ref { margin-top: 2px; color: var(--text-muted); font-size: .72rem; }
+        .crm-client-name { color: var(--text); font-weight: 720; }
+        .crm-client-contact { margin-top: 2px; color: var(--text-muted); font-size: .75rem; white-space: nowrap; }
+        .crm-area { max-width: 170px; font-weight: 650; }
+        .crm-status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 9px;
+            border: 1px solid #e0e5ea;
+            border-radius: 999px;
+            color: #5b6571;
+            background: #f5f7f9;
+            font-size: .70rem;
+            font-weight: 760;
+            white-space: nowrap;
+        }
+        .crm-status-pill::before { content:''; width:6px; height:6px; border-radius:50%; background:currentColor; }
+        .crm-status-pill.hot { color:#8a6108; background:#fff8e7; border-color:#f1dfb5; }
+        .crm-status-pill.won { color:#167541; background:#ecfaf2; border-color:#caecd9; }
+        .crm-status-pill.lost { color:#a13f39; background:#fff3f2; border-color:#efd5d2; }
+        .crm-next-action { max-width: 260px; color: #3e4752; font-size: .82rem; font-weight: 650; }
+        .crm-next-date {
+            margin-top: 5px;
+            width: fit-content;
+            padding: 3px 7px;
+            border-radius: 7px;
+            color: #707985;
+            background: #f3f5f7;
+            font-size: .69rem;
+            font-weight: 700;
+        }
+        .crm-next-date.overdue { color: #a13f39; background: #fff0ef; }
+        .crm-next-date.today { color: #80590a; background: #fff5d9; }
+        .crm-revenue { color: #303842; font-weight: 750; white-space: nowrap; }
+        .crm-responsavel { white-space: nowrap; }
+        .crm-edit-btn {
+            min-height: 36px;
+            padding: 7px 10px;
+            color: var(--adv-blue);
+            background: #fff;
+            border: 1px solid var(--border-strong);
+            border-radius: 9px;
+            font-size: .77rem;
+            font-weight: 750;
+            white-space: nowrap;
+        }
+        .crm-empty { padding: 48px 20px !important; text-align:center; color:var(--text-muted) !important; }
+        .crm-helper-strip {
+            margin-bottom: 15px;
+            padding: 11px 13px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 18px;
+            align-items: center;
+            color: #69727f;
+            background: #f8f9fb;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            font-size: .77rem;
+        }
+        .crm-helper-strip strong { color: var(--adv-blue); }
+
+        #crm-lead-dialog {
+            width: min(980px, calc(100vw - 26px));
+            max-height: min(92vh, 980px);
+            padding: 0;
+            overflow: hidden;
+            color: var(--text);
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            box-shadow: 0 30px 90px rgba(17,22,30,.28);
+        }
+        #crm-lead-dialog::backdrop { background: rgba(17,22,30,.55); backdrop-filter: blur(2px); }
+        .crm-dialog-header {
+            padding: 19px 22px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .crm-dialog-title { margin:0; color:var(--adv-blue); font-size:1.14rem; font-weight:790; }
+        .crm-dialog-subtitle { margin-top:4px; color:var(--text-muted); font-size:.78rem; }
+        .crm-dialog-close {
+            width:36px; height:36px; flex:0 0 36px; display:inline-flex; align-items:center; justify-content:center;
+            color:#69727f; background:#f6f7f9; border:1px solid var(--border); border-radius:10px;
+        }
+        .crm-dialog-body { max-height: calc(92vh - 75px); padding:22px; overflow-y:auto; }
+        .crm-form-section { margin-bottom: 22px; }
+        .crm-form-section-title {
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            color: var(--adv-blue);
+            border-bottom: 1px solid #edf0f3;
+            font-size: .80rem;
+            font-weight: 790;
+            letter-spacing: .045em;
+            text-transform: uppercase;
+        }
+        .crm-revenue-preview {
+            height: 100%;
+            min-height: 72px;
+            padding: 12px 14px;
+            display:flex;
+            flex-direction:column;
+            justify-content:center;
+            color:#58616e;
+            background:#f8f9fb;
+            border:1px solid var(--border);
+            border-radius:11px;
+            font-size:.76rem;
+        }
+        .crm-revenue-preview strong { margin-top:3px; color:var(--adv-blue); font-size:1rem; }
+        .crm-dialog-footer {
+            margin-top: 8px;
+            padding-top: 16px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 10px;
+            border-top: 1px solid var(--border);
+        }
+        .crm-form-status { min-height:20px; color:var(--text-muted); font-size:.80rem; font-weight:650; }
+        .ticket-crm-btn {
+            min-height: 40px;
+            padding: 9px 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #70571f;
+            background: #fff9e9;
+            border: 1px solid #ead8aa;
+            border-radius: 10px;
+            font-size: .82rem;
+            font-weight: 750;
+        }
+        .ticket-crm-btn:hover { background:#fff5d8; }
+
+        @media (max-width: 1399.98px) {
+            .crm-summary-grid { grid-template-columns: repeat(3, 1fr); }
+            .crm-toolbar { grid-template-columns: 1.2fr repeat(2, .7fr); }
+        }
+        @media (max-width: 899.98px) {
+            .crm-toolbar { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 575.98px) {
+            .tickets-subnav { width:100%; }
+            .tickets-subnav-btn { flex:1; justify-content:center; }
+            .crm-summary-grid { grid-template-columns: repeat(2,1fr); }
+            .crm-toolbar { grid-template-columns: 1fr; }
+            .crm-dialog-body { padding:16px; }
+            .crm-dialog-footer > div { width:100%; }
+            .crm-dialog-footer .btn { flex:1; }
+        }
+        @media (max-width: 399.98px) {
+            .crm-summary-grid { grid-template-columns:1fr; }
+        }
+
         /* Business days as pills */
         #business-days-container { gap: 8px !important; }
         #business-days-container .form-check { margin: 0; padding: 0; }
@@ -1758,79 +2032,178 @@
         </div>
 
         <div id="tab-tickets" class="content-section hidden">
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-                <div>
-                    <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Tickets ativos</h4>
-                    <p class="text-muted mb-0">Visão operacional dos atendimentos em aberto. Arquivos enviados pelo cliente são lidos automaticamente pelo Gemini e resumidos nos detalhes do ticket.</p>
-                </div>
-                <div class="d-flex align-items-center gap-3 flex-wrap">
-                    <span id="tickets-refresh-status" class="tickets-refresh-status">Atualização automática</span>
-                    <button type="button" class="btn btn-outline-secondary" onclick="carregarTicketsAtivos(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
-                </div>
+            <div class="tickets-subnav" role="tablist" aria-label="Tickets e CRM">
+                <button type="button" class="tickets-subnav-btn active" id="tickets-subnav-active" onclick="switchTicketsSubtab('active')">
+                    <i class="bi bi-inboxes"></i> Atendimentos ativos
+                </button>
+                <button type="button" class="tickets-subnav-btn" id="tickets-subnav-crm" onclick="switchTicketsSubtab('crm')">
+                    <i class="bi bi-kanban"></i> Controle CRM
+                </button>
             </div>
 
-            <div class="tickets-summary-grid" aria-label="Resumo dos tickets ativos">
-                <div class="ticket-summary-card">
-                    <div class="ticket-summary-copy"><div class="ticket-summary-label">Tickets ativos</div><div class="ticket-summary-value" id="tickets-metric-total">0</div></div>
-                    <span class="ticket-summary-icon"><i class="bi bi-inboxes"></i></span>
-                </div>
-                <div class="ticket-summary-card is-pending">
-                    <div class="ticket-summary-copy"><div class="ticket-summary-label">Pendentes da equipe</div><div class="ticket-summary-value" id="tickets-metric-pending">0</div></div>
-                    <span class="ticket-summary-icon"><i class="bi bi-person-exclamation"></i></span>
-                </div>
-                <div class="ticket-summary-card is-human">
-                    <div class="ticket-summary-copy"><div class="ticket-summary-label">Em atendimento</div><div class="ticket-summary-value" id="tickets-metric-human">0</div></div>
-                    <span class="ticket-summary-icon"><i class="bi bi-headset"></i></span>
-                </div>
-                <div class="ticket-summary-card is-client">
-                    <div class="ticket-summary-copy"><div class="ticket-summary-label">Aguardando cliente</div><div class="ticket-summary-value" id="tickets-metric-client">0</div></div>
-                    <span class="ticket-summary-icon"><i class="bi bi-hourglass-split"></i></span>
-                </div>
-                <div class="ticket-summary-card is-alert">
-                    <div class="ticket-summary-copy"><div class="ticket-summary-label">Pendentes +2h</div><div class="ticket-summary-value" id="tickets-metric-alert">0</div></div>
-                    <span class="ticket-summary-icon"><i class="bi bi-alarm"></i></span>
-                </div>
-            </div>
-
-            <div class="card-custom text-start tickets-panel-card" style="width: 100%;">
-                <div class="tickets-toolbar">
-                    <div class="tickets-search">
-                        <span class="search-icon"><i class="bi bi-search"></i></span>
-                        <input type="text" id="tickets-search-input" class="form-control" placeholder="Buscar ticket, cliente, CPF, WhatsApp ou área..." oninput="filtrarTicketsAtivos()">
+            <div id="tickets-view-active" class="tickets-subview">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                    <div>
+                        <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Tickets ativos</h4>
+                        <p class="text-muted mb-0">Visão operacional dos atendimentos em aberto. Arquivos enviados pelo cliente são lidos automaticamente pelo Gemini e resumidos nos detalhes do ticket.</p>
                     </div>
-                    <select id="tickets-filter-status" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar situação">
-                        <option value="">Todas as situações</option>
-                        <option value="advogado">Pendente da equipe</option>
-                        <option value="atendimento">Em atendimento</option>
-                        <option value="cliente">Aguardando cliente</option>
-                        <option value="outro">Revisar estado</option>
-                    </select>
-                    <select id="tickets-filter-area" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar área">
-                        <option value="">Todas as áreas</option>
-                    </select>
-                    <button type="button" class="btn btn-outline-secondary" onclick="limparFiltrosTickets()"><i class="bi bi-x-circle me-1"></i> Limpar</button>
+                    <div class="d-flex align-items-center gap-3 flex-wrap">
+                        <span id="tickets-refresh-status" class="tickets-refresh-status">Atualização automática</span>
+                        <button type="button" class="btn btn-outline-secondary" onclick="carregarTicketsAtivos(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
+                    </div>
                 </div>
 
-                <div id="tickets-status" class="menu-save-status text-muted mb-2"></div>
+                <div class="tickets-summary-grid" aria-label="Resumo dos tickets ativos">
+                    <div class="ticket-summary-card">
+                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Tickets ativos</div><div class="ticket-summary-value" id="tickets-metric-total">0</div></div>
+                        <span class="ticket-summary-icon"><i class="bi bi-inboxes"></i></span>
+                    </div>
+                    <div class="ticket-summary-card is-pending">
+                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Pendentes da equipe</div><div class="ticket-summary-value" id="tickets-metric-pending">0</div></div>
+                        <span class="ticket-summary-icon"><i class="bi bi-person-exclamation"></i></span>
+                    </div>
+                    <div class="ticket-summary-card is-human">
+                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Em atendimento</div><div class="ticket-summary-value" id="tickets-metric-human">0</div></div>
+                        <span class="ticket-summary-icon"><i class="bi bi-headset"></i></span>
+                    </div>
+                    <div class="ticket-summary-card is-client">
+                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Aguardando cliente</div><div class="ticket-summary-value" id="tickets-metric-client">0</div></div>
+                        <span class="ticket-summary-icon"><i class="bi bi-hourglass-split"></i></span>
+                    </div>
+                    <div class="ticket-summary-card is-alert">
+                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Pendentes +2h</div><div class="ticket-summary-value" id="tickets-metric-alert">0</div></div>
+                        <span class="ticket-summary-icon"><i class="bi bi-alarm"></i></span>
+                    </div>
+                </div>
 
-                <div class="tickets-table-wrap">
-                    <table class="table tickets-table align-middle">
-                        <thead>
-                            <tr>
-                                <th>Ticket</th>
-                                <th>Cliente</th>
-                                <th>Área</th>
-                                <th>Situação</th>
-                                <th>Triagem</th>
-                                <th>Última atividade</th>
-                                <th>Aberto há</th>
-                                <th class="text-end">Detalhes</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tickets-table-body">
-                            <tr><td colspan="8" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
-                        </tbody>
-                    </table>
+                <div class="card-custom text-start tickets-panel-card" style="width: 100%;">
+                    <div class="tickets-toolbar">
+                        <div class="tickets-search">
+                            <span class="search-icon"><i class="bi bi-search"></i></span>
+                            <input type="text" id="tickets-search-input" class="form-control" placeholder="Buscar ticket, cliente, CPF, WhatsApp ou área..." oninput="filtrarTicketsAtivos()">
+                        </div>
+                        <select id="tickets-filter-status" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar situação">
+                            <option value="">Todas as situações</option>
+                            <option value="advogado">Pendente da equipe</option>
+                            <option value="atendimento">Em atendimento</option>
+                            <option value="cliente">Aguardando cliente</option>
+                            <option value="outro">Revisar estado</option>
+                        </select>
+                        <select id="tickets-filter-area" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar área">
+                            <option value="">Todas as áreas</option>
+                        </select>
+                        <button type="button" class="btn btn-outline-secondary" onclick="limparFiltrosTickets()"><i class="bi bi-x-circle me-1"></i> Limpar</button>
+                    </div>
+
+                    <div id="tickets-status" class="menu-save-status text-muted mb-2"></div>
+
+                    <div class="tickets-table-wrap">
+                        <table class="table tickets-table align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Ticket</th>
+                                    <th>Cliente</th>
+                                    <th>Área</th>
+                                    <th>Situação</th>
+                                    <th>Triagem</th>
+                                    <th>Última atividade</th>
+                                    <th>Aberto há</th>
+                                    <th class="text-end">Detalhes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tickets-table-body">
+                                <tr><td colspan="8" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tickets-view-crm" class="tickets-subview hidden">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                    <div>
+                        <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Controle CRM</h4>
+                        <p class="text-muted mb-0">Controle comercial de leads, follow-ups, propostas e contratos. Estrutura baseada na planilha de CRM do escritório.</p>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <button type="button" class="btn btn-outline-secondary" onclick="carregarCRM(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
+                        <button type="button" class="btn text-white" style="background: var(--adv-blue)" onclick="abrirLeadCRM()"><i class="bi bi-plus-lg me-1"></i> Novo lead</button>
+                    </div>
+                </div>
+
+                <div class="crm-summary-grid">
+                    <div class="crm-summary-card">
+                        <div><div class="crm-summary-label">Leads em aberto</div><div class="crm-summary-value" id="crm-metric-open">0</div></div>
+                        <span class="crm-summary-icon"><i class="bi bi-person-lines-fill"></i></span>
+                    </div>
+                    <div class="crm-summary-card alerta">
+                        <div><div class="crm-summary-label">Follow-ups atrasados</div><div class="crm-summary-value" id="crm-metric-overdue">0</div></div>
+                        <span class="crm-summary-icon"><i class="bi bi-exclamation-triangle"></i></span>
+                    </div>
+                    <div class="crm-summary-card hoje">
+                        <div><div class="crm-summary-label">Ações para hoje</div><div class="crm-summary-value" id="crm-metric-today">0</div></div>
+                        <span class="crm-summary-icon"><i class="bi bi-calendar-check"></i></span>
+                    </div>
+                    <div class="crm-summary-card hoje">
+                        <div><div class="crm-summary-label">Propostas / negociação</div><div class="crm-summary-value" id="crm-metric-proposals">0</div></div>
+                        <span class="crm-summary-icon"><i class="bi bi-file-earmark-text"></i></span>
+                    </div>
+                    <div class="crm-summary-card ganho">
+                        <div><div class="crm-summary-label">Contratos no mês</div><div class="crm-summary-value" id="crm-metric-contracts">0</div></div>
+                        <span class="crm-summary-icon"><i class="bi bi-check2-circle"></i></span>
+                    </div>
+                    <div class="crm-summary-card ganho">
+                        <div><div class="crm-summary-label">Receita prevista aberta</div><div class="crm-summary-value money" id="crm-metric-revenue">R$ 0</div></div>
+                        <span class="crm-summary-icon"><i class="bi bi-cash-stack"></i></span>
+                    </div>
+                </div>
+
+                <div class="card-custom text-start crm-panel-card" style="width:100%;">
+                    <div class="crm-helper-strip">
+                        <span><strong>Regra prática:</strong> todo lead aberto deve ter uma próxima ação e uma data.</span>
+                        <span id="crm-helper-conversion">Conversão: 0%</span>
+                        <span id="crm-helper-no-action">Sem próxima ação: 0</span>
+                    </div>
+
+                    <div class="crm-toolbar">
+                        <div class="crm-search">
+                            <span class="search-icon"><i class="bi bi-search"></i></span>
+                            <input type="text" id="crm-search-input" class="form-control" placeholder="Buscar cliente, CRM, ticket, telefone, área ou assunto..." oninput="filtrarCRM()">
+                        </div>
+                        <select id="crm-filter-status" class="form-select" onchange="filtrarCRM()"><option value="">Todos os status</option></select>
+                        <select id="crm-filter-responsavel" class="form-select" onchange="filtrarCRM()"><option value="">Todos os responsáveis</option></select>
+                        <select id="crm-filter-area" class="form-select" onchange="filtrarCRM()"><option value="">Todas as áreas</option></select>
+                        <select id="crm-filter-acao" class="form-select" onchange="filtrarCRM()">
+                            <option value="">Todas as ações</option>
+                            <option value="atrasado">Follow-up atrasado</option>
+                            <option value="hoje">Ação hoje</option>
+                            <option value="7dias">Próximos 7 dias</option>
+                            <option value="semdada">Sem próxima ação/data</option>
+                        </select>
+                        <button type="button" class="btn btn-outline-secondary" onclick="limparFiltrosCRM()"><i class="bi bi-x-circle me-1"></i> Limpar</button>
+                    </div>
+
+                    <div id="crm-status" class="menu-save-status text-muted mb-2"></div>
+                    <div class="crm-table-wrap">
+                        <table class="table crm-table align-middle">
+                            <thead>
+                                <tr>
+                                    <th>CRM</th>
+                                    <th>Cliente</th>
+                                    <th>Área</th>
+                                    <th>Status</th>
+                                    <th>Próxima ação</th>
+                                    <th>Responsável</th>
+                                    <th>Receita prevista</th>
+                                    <th>Atualizado</th>
+                                    <th class="text-end">Ação</th>
+                                </tr>
+                            </thead>
+                            <tbody id="crm-table-body">
+                                <tr><td colspan="9" class="crm-empty">Abra o CRM para carregar os leads.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1956,6 +2329,86 @@
         <div class="ticket-dialog-body" id="ticket-detail-body"></div>
     </dialog>
 
+    <dialog id="crm-lead-dialog">
+        <div class="crm-dialog-header">
+            <div>
+                <h5 class="crm-dialog-title" id="crm-dialog-title">Novo lead</h5>
+                <div class="crm-dialog-subtitle" id="crm-dialog-subtitle">Cadastre somente o necessário agora; o restante pode ser atualizado durante o acompanhamento.</div>
+            </div>
+            <button type="button" class="crm-dialog-close" onclick="fecharLeadCRM()" aria-label="Fechar"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="crm-dialog-body">
+            <form id="crm-lead-form" onsubmit="salvarLeadCRM(event)">
+                <input type="hidden" id="crm-lead-id">
+
+                <div class="crm-form-section">
+                    <div class="crm-form-section-title">Lead e contato</div>
+                    <div class="row g-3">
+                        <div class="col-md-3"><label class="form-label small fw-bold">Data de entrada</label><input type="date" id="crm-data-entrada" class="form-control" required></div>
+                        <div class="col-md-3"><label class="form-label small fw-bold">Origem</label><input list="crm-origens-list" id="crm-origem" class="form-control" placeholder="Ex: Indicação"></div>
+                        <div class="col-md-6"><label class="form-label small fw-bold">Cliente / lead *</label><input type="text" id="crm-cliente" class="form-control" maxlength="240" required></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Telefone / WhatsApp</label><input type="text" id="crm-telefone" class="form-control" maxlength="40"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">E-mail</label><input type="email" id="crm-email" class="form-control" maxlength="240"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Cidade/UF</label><input type="text" id="crm-cidade" class="form-control" maxlength="160" placeholder="Ex: Piracicaba/SP"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Área</label><input list="crm-areas-list" id="crm-area" class="form-control" maxlength="160"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Status</label><select id="crm-status-lead" class="form-select" onchange="atualizarCamposCondicionaisCRM()"></select></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Responsável</label><input list="crm-responsaveis-list" id="crm-responsavel" class="form-control" maxlength="120" placeholder="Azevedo / Juvencio"></div>
+                        <div class="col-12"><label class="form-label small fw-bold">Assunto / resumo</label><textarea id="crm-assunto" class="form-control" rows="4" maxlength="6000" placeholder="Resumo objetivo da demanda e do que o lead busca."></textarea></div>
+                    </div>
+                </div>
+
+                <div class="crm-form-section">
+                    <div class="crm-form-section-title">Próxima ação</div>
+                    <div class="row g-3">
+                        <div class="col-md-8"><label class="form-label small fw-bold">Próxima ação</label><input type="text" id="crm-proxima-acao" class="form-control" maxlength="1000" placeholder="Ex: Enviar proposta de honorários"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Data próxima ação</label><input type="date" id="crm-data-proxima-acao" class="form-control"></div>
+                    </div>
+                    <div class="form-text mt-2">Para leads ainda abertos, mantenha sempre estes dois campos atualizados. É isso que alimenta os alertas do painel.</div>
+                </div>
+
+                <div class="crm-form-section">
+                    <div class="crm-form-section-title">Comercial / honorários</div>
+                    <div class="row g-3">
+                        <div class="col-md-3"><label class="form-label small fw-bold">Valor potencial (R$)</label><input type="number" min="0" step="0.01" id="crm-valor-potencial" class="form-control crm-money-input" oninput="atualizarPreviewReceitaCRM()"></div>
+                        <div class="col-md-3"><label class="form-label small fw-bold">Modelo de cobrança</label><select id="crm-modelo-cobranca" class="form-select" onchange="atualizarPreviewReceitaCRM()"></select></div>
+                        <div class="col-md-3"><label class="form-label small fw-bold">Entrada (R$)</label><input type="number" min="0" step="0.01" id="crm-entrada" class="form-control crm-money-input" oninput="atualizarPreviewReceitaCRM()"></div>
+                        <div class="col-md-3"><div class="crm-revenue-preview">Receita total prevista<strong id="crm-preview-receita">R$ 0,00</strong></div></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Parcelas (qtd.)</label><input type="number" min="0" step="1" id="crm-parcelas" class="form-control" oninput="atualizarPreviewReceitaCRM()"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Valor parcela (R$)</label><input type="number" min="0" step="0.01" id="crm-valor-parcela" class="form-control" oninput="atualizarPreviewReceitaCRM()"></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Êxito (%)</label><input type="number" min="0" max="100" step="0.1" id="crm-percentual-exito" class="form-control" oninput="atualizarPreviewReceitaCRM()" placeholder="Ex: 20"></div>
+                    </div>
+                </div>
+
+                <div class="crm-form-section">
+                    <div class="crm-form-section-title">Fechamento e observações</div>
+                    <div class="row g-3">
+                        <div class="col-md-4"><label class="form-label small fw-bold">Data fechamento</label><input type="date" id="crm-data-fechamento" class="form-control"></div>
+                        <div class="col-md-4" id="crm-motivo-perda-wrap"><label class="form-label small fw-bold">Motivo da perda</label><select id="crm-motivo-perda" class="form-select"></select></div>
+                        <div class="col-md-4"><label class="form-label small fw-bold">Pasta no Drive</label><input type="url" id="crm-pasta-drive" class="form-control" maxlength="1000" placeholder="https://..."></div>
+                        <div class="col-12"><label class="form-label small fw-bold">Observações</label><textarea id="crm-observacoes" class="form-control" rows="4" maxlength="6000"></textarea></div>
+                    </div>
+                </div>
+
+                <datalist id="crm-origens-list">
+                    <option value="Indicação"><option value="Instagram"><option value="Meta Ads"><option value="Google"><option value="Site"><option value="Parceria"><option value="WhatsApp / Orgânico"><option value="Outro">
+                </datalist>
+                <datalist id="crm-responsaveis-list"><option value="Azevedo"><option value="Juvencio"></datalist>
+                <datalist id="crm-areas-list">
+                    <option value="Cível"><option value="Consumidor"><option value="Família"><option value="Trabalhista"><option value="Imobiliário"><option value="Empresarial"><option value="Penal"><option value="Previdenciário"><option value="Direito Digital"><option value="Tributário"><option value="Outro">
+                </datalist>
+
+                <div class="crm-form-status" id="crm-form-status"></div>
+                <div class="crm-dialog-footer">
+                    <div><button type="button" id="crm-btn-delete" class="btn btn-outline-danger hidden" onclick="excluirLeadCRM()"><i class="bi bi-trash me-1"></i> Excluir lead</button></div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="button" class="btn btn-outline-secondary" onclick="fecharLeadCRM()">Cancelar</button>
+                        <button type="submit" id="crm-btn-save" class="btn text-white" style="background:var(--adv-blue)"><i class="bi bi-check2 me-1"></i> Salvar lead</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
     <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     
@@ -1993,9 +2446,27 @@
             if (window.innerWidth < 992) toggleSidebar(false);
             if(tabId === 'tab-ia') carregarConhecimento();
             if(tabId === 'tab-opcoes') carregarOpcoesAtendimento();
-            if(tabId === 'tab-tickets') carregarTicketsAtivos();
+            if(tabId === 'tab-tickets') switchTicketsSubtab(window.ticketsCurrentSubtab || 'active');
             if(tabId === 'tab-clientes') carregarClientes();
             if(tabId === 'tab-horario') carregarHorarioFuncionamento();
+        }
+
+        function switchTicketsSubtab(subtab = 'active') {
+            const activeView = document.getElementById('tickets-view-active');
+            const crmView = document.getElementById('tickets-view-crm');
+            const activeBtn = document.getElementById('tickets-subnav-active');
+            const crmBtn = document.getElementById('tickets-subnav-crm');
+            if (!activeView || !crmView) return;
+
+            const mostrarCRM = subtab === 'crm';
+            window.ticketsCurrentSubtab = mostrarCRM ? 'crm' : 'active';
+            activeView.classList.toggle('hidden', mostrarCRM);
+            crmView.classList.toggle('hidden', !mostrarCRM);
+            activeBtn?.classList.toggle('active', !mostrarCRM);
+            crmBtn?.classList.toggle('active', mostrarCRM);
+
+            if (mostrarCRM) carregarCRM();
+            else carregarTicketsAtivos();
         }
 
         socket.on('qr', (qr) => {
@@ -2029,7 +2500,8 @@
 
         socket.on('ticket_document_ai_updated', ({ ticketNumber } = {}) => {
             const tab = document.getElementById('tab-tickets');
-            if (!tab || tab.classList.contains('hidden')) return;
+            const activeView = document.getElementById('tickets-view-active');
+            if (!tab || tab.classList.contains('hidden') || activeView?.classList.contains('hidden')) return;
 
             clearTimeout(window.ticketDocumentAIRefreshTimer);
             window.ticketDocumentAIRefreshTimer = setTimeout(() => {
@@ -2040,6 +2512,17 @@
                     carregarTicketsAtivos(true);
                 }
             }, 250);
+        });
+
+        socket.on('crm_updated', () => {
+            const tab = document.getElementById('tab-tickets');
+            const crmView = document.getElementById('tickets-view-crm');
+            if (!tab || tab.classList.contains('hidden') || crmView?.classList.contains('hidden')) return;
+            clearTimeout(window.crmSocketRefreshTimer);
+            window.crmSocketRefreshTimer = setTimeout(() => {
+                window.crmLoaded = false;
+                carregarCRM(true);
+            }, 350);
         });
 
         async function salvarConhecimento() {
@@ -3354,6 +3837,18 @@ function renderizarLista(itens) {
                 link.innerHTML = '<i class="bi bi-whatsapp"></i> Abrir conversa no WhatsApp';
                 actions.appendChild(link);
             }
+
+            const crmBtn = document.createElement('button');
+            crmBtn.type = 'button';
+            crmBtn.className = 'ticket-crm-btn';
+            if (ticket.crm?.id) {
+                crmBtn.innerHTML = `<i class="bi bi-kanban"></i> Abrir ${ticket.crm.crmNumber || 'lead'} no CRM`;
+                crmBtn.onclick = () => abrirCRMDoTicket(ticket);
+            } else {
+                crmBtn.innerHTML = '<i class="bi bi-person-plus"></i> Adicionar ao CRM';
+                crmBtn.onclick = () => adicionarTicketAoCRM(ticket, crmBtn);
+            }
+            actions.appendChild(crmBtn);
             body.appendChild(actions);
 
             if (!dialog.open) {
@@ -3374,13 +3869,459 @@ function renderizarLista(itens) {
             if (window.activeTicketsTimer) return;
             window.activeTicketsTimer = setInterval(() => {
                 const tab = document.getElementById('tab-tickets');
-                if (!tab || tab.classList.contains('hidden')) return;
+                const activeView = document.getElementById('tickets-view-active');
+                if (!tab || tab.classList.contains('hidden') || activeView?.classList.contains('hidden')) return;
                 window.activeTicketsLoaded = false;
                 carregarTicketsAtivos(true);
             }, TICKETS_REFRESH_INTERVAL_MS);
         }
 
         inicializarAtualizacaoTickets();
+
+        // ---------------------------------------------------------------------
+        // CRM de leads
+        // ---------------------------------------------------------------------
+        const CRM_STATUS_FALLBACK = ['Novo lead','Contato feito','Reunião agendada','Reunião realizada','Proposta enviada','Negociando','Contrato assinado','Em andamento','Aguardando cliente','Encerrado - ganho','Encerrado - perdido'];
+        const CRM_MODELOS_FALLBACK = ['Consulta','Fixo','Parcelado','Êxito','Misto'];
+        const CRM_MOTIVOS_FALLBACK = ['Sem resposta','Sem orçamento','Fechou com outro','Não é o perfil do caso','Outro'];
+        const CRM_STATUS_ENCERRADOS_JS = new Set(['Encerrado - ganho','Encerrado - perdido']);
+        const CRM_STATUS_GANHOS_JS = new Set(['Contrato assinado','Em andamento','Encerrado - ganho']);
+
+        function hojeCRMJS() {
+            const partes = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit'
+            }).formatToParts(new Date());
+            const mapa = Object.fromEntries(partes.map(p => [p.type,p.value]));
+            return `${mapa.year}-${mapa.month}-${mapa.day}`;
+        }
+
+        function dataMaisDiasCRM(dataISO, dias) {
+            const [a,m,d] = String(dataISO || hojeCRMJS()).split('-').map(Number);
+            const dt = new Date(a, (m || 1)-1, d || 1, 12, 0, 0);
+            dt.setDate(dt.getDate() + dias);
+            return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+        }
+
+        function formatarDataCRM(dataISO) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dataISO || ''))) return '—';
+            const [a,m,d] = dataISO.split('-');
+            return `${d}/${m}/${a}`;
+        }
+
+        function moedaCRM(valor) {
+            const numero = Number(valor || 0);
+            return numero.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+        }
+
+        function numeroWhatsAppLinkCRM(valor = '') {
+            let digitos = String(valor || '').replace(/\D/g, '');
+            if ((digitos.length === 10 || digitos.length === 11) && !digitos.startsWith('55')) digitos = `55${digitos}`;
+            return digitos;
+        }
+
+        function normalizarBuscaCRM(valor = '') {
+            return String(valor || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+        }
+
+        function statusClassCRM(status = '') {
+            if (CRM_STATUS_GANHOS_JS.has(status)) return 'won';
+            if (status === 'Encerrado - perdido') return 'lost';
+            if (['Proposta enviada','Negociando','Reunião agendada'].includes(status)) return 'hot';
+            return '';
+        }
+
+        function preencherSelectCRM(select, valores = [], placeholder = '', valorAtual = '') {
+            if (!select) return;
+            select.innerHTML = '';
+            if (placeholder !== null) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = placeholder;
+                select.appendChild(opt);
+            }
+            [...new Set(valores.filter(Boolean))].forEach(valor => {
+                const opt = document.createElement('option');
+                opt.value = valor;
+                opt.textContent = valor;
+                select.appendChild(opt);
+            });
+            select.value = valorAtual || '';
+        }
+
+        function atualizarResumoCRM(resumo = {}) {
+            document.getElementById('crm-metric-open').textContent = Number(resumo.abertos || 0);
+            document.getElementById('crm-metric-overdue').textContent = Number(resumo.followupsAtrasados || 0);
+            document.getElementById('crm-metric-today').textContent = Number(resumo.acoesHoje || 0);
+            document.getElementById('crm-metric-proposals').textContent = Number(resumo.propostasAbertas || 0);
+            document.getElementById('crm-metric-contracts').textContent = Number(resumo.contratosMes || 0);
+            document.getElementById('crm-metric-revenue').textContent = moedaCRM(resumo.receitaAberta || 0);
+            const conversao = Number(resumo.taxaConversao || 0) * 100;
+            document.getElementById('crm-helper-conversion').textContent = `Conversão: ${conversao.toLocaleString('pt-BR',{maximumFractionDigits:1})}%`;
+            document.getElementById('crm-helper-no-action').textContent = `Sem próxima ação: ${Number(resumo.semProximaAcao || 0)}`;
+        }
+
+        function preencherFiltrosCRM() {
+            const leads = Array.isArray(window.crmLeadsData) ? window.crmLeadsData : [];
+            const options = window.crmOptions || {};
+            const statusAtual = document.getElementById('crm-filter-status')?.value || '';
+            const respAtual = document.getElementById('crm-filter-responsavel')?.value || '';
+            const areaAtual = document.getElementById('crm-filter-area')?.value || '';
+            preencherSelectCRM(document.getElementById('crm-filter-status'), options.status || CRM_STATUS_FALLBACK, 'Todos os status', statusAtual);
+            preencherSelectCRM(document.getElementById('crm-filter-responsavel'), leads.map(l => l.responsavel).filter(Boolean).sort(), 'Todos os responsáveis', respAtual);
+            preencherSelectCRM(document.getElementById('crm-filter-area'), leads.map(l => l.area).filter(Boolean).sort(), 'Todas as áreas', areaAtual);
+        }
+
+        function renderizarCRM(leads) {
+            const tbody = document.getElementById('crm-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            if (!leads?.length) {
+                tbody.innerHTML = '<tr><td colspan="9" class="crm-empty">Nenhum lead encontrado para os filtros atuais.</td></tr>';
+                return;
+            }
+
+            const hoje = hojeCRMJS();
+            leads.forEach(lead => {
+                const tr = document.createElement('tr');
+
+                const crmTd = document.createElement('td');
+                const numero = document.createElement('div');
+                numero.className = 'crm-number';
+                numero.textContent = lead.crmNumber || '—';
+                const ticket = document.createElement('div');
+                ticket.className = 'crm-ticket-ref';
+                ticket.textContent = lead.ticketNumber ? `Ticket ${lead.ticketNumber}` : 'Lead manual';
+                crmTd.append(numero, ticket);
+
+                const clienteTd = document.createElement('td');
+                const nome = document.createElement('div');
+                nome.className = 'crm-client-name';
+                nome.textContent = lead.cliente || 'Sem nome';
+                const contato = document.createElement('div');
+                contato.className = 'crm-client-contact';
+                contato.textContent = lead.telefone ? formatarWhatsAppCliente(lead.telefone) : (lead.email || 'Contato não informado');
+                clienteTd.append(nome, contato);
+
+                const areaTd = document.createElement('td');
+                areaTd.className = 'crm-area';
+                areaTd.textContent = lead.area || '—';
+
+                const statusTd = document.createElement('td');
+                const status = document.createElement('span');
+                status.className = `crm-status-pill ${statusClassCRM(lead.status)}`;
+                status.textContent = lead.status || 'Novo lead';
+                statusTd.appendChild(status);
+
+                const nextTd = document.createElement('td');
+                const next = document.createElement('div');
+                next.className = 'crm-next-action';
+                next.textContent = lead.proximaAcao || 'Sem próxima ação definida';
+                const nextDate = document.createElement('div');
+                const encerrado = CRM_STATUS_GANHOS_JS.has(lead.status) || lead.status === 'Encerrado - perdido';
+                const atrasado = !encerrado && lead.dataProximaAcao && lead.dataProximaAcao < hoje;
+                const hojeAcao = !encerrado && lead.dataProximaAcao === hoje;
+                nextDate.className = `crm-next-date${atrasado ? ' overdue' : (hojeAcao ? ' today' : '')}`;
+                nextDate.textContent = lead.dataProximaAcao ? `${atrasado ? 'Atrasado • ' : (hojeAcao ? 'Hoje • ' : '')}${formatarDataCRM(lead.dataProximaAcao)}` : 'Sem data';
+                nextTd.append(next, nextDate);
+
+                const respTd = document.createElement('td');
+                respTd.className = 'crm-responsavel';
+                respTd.textContent = lead.responsavel || '—';
+
+                const receitaTd = document.createElement('td');
+                receitaTd.className = 'crm-revenue';
+                receitaTd.textContent = lead.receitaTotalPrevista == null ? '—' : moedaCRM(lead.receitaTotalPrevista);
+
+                const updateTd = document.createElement('td');
+                updateTd.innerHTML = `<div class="ticket-time-main">${lead.updatedAt ? formatarDataTicket(lead.updatedAt) : '—'}</div><div class="ticket-time-sub">${lead.origem || 'Origem não informada'}</div>`;
+
+                const acaoTd = document.createElement('td');
+                acaoTd.className = 'text-end';
+                const actions = document.createElement('div');
+                actions.className = 'd-inline-flex gap-1';
+                if (lead.telefone) {
+                    const wa = document.createElement('a');
+                    wa.className = 'crm-edit-btn text-decoration-none';
+                    wa.href = `https://wa.me/${numeroWhatsAppLinkCRM(lead.telefone)}`;
+                    wa.target = '_blank';
+                    wa.rel = 'noopener noreferrer';
+                    wa.title = 'Abrir WhatsApp';
+                    wa.innerHTML = '<i class="bi bi-whatsapp"></i>';
+                    actions.appendChild(wa);
+                }
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'crm-edit-btn';
+                btn.innerHTML = '<i class="bi bi-pencil-square me-1"></i> Editar';
+                btn.onclick = () => abrirLeadCRM(lead.id);
+                actions.appendChild(btn);
+                acaoTd.appendChild(actions);
+
+                tr.append(crmTd, clienteTd, areaTd, statusTd, nextTd, respTd, receitaTd, updateTd, acaoTd);
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filtrarCRM() {
+            const termo = normalizarBuscaCRM(document.getElementById('crm-search-input')?.value || '');
+            const status = document.getElementById('crm-filter-status')?.value || '';
+            const responsavel = document.getElementById('crm-filter-responsavel')?.value || '';
+            const area = document.getElementById('crm-filter-area')?.value || '';
+            const acao = document.getElementById('crm-filter-acao')?.value || '';
+            const hoje = hojeCRMJS();
+            const limite7 = dataMaisDiasCRM(hoje, 7);
+            const leads = Array.isArray(window.crmLeadsData) ? window.crmLeadsData : [];
+
+            const filtrados = leads.filter(lead => {
+                if (status && lead.status !== status) return false;
+                if (responsavel && lead.responsavel !== responsavel) return false;
+                if (area && lead.area !== area) return false;
+                const encerrado = CRM_STATUS_GANHOS_JS.has(lead.status) || lead.status === 'Encerrado - perdido';
+                if (acao === 'atrasado' && (encerrado || !lead.dataProximaAcao || lead.dataProximaAcao >= hoje)) return false;
+                if (acao === 'hoje' && (encerrado || lead.dataProximaAcao !== hoje)) return false;
+                if (acao === '7dias' && (encerrado || !lead.dataProximaAcao || lead.dataProximaAcao <= hoje || lead.dataProximaAcao > limite7)) return false;
+                if (acao === 'semdada' && (encerrado || (lead.dataProximaAcao && lead.proximaAcao))) return false;
+                if (!termo) return true;
+                return [lead.crmNumber,lead.ticketNumber,lead.cliente,lead.telefone,lead.email,lead.area,lead.assuntoResumo,lead.status,lead.proximaAcao,lead.responsavel,lead.origem]
+                    .map(normalizarBuscaCRM).some(campo => campo.includes(termo));
+            });
+
+            filtrados.sort((a,b) => {
+                const aClosed = (CRM_STATUS_GANHOS_JS.has(a.status) || a.status === 'Encerrado - perdido') ? 1 : 0;
+                const bClosed = (CRM_STATUS_GANHOS_JS.has(b.status) || b.status === 'Encerrado - perdido') ? 1 : 0;
+                if (aClosed !== bClosed) return aClosed - bClosed;
+                const da = a.dataProximaAcao || '9999-12-31';
+                const db = b.dataProximaAcao || '9999-12-31';
+                if (da !== db) return da.localeCompare(db);
+                return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+            });
+            renderizarCRM(filtrados);
+        }
+
+        function limparFiltrosCRM() {
+            ['crm-search-input','crm-filter-status','crm-filter-responsavel','crm-filter-area','crm-filter-acao'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
+            filtrarCRM();
+        }
+
+        async function carregarCRM(forcar = false) {
+            if (window.crmLoading) return;
+            if (window.crmLoaded && !forcar) { filtrarCRM(); return; }
+            const status = document.getElementById('crm-status');
+            window.crmLoading = true;
+            if (status) { status.className='menu-save-status text-muted mb-2'; status.textContent='Carregando CRM...'; }
+            try {
+                const res = await fetch('/api/crm/leads', { cache:'no-store' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar o CRM.');
+                window.crmLeadsData = Array.isArray(data.leads) ? data.leads : [];
+                window.crmOptions = data.options || {};
+                window.crmLoaded = true;
+                atualizarResumoCRM(data.resumo || {});
+                preencherFiltrosCRM();
+                filtrarCRM();
+                if (status) status.textContent = '';
+            } catch (err) {
+                console.error(err);
+                if (status) { status.className='menu-save-status text-danger mb-2'; status.textContent=err.message || 'Erro ao carregar CRM.'; }
+            } finally { window.crmLoading = false; }
+        }
+
+        function valorInputNumero(id) {
+            const valor = document.getElementById(id)?.value;
+            if (valor === '' || valor == null) return null;
+            const numero = Number(valor);
+            return Number.isFinite(numero) ? numero : null;
+        }
+
+        function atualizarPreviewReceitaCRM() {
+            const modelo = document.getElementById('crm-modelo-cobranca')?.value || '';
+            const potencial = valorInputNumero('crm-valor-potencial') || 0;
+            const entrada = valorInputNumero('crm-entrada') || 0;
+            const parcelas = valorInputNumero('crm-parcelas') || 0;
+            const valorParcela = valorInputNumero('crm-valor-parcela') || 0;
+            const percentual = (valorInputNumero('crm-percentual-exito') || 0) / 100;
+            let contrato = null, exito = null;
+            if (modelo === 'Consulta') contrato = entrada;
+            else if (modelo === 'Fixo') contrato = potencial;
+            else if (modelo === 'Parcelado' || modelo === 'Misto') contrato = entrada + (parcelas * valorParcela);
+            if (modelo === 'Êxito' || modelo === 'Misto') exito = potencial * percentual;
+            const total = [contrato,exito].filter(v => v != null).reduce((s,v)=>s+v,0);
+            document.getElementById('crm-preview-receita').textContent = moedaCRM(total);
+        }
+
+        function atualizarCamposCondicionaisCRM() {
+            const perdido = document.getElementById('crm-status-lead')?.value === 'Encerrado - perdido';
+            document.getElementById('crm-motivo-perda-wrap')?.classList.toggle('hidden', !perdido);
+        }
+
+        function setValorCRM(id, valor) {
+            const el = document.getElementById(id); if (el) el.value = valor ?? '';
+        }
+
+        function abrirLeadCRM(id = null) {
+            const dialog = document.getElementById('crm-lead-dialog');
+            if (!dialog) return;
+            const lead = id ? (window.crmLeadsData || []).find(item => String(item.id) === String(id)) : null;
+            window.crmEditingId = lead?.id || null;
+
+            const statusOptions = window.crmOptions?.status || CRM_STATUS_FALLBACK;
+            const modelos = window.crmOptions?.modelosCobranca || CRM_MODELOS_FALLBACK;
+            const motivos = window.crmOptions?.motivosPerda || CRM_MOTIVOS_FALLBACK;
+            preencherSelectCRM(document.getElementById('crm-status-lead'), statusOptions, null, lead?.status || 'Novo lead');
+            preencherSelectCRM(document.getElementById('crm-modelo-cobranca'), modelos, 'Selecione...', lead?.modeloCobranca || '');
+            preencherSelectCRM(document.getElementById('crm-motivo-perda'), motivos, 'Selecione...', lead?.motivoPerda || '');
+
+            setValorCRM('crm-lead-id', lead?.id || '');
+            setValorCRM('crm-data-entrada', lead?.dataEntrada || hojeCRMJS());
+            setValorCRM('crm-origem', lead?.origem || '');
+            setValorCRM('crm-cliente', lead?.cliente || '');
+            setValorCRM('crm-telefone', lead?.telefone || '');
+            setValorCRM('crm-email', lead?.email || '');
+            setValorCRM('crm-cidade', lead?.cidadeUf || '');
+            setValorCRM('crm-area', lead?.area || '');
+            setValorCRM('crm-responsavel', lead?.responsavel || '');
+            setValorCRM('crm-assunto', lead?.assuntoResumo || '');
+            setValorCRM('crm-proxima-acao', lead?.proximaAcao || '');
+            setValorCRM('crm-data-proxima-acao', lead?.dataProximaAcao || '');
+            setValorCRM('crm-valor-potencial', lead?.valorPotencial ?? '');
+            setValorCRM('crm-entrada', lead?.entrada ?? '');
+            setValorCRM('crm-parcelas', lead?.parcelasQtd ?? '');
+            setValorCRM('crm-valor-parcela', lead?.valorParcela ?? '');
+            setValorCRM('crm-percentual-exito', lead?.percentualExito == null ? '' : Number(lead.percentualExito) * 100);
+            setValorCRM('crm-data-fechamento', lead?.dataFechamento || '');
+            setValorCRM('crm-pasta-drive', lead?.pastaDrive || '');
+            setValorCRM('crm-observacoes', lead?.observacoes || '');
+            document.getElementById('crm-dialog-title').textContent = lead ? `${lead.crmNumber || 'Lead'} • ${lead.cliente || ''}` : 'Novo lead';
+            document.getElementById('crm-dialog-subtitle').textContent = lead?.ticketNumber ? `Originado do ticket ${lead.ticketNumber}` : 'Cadastre somente o necessário agora; o restante pode ser atualizado durante o acompanhamento.';
+            document.getElementById('crm-form-status').textContent = '';
+            document.getElementById('crm-btn-delete').classList.toggle('hidden', !lead);
+            atualizarCamposCondicionaisCRM();
+            atualizarPreviewReceitaCRM();
+
+            if (!dialog.open) {
+                if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open','');
+            }
+            setTimeout(() => document.getElementById('crm-cliente')?.focus(), 30);
+        }
+
+        function fecharLeadCRM() {
+            const dialog = document.getElementById('crm-lead-dialog');
+            window.crmEditingId = null;
+            if (!dialog) return;
+            if (typeof dialog.close === 'function') dialog.close(); else dialog.removeAttribute('open');
+        }
+
+        function coletarLeadCRM() {
+            return {
+                dataEntrada: document.getElementById('crm-data-entrada').value,
+                origem: document.getElementById('crm-origem').value.trim(),
+                cliente: document.getElementById('crm-cliente').value.trim(),
+                telefone: document.getElementById('crm-telefone').value.trim(),
+                email: document.getElementById('crm-email').value.trim(),
+                cidadeUf: document.getElementById('crm-cidade').value.trim(),
+                area: document.getElementById('crm-area').value.trim(),
+                assuntoResumo: document.getElementById('crm-assunto').value.trim(),
+                valorPotencial: valorInputNumero('crm-valor-potencial'),
+                modeloCobranca: document.getElementById('crm-modelo-cobranca').value,
+                entrada: valorInputNumero('crm-entrada'),
+                parcelasQtd: valorInputNumero('crm-parcelas'),
+                valorParcela: valorInputNumero('crm-valor-parcela'),
+                percentualExito: valorInputNumero('crm-percentual-exito'),
+                status: document.getElementById('crm-status-lead').value,
+                proximaAcao: document.getElementById('crm-proxima-acao').value.trim(),
+                dataProximaAcao: document.getElementById('crm-data-proxima-acao').value,
+                responsavel: document.getElementById('crm-responsavel').value.trim(),
+                pastaDrive: document.getElementById('crm-pasta-drive').value.trim(),
+                observacoes: document.getElementById('crm-observacoes').value.trim(),
+                dataFechamento: document.getElementById('crm-data-fechamento').value,
+                motivoPerda: document.getElementById('crm-motivo-perda').value
+            };
+        }
+
+        async function salvarLeadCRM(event) {
+            event?.preventDefault();
+            const id = window.crmEditingId;
+            const dados = coletarLeadCRM();
+            const status = document.getElementById('crm-form-status');
+            const btn = document.getElementById('crm-btn-save');
+            if (!dados.cliente) { status.className='crm-form-status text-danger'; status.textContent='Informe o nome do cliente/lead.'; return; }
+            if (dados.status === 'Encerrado - perdido' && !dados.motivoPerda) {
+                status.className='crm-form-status text-danger';
+                status.textContent='Selecione o motivo da perda antes de encerrar o lead.';
+                return;
+            }
+            const convertidoOuEncerrado = CRM_STATUS_GANHOS_JS.has(dados.status) || dados.status === 'Encerrado - perdido';
+            if (!convertidoOuEncerrado && (!dados.proximaAcao || !dados.dataProximaAcao)) {
+                const continuar = confirm('Este lead ficará aberto sem próxima ação e/ou sem data. Deseja salvar mesmo assim?');
+                if (!continuar) return;
+            }
+            btn.disabled = true;
+            status.className='crm-form-status text-muted'; status.textContent='Salvando...';
+            try {
+                const res = await fetch(id ? `/api/crm/leads/${id}` : '/api/crm/leads', {
+                    method: id ? 'PUT' : 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(dados)
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível salvar o lead.');
+                window.crmLoaded = false;
+                window.activeTicketsLoaded = false;
+                fecharLeadCRM();
+                await carregarCRM(true);
+            } catch (err) {
+                console.error(err);
+                status.className='crm-form-status text-danger'; status.textContent=err.message || 'Erro ao salvar lead.';
+            } finally { btn.disabled = false; }
+        }
+
+        async function excluirLeadCRM() {
+            const id = window.crmEditingId;
+            if (!id || !confirm('Excluir este lead do CRM? Esta ação não exclui o ticket nem o cadastro do cliente.')) return;
+            const status = document.getElementById('crm-form-status');
+            try {
+                const res = await fetch(`/api/crm/leads/${id}`, { method:'DELETE' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível excluir o lead.');
+                window.crmLoaded = false;
+                window.activeTicketsLoaded = false;
+                fecharLeadCRM();
+                await carregarCRM(true);
+            } catch (err) {
+                console.error(err);
+                status.className='crm-form-status text-danger'; status.textContent=err.message || 'Erro ao excluir lead.';
+            }
+        }
+
+        async function adicionarTicketAoCRM(ticket, btn) {
+            if (!ticket?.ticketNumber || !btn) return;
+            const textoOriginal = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Adicionando...';
+            try {
+                const res = await fetch(`/api/crm/leads/from-ticket/${encodeURIComponent(ticket.ticketNumber)}`, { method:'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível adicionar o ticket ao CRM.');
+                ticket.crm = data.lead ? { id:data.lead.id, crmNumber:data.lead.crmNumber, status:data.lead.status } : ticket.crm;
+                window.crmLoaded = false;
+                window.activeTicketsLoaded = false;
+                fecharDetalheTicket();
+                switchTicketsSubtab('crm');
+                await carregarCRM(true);
+                if (data.lead?.id) abrirLeadCRM(data.lead.id);
+            } catch (err) {
+                console.error(err);
+                alert(err.message || 'Erro ao adicionar ao CRM.');
+                btn.innerHTML = textoOriginal;
+            } finally { btn.disabled = false; }
+        }
+
+        async function abrirCRMDoTicket(ticket) {
+            fecharDetalheTicket();
+            switchTicketsSubtab('crm');
+            await carregarCRM();
+            if (ticket?.crm?.id) abrirLeadCRM(ticket.crm.id);
+        }
 
         function formatarCPFCliente(cpf = '') {
             const numeros = String(cpf || '').replace(/\D/g, '').slice(0, 11);
