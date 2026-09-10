@@ -688,6 +688,90 @@
             box-shadow: 0 0 0 4px rgba(197,160,89,.12);
         }
 
+
+        /* Central de notificações em tempo real */
+        .topbar-actions { display:flex; align-items:center; gap:10px; }
+        .notification-center { position:relative; }
+        .notification-bell {
+            position:relative; width:42px; height:42px; display:inline-flex;
+            align-items:center; justify-content:center; color:var(--adv-blue);
+            background:rgba(255,255,255,.82); border:1px solid var(--border);
+            border-radius:12px; box-shadow:var(--shadow-sm); cursor:pointer;
+            transition:var(--transition);
+        }
+        .notification-bell:hover { background:#fff; transform:translateY(-1px); }
+        .notification-bell.has-unread { border-color:rgba(197,160,89,.62); }
+        .notification-badge, .nav-notification-badge {
+            min-width:19px; height:19px; padding:0 5px; display:inline-flex;
+            align-items:center; justify-content:center; color:#fff;
+            background:var(--danger-red); border:2px solid #fff; border-radius:999px;
+            font-size:.62rem; line-height:1; font-weight:800;
+        }
+        .notification-badge { position:absolute; top:-6px; right:-6px; }
+        .nav-notification-badge { margin-left:auto; border-color:var(--adv-blue-strong); }
+        .notification-popover {
+            position:absolute; top:calc(100% + 10px); right:0; z-index:1200;
+            width:min(390px, calc(100vw - 28px)); max-height:min(520px, calc(100vh - 110px));
+            display:flex; flex-direction:column; overflow:hidden; background:#fff;
+            border:1px solid var(--border); border-radius:16px;
+            box-shadow:0 24px 65px rgba(17,22,30,.22);
+        }
+        .notification-popover-header {
+            padding:14px 15px 12px; display:flex; align-items:center;
+            justify-content:space-between; gap:12px; border-bottom:1px solid var(--border);
+        }
+        .notification-popover-title { color:var(--adv-blue); font-size:.88rem; font-weight:800; }
+        .notification-mark-all { padding:4px 7px; color:#69727f; background:transparent; border:0; font-size:.70rem; font-weight:700; }
+        .notification-mark-all:hover { color:var(--adv-blue); }
+        .notification-list { overflow-y:auto; }
+        .notification-empty { padding:34px 20px; color:var(--text-muted); text-align:center; font-size:.82rem; }
+        .notification-item {
+            width:100%; padding:13px 14px; display:grid; grid-template-columns:36px minmax(0,1fr) auto;
+            gap:10px; align-items:flex-start; text-align:left; background:#fff; border:0;
+            border-bottom:1px solid #edf0f3; cursor:pointer;
+        }
+        .notification-item:hover { background:#fafbfc; }
+        .notification-item.unread { background:#fffdf8; }
+        .notification-item-icon {
+            width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center;
+            border-radius:10px; color:var(--adv-blue); background:#f1f3f6;
+        }
+        .notification-item.lead .notification-item-icon { color:#8a6108; background:#fff7e1; }
+        .notification-item-title { color:#303842; font-size:.80rem; font-weight:800; }
+        .notification-item-message { margin-top:2px; color:#626c78; font-size:.76rem; line-height:1.4; }
+        .notification-item-time { margin-top:4px; color:#929aa4; font-size:.67rem; }
+        .notification-unread-dot { width:7px; height:7px; margin-top:6px; border-radius:50%; background:var(--adv-gold); }
+        .notification-toast-stack {
+            position:fixed; top:92px; right:20px; z-index:1300;
+            width:min(370px, calc(100vw - 28px)); display:flex; flex-direction:column;
+            gap:10px; pointer-events:none;
+        }
+        .notification-toast {
+            width:100%; padding:14px 14px 13px; display:grid;
+            grid-template-columns:40px minmax(0,1fr) 26px; gap:10px; align-items:flex-start;
+            color:var(--text); background:rgba(255,255,255,.98); border:1px solid var(--border);
+            border-left:4px solid var(--adv-blue); border-radius:14px;
+            box-shadow:0 18px 48px rgba(17,22,30,.19); pointer-events:auto; cursor:pointer;
+            animation:notificationToastIn .22s ease both;
+        }
+        .notification-toast.lead { border-left-color:var(--adv-gold); }
+        .notification-toast-icon {
+            width:40px; height:40px; display:inline-flex; align-items:center; justify-content:center;
+            color:var(--adv-blue); background:#f1f3f6; border-radius:11px; font-size:1rem;
+        }
+        .notification-toast.lead .notification-toast-icon { color:#8a6108; background:#fff7e1; }
+        .notification-toast-title { color:var(--adv-blue); font-size:.86rem; font-weight:800; }
+        .notification-toast-message { margin-top:2px; color:#606976; font-size:.77rem; line-height:1.4; }
+        .notification-toast-action { margin-top:6px; color:#75602c; font-size:.69rem; font-weight:750; }
+        .notification-toast-close {
+            width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center;
+            color:#7d8590; background:transparent; border:0; border-radius:7px;
+        }
+        .notification-toast-close:hover { background:#f1f3f6; }
+        .notification-toast.is-leaving { animation:notificationToastOut .18s ease both; }
+        @keyframes notificationToastIn { from { opacity:0; transform:translateX(18px) translateY(-3px); } to { opacity:1; transform:none; } }
+        @keyframes notificationToastOut { to { opacity:0; transform:translateX(16px); } }
+
         .mobile-menu-btn {
             display: none;
             width: 42px;
@@ -1879,6 +1963,13 @@
             #business-days-container .form-check-label { width: 100%; }
         }
 
+        @media (max-width: 767.98px) {
+            .topbar-actions { gap:7px; }
+            .notification-bell { width:40px; height:40px; }
+            .notification-popover { position:fixed; top:72px; right:10px; width:calc(100vw - 20px); max-height:calc(100dvh - 86px); }
+            .notification-toast-stack { top:76px; right:10px; width:calc(100vw - 20px); }
+        }
+
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
                 animation-duration: .01ms !important;
@@ -1951,9 +2042,10 @@
                     <span class="nav-icon"><i class="bi bi-sliders2"></i></span>
                     <span>Opções de atendimento</span>
                 </div>
-                <div class="nav-link" onclick="switchTab('tab-tickets', this)">
+                <div class="nav-link" id="nav-tickets-link" onclick="switchTab('tab-tickets', this)">
                     <span class="nav-icon"><i class="bi bi-inboxes"></i></span>
                     <span>Tickets ativos</span>
+                    <span id="nav-notification-badge" class="nav-notification-badge hidden" aria-label="Notificações não lidas">0</span>
                 </div>
                 <div class="nav-link" onclick="switchTab('tab-clientes', this)">
                     <span class="nav-icon"><i class="bi bi-people"></i></span>
@@ -1984,9 +2076,26 @@
                         <strong class="topbar-title">Gestão do Chatbot</strong>
                     </div>
                 </div>
-                <div class="topbar-brand">
-                    <span class="dot"></span>
-                    Painel administrativo
+                <div class="topbar-actions">
+                    <div class="notification-center" id="notification-center">
+                        <button type="button" class="notification-bell" id="notification-bell" aria-label="Abrir notificações" aria-expanded="false" onclick="toggleNotificationPopover()">
+                            <i class="bi bi-bell"></i>
+                            <span id="notification-badge" class="notification-badge hidden">0</span>
+                        </button>
+                        <div id="notification-popover" class="notification-popover hidden" role="dialog" aria-label="Notificações recentes">
+                            <div class="notification-popover-header">
+                                <span class="notification-popover-title">Notificações</span>
+                                <button type="button" class="notification-mark-all" onclick="marcarTodasNotificacoesComoLidas(event)">Marcar como lidas</button>
+                            </div>
+                            <div id="notification-list" class="notification-list">
+                                <div class="notification-empty">Nenhuma notificação nova.</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="topbar-brand">
+                        <span class="dot"></span>
+                        Painel administrativo
+                    </div>
                 </div>
             </header>
 
@@ -2476,6 +2585,8 @@
         </div>
     </dialog>
 
+    <div id="notification-toast-stack" class="notification-toast-stack" aria-live="polite" aria-atomic="false"></div>
+
     <dialog id="ticket-detail-dialog">
         <div class="ticket-dialog-header">
             <div>
@@ -2570,6 +2681,180 @@
     <script>
         const socket = io();
 
+
+        // ---------------------------------------------------------------------
+        // NOTIFICAÇÕES DE NOVOS TICKETS / LEADS
+        // ---------------------------------------------------------------------
+        const PANEL_NOTIFICATIONS_STORAGE_KEY = 'aj_panel_notifications_v1';
+        const PANEL_NOTIFICATIONS_MAX = 50;
+        const PANEL_NOTIFICATION_TOAST_MS = 6500;
+        const PANEL_ORIGINAL_TITLE = document.title;
+
+        function carregarNotificacoesLocais() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(PANEL_NOTIFICATIONS_STORAGE_KEY) || '[]');
+                return Array.isArray(parsed) ? parsed.slice(0, PANEL_NOTIFICATIONS_MAX) : [];
+            } catch (_) { return []; }
+        }
+        window.panelNotifications = carregarNotificacoesLocais();
+
+        function salvarNotificacoesLocais() {
+            try { localStorage.setItem(PANEL_NOTIFICATIONS_STORAGE_KEY, JSON.stringify((window.panelNotifications || []).slice(0, PANEL_NOTIFICATIONS_MAX))); } catch (_) {}
+        }
+        function tempoRelativoNotificacao(valor) {
+            const data = new Date(Number(valor) || valor || Date.now());
+            if (Number.isNaN(data.getTime())) return 'agora';
+            const segundos = Math.max(0, Math.floor((Date.now() - data.getTime()) / 1000));
+            if (segundos < 45) return 'agora';
+            if (segundos < 3600) return `há ${Math.floor(segundos / 60)} min`;
+            if (segundos < 86400) return `há ${Math.floor(segundos / 3600)} h`;
+            return `há ${Math.floor(segundos / 86400)} d`;
+        }
+        function contadorNotificacoesNaoLidas() { return (window.panelNotifications || []).filter(item => !item.lida).length; }
+        function atualizarIndicadoresNotificacao() {
+            const total = contadorNotificacoesNaoLidas();
+            const texto = total > 99 ? '99+' : String(total);
+            [document.getElementById('notification-badge'), document.getElementById('nav-notification-badge')].forEach(el => {
+                if (!el) return;
+                el.textContent = texto;
+                el.classList.toggle('hidden', total === 0);
+            });
+            document.getElementById('notification-bell')?.classList.toggle('has-unread', total > 0);
+            document.title = total > 0 ? `(${total}) ${PANEL_ORIGINAL_TITLE}` : PANEL_ORIGINAL_TITLE;
+        }
+        function renderizarListaNotificacoes() {
+            const lista = document.getElementById('notification-list');
+            if (!lista) return;
+            lista.innerHTML = '';
+            const itens = (window.panelNotifications || []).slice(0, 20);
+            if (!itens.length) {
+                const empty = document.createElement('div');
+                empty.className = 'notification-empty';
+                empty.textContent = 'Nenhuma notificação nova.';
+                lista.appendChild(empty);
+                return;
+            }
+            itens.forEach(item => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `notification-item ${item.tipo === 'lead' ? 'lead' : 'ticket'}${item.lida ? '' : ' unread'}`;
+                btn.onclick = () => abrirDestinoNotificacao(item.id);
+                const icon = document.createElement('span');
+                icon.className = 'notification-item-icon';
+                icon.innerHTML = item.tipo === 'lead' ? '<i class="bi bi-person-plus"></i>' : '<i class="bi bi-inbox"></i>';
+                const copy = document.createElement('span');
+                const title = document.createElement('div');
+                title.className = 'notification-item-title';
+                title.textContent = item.titulo || (item.tipo === 'lead' ? 'Novo lead' : 'Novo ticket');
+                const message = document.createElement('div');
+                message.className = 'notification-item-message';
+                message.textContent = item.mensagem || item.crmNumber || item.ticketNumber || 'Novo atendimento recebido.';
+                const time = document.createElement('div');
+                time.className = 'notification-item-time';
+                time.textContent = tempoRelativoNotificacao(item.createdAt);
+                copy.append(title, message, time);
+                const dot = document.createElement('span');
+                if (!item.lida) dot.className = 'notification-unread-dot';
+                btn.append(icon, copy, dot);
+                lista.appendChild(btn);
+            });
+        }
+        function adicionarNotificacaoPainel(payload = {}) {
+            if (!payload?.id) return;
+            const atual = Array.isArray(window.panelNotifications) ? window.panelNotifications : [];
+            if (atual.some(item => String(item.id) === String(payload.id))) return;
+            const notificacao = {
+                id:String(payload.id), tipo:payload.tipo === 'lead' ? 'lead' : 'ticket',
+                titulo:String(payload.titulo || '').slice(0,100), mensagem:String(payload.mensagem || '').slice(0,300),
+                ticketNumber:payload.ticketNumber || null, leadId:payload.leadId || null, crmNumber:payload.crmNumber || null,
+                whatsapp:payload.whatsapp || null, createdAt:Number(payload.createdAt) || Date.now(), lida:false
+            };
+            window.panelNotifications = [notificacao, ...atual].slice(0, PANEL_NOTIFICATIONS_MAX);
+            salvarNotificacoesLocais(); atualizarIndicadoresNotificacao(); renderizarListaNotificacoes(); mostrarToastNotificacao(notificacao);
+        }
+        function marcarNotificacaoComoLida(id) {
+            const item = (window.panelNotifications || []).find(n => String(n.id) === String(id));
+            if (item) item.lida = true;
+            salvarNotificacoesLocais(); atualizarIndicadoresNotificacao(); renderizarListaNotificacoes();
+            return item || null;
+        }
+        function marcarTodasNotificacoesComoLidas(event) {
+            event?.stopPropagation();
+            (window.panelNotifications || []).forEach(item => { item.lida = true; });
+            salvarNotificacoesLocais(); atualizarIndicadoresNotificacao(); renderizarListaNotificacoes();
+        }
+        function toggleNotificationPopover(forceState) {
+            const popover = document.getElementById('notification-popover');
+            const bell = document.getElementById('notification-bell');
+            if (!popover) return;
+            const abrir = typeof forceState === 'boolean' ? forceState : popover.classList.contains('hidden');
+            popover.classList.toggle('hidden', !abrir);
+            bell?.setAttribute('aria-expanded', String(abrir));
+            if (abrir) renderizarListaNotificacoes();
+        }
+        document.addEventListener('click', event => {
+            const center = document.getElementById('notification-center');
+            if (center && !center.contains(event.target)) toggleNotificationPopover(false);
+        });
+        function removerToastNotificacao(elemento) {
+            if (!elemento || !elemento.isConnected) return;
+            elemento.classList.add('is-leaving');
+            setTimeout(() => elemento.remove(), 190);
+        }
+        function mostrarToastNotificacao(item) {
+            const stack = document.getElementById('notification-toast-stack');
+            if (!stack) return;
+            const toast = document.createElement('div');
+            toast.className = `notification-toast ${item.tipo === 'lead' ? 'lead' : 'ticket'}`;
+            toast.setAttribute('role','button'); toast.tabIndex = 0;
+            const icon = document.createElement('span');
+            icon.className = 'notification-toast-icon';
+            icon.innerHTML = item.tipo === 'lead' ? '<i class="bi bi-person-plus"></i>' : '<i class="bi bi-inbox"></i>';
+            const copy = document.createElement('div');
+            const title = document.createElement('div'); title.className='notification-toast-title'; title.textContent=item.titulo || (item.tipo === 'lead' ? 'Novo lead' : 'Novo ticket');
+            const message = document.createElement('div'); message.className='notification-toast-message'; message.textContent=item.mensagem || item.ticketNumber || 'Novo atendimento recebido.';
+            const action = document.createElement('div'); action.className='notification-toast-action'; action.textContent=item.tipo === 'lead' ? 'Clique para abrir no CRM' : 'Clique para abrir o ticket';
+            copy.append(title,message,action);
+            const close = document.createElement('button'); close.type='button'; close.className='notification-toast-close'; close.setAttribute('aria-label','Fechar notificação'); close.innerHTML='<i class="bi bi-x"></i>';
+            close.onclick = event => { event.stopPropagation(); removerToastNotificacao(toast); };
+            const abrir = () => { removerToastNotificacao(toast); abrirDestinoNotificacao(item.id); };
+            toast.onclick = abrir;
+            toast.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); abrir(); } };
+            toast.append(icon,copy,close); stack.prepend(toast);
+            while (stack.children.length > 3) stack.lastElementChild?.remove();
+            setTimeout(() => removerToastNotificacao(toast), PANEL_NOTIFICATION_TOAST_MS);
+        }
+        async function abrirDestinoNotificacao(id) {
+            const item = marcarNotificacaoComoLida(id);
+            if (!item) return;
+            toggleNotificationPopover(false);
+            const navTickets = document.getElementById('nav-tickets-link');
+            if (navTickets) switchTab('tab-tickets', navTickets);
+            if (item.tipo === 'lead') {
+                switchTicketsSubtab('crm');
+                await carregarCRM(true);
+                const lead = item.leadId
+                    ? (window.crmLeadsData || []).find(l => String(l.id) === String(item.leadId))
+                    : (window.crmLeadsData || []).find(l => String(l.ticketNumber || '') === String(item.ticketNumber || ''));
+                if (lead?.id) {
+                    abrirLeadCRM(lead.id);
+                    return;
+                }
+
+                // Se o CRM ainda não conseguiu materializar o lead, não deixamos o
+                // clique sem destino: abrimos o ticket que originou o contato.
+                switchTicketsSubtab('active');
+                await carregarTicketsAtivos(true);
+                if (item.ticketNumber) abrirDetalheTicket(item.ticketNumber);
+                return;
+            }
+            switchTicketsSubtab('active');
+            await carregarTicketsAtivos(true);
+            if (item.ticketNumber) abrirDetalheTicket(item.ticketNumber);
+        }
+        atualizarIndicadoresNotificacao();
+        renderizarListaNotificacoes();
+
         function toggleSidebar(forceState) {
             const sidebar = document.getElementById('app-sidebar');
             const overlay = document.getElementById('sidebar-overlay');
@@ -2623,6 +2908,24 @@
             if (mostrarCRM) carregarCRM();
             else carregarTicketsAtivos();
         }
+
+        socket.on('panel_notification', (payload = {}) => {
+            adicionarNotificacaoPainel(payload);
+            const tabTickets = document.getElementById('tab-tickets');
+            const activeView = document.getElementById('tickets-view-active');
+            const crmView = document.getElementById('tickets-view-crm');
+            window.activeTicketsLoaded = false;
+            if (payload.tipo === 'lead') window.crmLoaded = false;
+            if (tabTickets && !tabTickets.classList.contains('hidden')) {
+                if (payload.tipo === 'lead' && crmView && !crmView.classList.contains('hidden')) {
+                    clearTimeout(window.crmNotificationRefreshTimer);
+                    window.crmNotificationRefreshTimer = setTimeout(() => carregarCRM(true), 250);
+                } else if (activeView && !activeView.classList.contains('hidden')) {
+                    clearTimeout(window.ticketNotificationRefreshTimer);
+                    window.ticketNotificationRefreshTimer = setTimeout(() => carregarTicketsAtivos(true), 250);
+                }
+            }
+        });
 
         socket.on('qr', (qr) => {
             document.getElementById('status-container').classList.add('hidden');

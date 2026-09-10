@@ -831,6 +831,44 @@ const processing = new Set();
 
 let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl;
 
+
+// -----------------------------------------------------------------------------
+// NOTIFICAÇÕES EM TEMPO REAL DO PAINEL
+// -----------------------------------------------------------------------------
+// Evento leve: envia apenas metadados para o painel conectado, sem conteúdo de
+// documentos ou mensagens completas.
+function emitirNotificacaoPainel({
+    tipo = 'ticket',
+    titulo = '',
+    mensagem = '',
+    ticketNumber = null,
+    leadId = null,
+    crmNumber = null,
+    whatsapp = null,
+    createdAt = Date.now()
+} = {}) {
+    const tipoSeguro = tipo === 'lead' ? 'lead' : 'ticket';
+    const ticketSeguro = ticketNumber ? String(ticketNumber).slice(0, 80) : null;
+    const leadSeguro = leadId ? String(leadId).slice(0, 120) : null;
+    const crmSeguro = crmNumber ? String(crmNumber).slice(0, 80) : null;
+    const whatsappSeguro = whatsapp ? String(whatsapp).replace(/\D/g, '').slice(0, 20) : null;
+    const id = tipoSeguro === 'lead'
+        ? `lead:${leadSeguro || crmSeguro || ticketSeguro || createdAt}`
+        : `ticket:${ticketSeguro || createdAt}`;
+
+    io.emit('panel_notification', {
+        id,
+        tipo: tipoSeguro,
+        titulo: String(titulo || (tipoSeguro === 'lead' ? 'Novo lead' : 'Novo ticket')).slice(0, 100),
+        mensagem: String(mensagem || '').slice(0, 300),
+        ticketNumber: ticketSeguro,
+        leadId: leadSeguro,
+        crmNumber: crmSeguro,
+        whatsapp: whatsappSeguro,
+        createdAt: Number(createdAt) || Date.now()
+    });
+}
+
 async function sendBotMsg(jid, content) {
     try {
         const sent = await sock.sendMessage(jid, content);
@@ -2259,7 +2297,7 @@ async function fecharTicketAnterior(ticket, status = 'encerrado_timeout') {
     await ticketsColl.deleteOne({ _id: ticket._id });
 }
 
-async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, paused = false }) {
+async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, paused = false, notificarPainel = false }) {
     const { seq, ticketNumber } = await gerarNumeroTicket();
     const agora = Date.now();
     const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
@@ -2308,9 +2346,11 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
 
     // LEADS DE ANÚNCIO entram automaticamente no CRM no mesmo instante em que
     // o ticket é criado. A falha do CRM nunca impede a abertura do atendimento.
+    // O resultado é reaproveitado pela notificação para abrir o lead diretamente.
+    let resultadoCRMAutomatico = null;
     if (ticket.origem === 'lead_anuncio') {
         try {
-            await sincronizarLeadCRMDoTicket(ticket);
+            resultadoCRMAutomatico = await sincronizarLeadCRMDoTicket(ticket);
         } catch (err) {
             console.error(`[CRM] Ticket ${ticket.ticketNumber} foi criado, mas não foi possível sincronizar o lead automaticamente:`, err?.message || err);
         }
@@ -2333,6 +2373,41 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
                 }
             }
         );
+    }
+
+    // Tickets iniciados pelo próprio escritório não geram alerta. Este parâmetro
+    // só é ativado nas mensagens recebidas do cliente. Para leads de anúncio,
+    // mostramos apenas "Novo lead" para evitar duas notificações do mesmo contato.
+    if (notificarPainel) {
+        const whatsapp = contato.numeroPrincipal || ticket.numeroReal || null;
+        const nomeExibicao = ticket.clienteNome || cliente?.nomeCompleto || null;
+
+        if (ticket.origem === 'lead_anuncio') {
+            const lead = resultadoCRMAutomatico?.lead || null;
+            emitirNotificacaoPainel({
+                tipo: 'lead',
+                titulo: 'Novo lead',
+                mensagem: nomeExibicao
+                    ? `${nomeExibicao} iniciou um atendimento vindo de anúncio.`
+                    : `Novo contato de anúncio no ticket ${ticket.ticketNumber}.`,
+                ticketNumber: ticket.ticketNumber,
+                leadId: lead?._id ? String(lead._id) : null,
+                crmNumber: lead?.crmNumber || null,
+                whatsapp,
+                createdAt: ticket.createdAt
+            });
+        } else {
+            emitirNotificacaoPainel({
+                tipo: 'ticket',
+                titulo: 'Novo ticket',
+                mensagem: nomeExibicao
+                    ? `${nomeExibicao} iniciou o ticket ${ticket.ticketNumber}.`
+                    : `Novo atendimento recebido no ticket ${ticket.ticketNumber}.`,
+                ticketNumber: ticket.ticketNumber,
+                whatsapp,
+                createdAt: ticket.createdAt
+            });
+        }
     }
 
     return ticket;
@@ -2688,7 +2763,8 @@ sock.ev.on('messages.upsert', async m => {
                     rawJid,
                     textoInicial: texto,
                     cliente,
-                    paused: false
+                    paused: false,
+                    notificarPainel: true
                 });
             }
 
@@ -2765,7 +2841,8 @@ sock.ev.on('messages.upsert', async m => {
                 rawJid,
                 textoInicial: texto,
                 cliente,
-                paused: false
+                paused: false,
+                notificarPainel: true
             });
 
             dispararAnaliseArquivo(ticket);
