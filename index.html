@@ -1320,7 +1320,7 @@
         .tickets-panel-card { padding: 22px !important; }
         .tickets-toolbar {
             display: grid;
-            grid-template-columns: minmax(240px, 1.4fr) minmax(190px, .7fr) minmax(190px, .7fr) auto;
+            grid-template-columns: minmax(240px, 1.35fr) repeat(3, minmax(170px, .65fr)) auto;
             gap: 10px;
             align-items: center;
             margin-bottom: 16px;
@@ -1372,6 +1372,34 @@
             vertical-align: middle;
         }
         .tickets-table tbody tr:hover { background: #fbfcfd; }
+        .tickets-table tbody tr.ticket-row-assigned > td {
+            background: #f6f8fb;
+        }
+        .tickets-table tbody tr.ticket-row-assigned:hover > td {
+            background: #f1f4f8;
+        }
+        .tickets-table tbody tr.ticket-row-mine > td {
+            background: #f2f8f4;
+        }
+        .tickets-table tbody tr.ticket-row-mine:hover > td {
+            background: #ebf5ef;
+        }
+        .tickets-table tbody tr.ticket-row-assigned > td:first-child {
+            box-shadow: inset 4px 0 0 #8ca2b8;
+        }
+        .tickets-table tbody tr.ticket-row-mine > td:first-child {
+            box-shadow: inset 4px 0 0 var(--adv-gold);
+        }
+        .ticket-owner-line {
+            margin-top: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: #66717e;
+            font-size: .70rem;
+            font-weight: 720;
+        }
+        .ticket-owner-line.mine { color: #49705a; }
         .ticket-number {
             color: var(--adv-blue);
             font-weight: 780;
@@ -2139,7 +2167,12 @@
 
         .ticket-actions-inline { display:flex; justify-content:flex-end; gap:7px; }
         .ticket-chat-btn { min-height:36px; padding:7px 10px; color:#fff; background:var(--adv-blue); border:1px solid var(--adv-blue); border-radius:9px; font-size:.78rem; font-weight:760; white-space:nowrap; }
-        .ticket-chat-btn:hover { background:var(--adv-blue-strong); }
+        .ticket-chat-btn:hover:not(:disabled) { background:var(--adv-blue-strong); }
+        .ticket-chat-btn.is-mine { color:#315f45; background:#edf7f1; border-color:#cfe8d8; }
+        .ticket-chat-btn.is-mine:hover:not(:disabled) { color:#244d36; background:#e4f2e9; }
+        .ticket-chat-btn.is-other { color:#4f5865; background:#fff; border-color:#d9dfe5; }
+        .ticket-chat-btn.is-other:hover:not(:disabled) { color:var(--adv-blue); background:#f6f7f9; border-color:#c7ced6; }
+        .ticket-chat-btn:disabled { color:#7d8792; background:#f2f4f6; border-color:#dfe4e9; cursor:not-allowed; opacity:1; }
 
         /* Chat do ticket */
         #ticket-chat-dialog { width:min(920px, calc(100vw - 24px)); height:min(88vh, 900px); padding:0; overflow:hidden; color:var(--text); background:#fff; border:1px solid var(--border); border-radius:20px; box-shadow:0 30px 90px rgba(17,22,30,.30); }
@@ -2493,6 +2526,11 @@
                         <select id="tickets-filter-area" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar área">
                             <option value="">Todas as áreas</option>
                         </select>
+                        <select id="tickets-filter-owner" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar responsável">
+                            <option value="">Todos os responsáveis</option>
+                            <option value="mine">Meus atendimentos</option>
+                            <option value="unassigned">Não atribuídos</option>
+                        </select>
                         <button type="button" class="btn btn-outline-secondary" onclick="limparFiltrosTickets()"><i class="bi bi-x-circle me-1"></i> Limpar</button>
                     </div>
 
@@ -2820,7 +2858,7 @@
                 </div>
                 <button type="button" class="ticket-chat-close" onclick="fecharChatTicket()" aria-label="Fechar chat"><i class="bi bi-x-lg"></i></button>
             </div>
-            <div class="ticket-chat-storage" id="ticket-chat-storage">Histórico operacional leve: arquivos não são armazenados no MongoDB.</div>
+            <div class="ticket-chat-storage" id="ticket-chat-storage">Histórico operacional leve</div>
             <div class="ticket-chat-history" id="ticket-chat-history">
                 <div class="chat-empty">Carregando conversa...</div>
             </div>
@@ -3275,14 +3313,50 @@
             }
         });
 
-        socket.on('ticket_activity_updated', ({ ticketNumber } = {}) => {
-            window.activeTicketsLoaded = false;
-            const tab = document.getElementById('tab-tickets');
-            const activeView = document.getElementById('tickets-view-active');
-            if (tab && !tab.classList.contains('hidden') && activeView && !activeView.classList.contains('hidden')) {
-                clearTimeout(window.ticketActivityRefreshTimer);
-                window.ticketActivityRefreshTimer = setTimeout(() => carregarTicketsAtivos(true), 450);
+        socket.on('ticket_claimed', (payload = {}) => {
+            const atualizado = aplicarAtribuicaoTicketLocal(payload);
+            if (atualizado) {
+                recalcularResumoTicketsLocal();
+                filtrarTicketsAtivos();
+            } else {
+                window.activeTicketsLoaded = false;
             }
+
+            // Se outro advogado acabou de assumir o ticket que estava aberto em detalhes,
+            // atualizamos o detalhe sem recarregar toda a lista.
+            if (window.activeTicketDialogNumber && String(window.activeTicketDialogNumber) === String(payload.ticketNumber || '')) {
+                abrirDetalheTicket(payload.ticketNumber);
+            }
+        });
+
+        socket.on('ticket_activity_updated', (payload = {}) => {
+            const ticketNumber = String(payload.ticketNumber || '');
+            const ticket = (window.activeTicketsData || []).find(item => String(item.ticketNumber || '') === ticketNumber);
+
+            if (!ticket) {
+                window.activeTicketsLoaded = false;
+                return;
+            }
+
+            // Atualização local evita uma consulta completa ao MongoDB para cada mensagem
+            // recebida/enviada enquanto o advogado está conversando no chat.
+            if (payload.lastActivity) {
+                ticket.lastActivity = Number(payload.lastActivity);
+                ticket.idadeUltimaAtividadeMs = 0;
+            }
+            if (payload.status === 'em_atendimento_humano') {
+                ticket.status = 'em_atendimento_humano';
+                ticket.statusLabel = 'Em atendimento humano';
+                ticket.pendenciaTipo = 'atendimento';
+                ticket.pendenciaLabel = 'Em atendimento';
+                ticket.pendenciaOrdem = 2;
+                ticket.pendenteHaMaisDe2h = false;
+            }
+            if (payload.advogadoResponsavelId) ticket.advogadoResponsavelId = payload.advogadoResponsavelId;
+            if (payload.advogadoResponsavelNome) ticket.advogadoResponsavelNome = payload.advogadoResponsavelNome;
+
+            recalcularResumoTicketsLocal();
+            filtrarTicketsAtivos();
         });
 
         socket.on('panel_users_updated', () => {
@@ -4280,7 +4354,7 @@ function renderizarLista(itens) {
             }
         }
 
-        const TICKETS_REFRESH_INTERVAL_MS = 30 * 1000;
+        const TICKETS_REFRESH_INTERVAL_MS = 60 * 1000;
 
         function normalizarBuscaTicket(valor = '') {
             return String(valor || '')
@@ -4342,6 +4416,50 @@ function renderizarLista(itens) {
             document.getElementById('tickets-metric-alert').textContent = Number(resumo.pendentesMaisDe2h || 0);
         }
 
+
+        function idUsuarioPainelAtual() {
+            return String(window.panelSessionUser?.id || '').trim();
+        }
+
+        function ticketEhMeuAtendimento(ticket = {}) {
+            const meuId = idUsuarioPainelAtual();
+            return !!meuId && String(ticket.advogadoResponsavelId || '').trim() === meuId;
+        }
+
+        function ticketTemResponsavel(ticket = {}) {
+            return !!String(ticket.advogadoResponsavelId || '').trim();
+        }
+
+        function recalcularResumoTicketsLocal() {
+            const itens = Array.isArray(window.activeTicketsData) ? window.activeTicketsData : [];
+            atualizarResumoTickets({
+                total: itens.length,
+                pendentesEquipe: itens.filter(item => item.pendenciaTipo === 'advogado').length,
+                emAtendimento: itens.filter(item => item.pendenciaTipo === 'atendimento').length,
+                aguardandoCliente: itens.filter(item => item.pendenciaTipo === 'cliente').length,
+                pendentesMaisDe2h: itens.filter(item => item.pendenteHaMaisDe2h).length
+            });
+        }
+
+        function aplicarAtribuicaoTicketLocal(payload = {}) {
+            const numero = String(payload.ticketNumber || '').trim();
+            if (!numero || !Array.isArray(window.activeTicketsData)) return null;
+            const ticket = window.activeTicketsData.find(item => String(item.ticketNumber || '') === numero);
+            if (!ticket) return null;
+
+            ticket.status = payload.status || 'em_atendimento_humano';
+            ticket.statusLabel = payload.statusLabel || 'Em atendimento humano';
+            ticket.pendenciaTipo = payload.pendenciaTipo || 'atendimento';
+            ticket.pendenciaLabel = payload.pendenciaLabel || 'Em atendimento';
+            ticket.pendenciaOrdem = 2;
+            ticket.pendenteHaMaisDe2h = false;
+            ticket.paused = true;
+            ticket.advogadoResponsavelId = payload.advogadoResponsavelId || ticket.advogadoResponsavelId || null;
+            ticket.advogadoResponsavelNome = payload.advogadoResponsavelNome || ticket.advogadoResponsavelNome || null;
+            ticket.atendimentoAssumidoEm = payload.atendimentoAssumidoEm || ticket.atendimentoAssumidoEm || Date.now();
+            return ticket;
+        }
+
         function preencherFiltroAreasTickets(tickets = []) {
             const select = document.getElementById('tickets-filter-area');
             if (!select) return;
@@ -4393,6 +4511,12 @@ function renderizarLista(itens) {
 
             tickets.forEach(ticket => {
                 const tr = document.createElement('tr');
+                const possuiResponsavel = ticketTemResponsavel(ticket);
+                const ehMeuAtendimento = ticketEhMeuAtendimento(ticket);
+                if (possuiResponsavel || ticket.pendenciaTipo === 'atendimento') tr.classList.add('ticket-row-assigned');
+                if (ehMeuAtendimento) tr.classList.add('ticket-row-mine');
+                tr.dataset.ticketNumber = ticket.ticketNumber || '';
+                tr.dataset.ownerId = ticket.advogadoResponsavelId || '';
 
                 const numeroTd = document.createElement('td');
                 const numero = document.createElement('div');
@@ -4430,6 +4554,18 @@ function renderizarLista(itens) {
                 etapa.className = 'ticket-stage';
                 etapa.textContent = ticket.statusLabel || ticket.status || '—';
                 situacaoTd.append(pill, etapa);
+                if (possuiResponsavel) {
+                    const owner = document.createElement('div');
+                    owner.className = `ticket-owner-line${ehMeuAtendimento ? ' mine' : ''}`;
+                    const ownerIcon = document.createElement('i');
+                    ownerIcon.className = 'bi bi-person-check';
+                    const ownerText = document.createElement('span');
+                    ownerText.textContent = ehMeuAtendimento
+                        ? 'Meu atendimento'
+                        : (ticket.advogadoResponsavelNome || 'Advogado responsável');
+                    owner.append(ownerIcon, ownerText);
+                    situacaoTd.appendChild(owner);
+                }
 
                 const triagemTd = document.createElement('td');
                 const progress = document.createElement('div');
@@ -4483,8 +4619,21 @@ function renderizarLista(itens) {
                     const chatBtn = document.createElement('button');
                     chatBtn.type = 'button';
                     chatBtn.className = 'ticket-chat-btn';
-                    chatBtn.innerHTML = '<i class="bi bi-chat-dots me-1"></i> Atender';
-                    chatBtn.onclick = () => abrirChatTicket(ticket.ticketNumber);
+
+                    if (!possuiResponsavel) {
+                        chatBtn.innerHTML = '<i class="bi bi-chat-dots me-1"></i> Atender';
+                        chatBtn.title = 'Assumir este atendimento';
+                    } else if (ehMeuAtendimento) {
+                        chatBtn.classList.add('is-mine');
+                        chatBtn.innerHTML = '<i class="bi bi-chat-dots me-1"></i> Abrir chat';
+                        chatBtn.title = 'Continuar meu atendimento';
+                    } else {
+                        chatBtn.classList.add('is-other');
+                        chatBtn.innerHTML = '<i class="bi bi-chat-dots me-1"></i> Abrir chat';
+                        chatBtn.title = `Responsável atribuído: ${ticket.advogadoResponsavelNome || 'outro advogado'}. O chat permanece disponível para a equipe.`;
+                    }
+                    chatBtn.onclick = () => abrirChatTicket(ticket.ticketNumber, chatBtn);
+
                     actionsWrap.appendChild(chatBtn);
                 }
                 const btn = document.createElement('button');
@@ -4504,12 +4653,19 @@ function renderizarLista(itens) {
             const termo = normalizarBuscaTicket(document.getElementById('tickets-search-input')?.value || '');
             const status = document.getElementById('tickets-filter-status')?.value || '';
             const area = document.getElementById('tickets-filter-area')?.value || '';
+            const ownerFilter = document.getElementById('tickets-filter-owner')?.value || '';
+            const meuId = idUsuarioPainelAtual();
             const apenasNumeros = termo.replace(/\D/g, '');
             const tickets = Array.isArray(window.activeTicketsData) ? window.activeTicketsData : [];
 
             const filtrados = tickets.filter(ticket => {
                 if (status && ticket.pendenciaTipo !== status) return false;
                 if (area && String(ticket.area || '') !== area) return false;
+
+                const responsavelId = String(ticket.advogadoResponsavelId || '').trim();
+                if (ownerFilter === 'mine' && (!meuId || responsavelId !== meuId)) return false;
+                if (ownerFilter === 'unassigned' && responsavelId) return false;
+
                 if (!termo) return true;
 
                 const camposTexto = [
@@ -4519,7 +4675,8 @@ function renderizarLista(itens) {
                     ticket.menuOptionTitle,
                     ticket.statusLabel,
                     ticket.pendenciaLabel,
-                    ticket.origem
+                    ticket.origem,
+                    ticket.advogadoResponsavelNome
                 ].map(normalizarBuscaTicket);
 
                 const numeros = [ticket.cpf, ticket.whatsapp]
@@ -4537,9 +4694,11 @@ function renderizarLista(itens) {
             const busca = document.getElementById('tickets-search-input');
             const status = document.getElementById('tickets-filter-status');
             const area = document.getElementById('tickets-filter-area');
+            const owner = document.getElementById('tickets-filter-owner');
             if (busca) busca.value = '';
             if (status) status.value = '';
             if (area) area.value = '';
+            if (owner) owner.value = '';
             filtrarTicketsAtivos();
         }
 
@@ -4571,11 +4730,6 @@ function renderizarLista(itens) {
                 atualizarResumoTickets(data.resumo || {});
                 preencherFiltroAreasTickets(window.activeTicketsData);
                 filtrarTicketsAtivos();
-
-                const dialogAberto = document.getElementById('ticket-detail-dialog');
-                if (dialogAberto?.open && window.activeTicketDialogNumber) {
-                    abrirDetalheTicket(window.activeTicketDialogNumber);
-                }
 
                 if (status) status.textContent = '';
                 if (refresh) refresh.textContent = `Atualizado ${new Date(window.activeTicketsLastUpdate).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
@@ -4678,10 +4832,10 @@ function renderizarLista(itens) {
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.erro || 'Não foi possível gerar uma nova leitura.');
 
-                // Atualiza imediatamente para mostrar "Na fila"; o socket atualizará de novo
-                // quando a nova análise for concluída ou falhar.
+                // Atualiza apenas o detalhe atual; a listagem leve será renovada pelo
+                // próximo evento/intervalo, evitando consulta pesada desnecessária.
                 window.activeTicketsLoaded = false;
-                await carregarTicketsAtivos(true);
+                await abrirDetalheTicket(ticketNumber);
             } catch (err) {
                 console.error(err);
                 if (button) {
@@ -4827,8 +4981,37 @@ function renderizarLista(itens) {
             body.appendChild(section);
         }
 
-        function abrirDetalheTicket(ticketNumber) {
-            const ticket = (window.activeTicketsData || []).find(item => String(item.ticketNumber) === String(ticketNumber));
+        async function abrirDetalheTicket(ticketNumber) {
+            const dialog = document.getElementById('ticket-detail-dialog');
+            const body = document.getElementById('ticket-detail-body');
+            if (!dialog || !body || !ticketNumber) return;
+
+            window.activeTicketDialogNumber = String(ticketNumber);
+            document.getElementById('ticket-detail-title').textContent = String(ticketNumber);
+            document.getElementById('ticket-detail-subtitle').textContent = 'Carregando detalhes...';
+            body.innerHTML = '<div class="tickets-empty">Carregando informações do ticket...</div>';
+
+            if (!dialog.open) {
+                if (typeof dialog.showModal === 'function') dialog.showModal();
+                else dialog.setAttribute('open', '');
+            }
+
+            try {
+                const res = await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/detail`, { cache: 'no-store' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar os detalhes do ticket.');
+                renderizarDetalheTicket(data.ticket);
+            } catch (err) {
+                document.getElementById('ticket-detail-subtitle').textContent = 'Falha ao carregar';
+                body.innerHTML = '';
+                const erro = document.createElement('div');
+                erro.className = 'ticket-doc-error';
+                erro.textContent = err.message || 'Não foi possível carregar os detalhes do ticket.';
+                body.appendChild(erro);
+            }
+        }
+
+        function renderizarDetalheTicket(ticket) {
             const dialog = document.getElementById('ticket-detail-dialog');
             const body = document.getElementById('ticket-detail-body');
             if (!ticket || !dialog || !body) return;
@@ -4923,8 +5106,23 @@ function renderizarLista(itens) {
                 const chatBtn = document.createElement('button');
                 chatBtn.type = 'button';
                 chatBtn.className = 'ticket-chat-btn';
-                chatBtn.innerHTML = '<i class="bi bi-chat-dots"></i> Atender pelo painel';
-                chatBtn.onclick = () => { fecharDetalheTicket(); abrirChatTicket(ticket.ticketNumber); };
+                const possuiResponsavel = ticketTemResponsavel(ticket);
+                const ehMeuAtendimento = ticketEhMeuAtendimento(ticket);
+
+                if (!possuiResponsavel) {
+                    chatBtn.innerHTML = '<i class="bi bi-chat-dots"></i> Atender pelo painel';
+                    chatBtn.title = 'Assumir este atendimento';
+                } else if (ehMeuAtendimento) {
+                    chatBtn.classList.add('is-mine');
+                    chatBtn.innerHTML = '<i class="bi bi-chat-dots"></i> Abrir meu atendimento';
+                    chatBtn.title = 'Continuar meu atendimento';
+                } else {
+                    chatBtn.classList.add('is-other');
+                    chatBtn.innerHTML = '<i class="bi bi-chat-dots"></i> Abrir chat';
+                    chatBtn.title = `Responsável atribuído: ${ticket.advogadoResponsavelNome || 'outro advogado'}. O chat permanece disponível para a equipe.`;
+                }
+                chatBtn.onclick = () => { fecharDetalheTicket(); abrirChatTicket(ticket.ticketNumber, chatBtn); };
+
                 actions.appendChild(chatBtn);
             }
             if (ticket.whatsapp) {
@@ -5879,25 +6077,86 @@ function renderizarLista(itens) {
             if(preserveScroll) history.scrollTop=Math.max(0, history.scrollHeight-oldHeight);
             else history.scrollTop=history.scrollHeight;
         }
-        async function abrirChatTicket(ticketNumber) {
-            if(!temPermissaoPainel('chat')) return;
-            const dialog=document.getElementById('ticket-chat-dialog');
-            const history=document.getElementById('ticket-chat-history');
-            window.activeChatTicketNumber=String(ticketNumber||''); window.activeChatMessages=[]; window.activeChatOldest=null;
-            if(history) history.innerHTML='<div class="chat-empty">Carregando conversa...</div>';
-            if(!dialog.open) { if(typeof dialog.showModal==='function') dialog.showModal(); else dialog.setAttribute('open',''); }
+        async function abrirChatTicket(ticketNumber, triggerButton = null) {
+            if(!temPermissaoPainel('chat') || !ticketNumber) return;
+
+            const meuId = idUsuarioPainelAtual();
+            const local = (window.activeTicketsData || []).find(item => String(item.ticketNumber) === String(ticketNumber));
+            const responsavelLocal = String(local?.advogadoResponsavelId || '').trim();
+
+            const originalButtonHtml = triggerButton?.innerHTML || '';
+            if (triggerButton) {
+                triggerButton.disabled = true;
+                triggerButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> Abrindo...';
+            }
+
             try {
+                // Se o ticket ainda estiver sem responsável, o primeiro clique em Atender
+                // faz a atribuição atômica. Se já houver responsável, o endpoint apenas
+                // devolve a atribuição existente e o chat continua acessível normalmente.
+                const claimRes = await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/claim`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const claimData = await claimRes.json().catch(() => ({}));
+                if (!claimRes.ok) {
+                    const erro = new Error(claimData.erro || 'Não foi possível abrir este atendimento.');
+                    erro.status = claimRes.status;
+                    throw erro;
+                }
+
+                aplicarAtribuicaoTicketLocal({
+                    ticketNumber,
+                    status: claimData.ticket?.status || 'em_atendimento_humano',
+                    statusLabel: 'Em atendimento humano',
+                    pendenciaTipo: 'atendimento',
+                    pendenciaLabel: 'Em atendimento',
+                    advogadoResponsavelId: claimData.responsavel?.id || responsavelLocal || meuId,
+                    advogadoResponsavelNome: claimData.responsavel?.nome || local?.advogadoResponsavelNome || window.panelSessionUser?.nome || null,
+                    atendimentoAssumidoEm: claimData.ticket?.atendimentoAssumidoEm || local?.atendimentoAssumidoEm || Date.now()
+                });
+                recalcularResumoTicketsLocal();
+                filtrarTicketsAtivos();
+
+                const dialog=document.getElementById('ticket-chat-dialog');
+                const history=document.getElementById('ticket-chat-history');
+                window.activeChatTicketNumber=String(ticketNumber||''); window.activeChatMessages=[]; window.activeChatOldest=null;
+                if(history) history.innerHTML='<div class="chat-empty">Carregando conversa...</div>';
+                if(!dialog.open) { if(typeof dialog.showModal==='function') dialog.showModal(); else dialog.setAttribute('open',''); }
+
                 const res=await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/chat?limit=60`, {cache:'no-store'});
                 const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.erro||'Não foi possível carregar o chat.');
                 document.getElementById('ticket-chat-title').textContent=`${data.ticket?.ticketNumber||ticketNumber} · ${data.ticket?.clienteNome||'Cliente não cadastrado'}`;
                 document.getElementById('ticket-chat-subtitle').textContent=[data.ticket?.area, data.ticket?.whatsapp ? formatarWhatsAppCliente(data.ticket.whatsapp) : null].filter(Boolean).join(' • ');
-                document.getElementById('ticket-chat-current-user').textContent=`Atendimento por: ${window.panelSessionUser?.assinatura||window.panelSessionUser?.nome||'usuário conectado'}`;
-                document.getElementById('ticket-chat-storage').textContent=`Histórico leve: até ${data.maxMessagesPerTicket||500} mensagens por ticket / ${data.retentionDays||60} dias. Arquivos não são salvos no MongoDB.`;
+                const responsavelNomeChat = data.ticket?.advogadoResponsavelNome || claimData.responsavel?.nome || null;
+                const usuarioAtualChat = window.panelSessionUser?.assinatura || window.panelSessionUser?.nome || 'usuário conectado';
+                document.getElementById('ticket-chat-current-user').textContent = responsavelNomeChat
+                    ? `Responsável: ${responsavelNomeChat} • Você: ${usuarioAtualChat}`
+                    : `Você: ${usuarioAtualChat}`;
+                document.getElementById('ticket-chat-storage').textContent=`Histórico leve: até ${data.maxMessagesPerTicket||500} mensagens por ticket / ${data.retentionDays||60} dias.`;
                 window.activeChatMessages=Array.isArray(data.messages)?data.messages:[]; window.activeChatHasMore=data.hasMore===true;
                 window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
                 renderizarChat(window.activeChatMessages,window.activeChatHasMore);
                 document.getElementById('ticket-chat-input')?.focus();
-            } catch(err) { if(history) history.innerHTML=`<div class="chat-empty">${escapeHtmlChat(err.message||'Erro ao carregar chat.')}</div>`; }
+            } catch(err) {
+                const dialog=document.getElementById('ticket-chat-dialog');
+                const history=document.getElementById('ticket-chat-history');
+                if (dialog?.open && history) {
+                    history.innerHTML=`<div class="chat-empty">${escapeHtmlChat(err.message||'Erro ao carregar chat.')}</div>`;
+                } else {
+                    alert(err.message || 'Não foi possível abrir o atendimento.');
+                }
+                // Em conflito, recarrega a lista para mostrar imediatamente quem venceu a assunção.
+                if (Number(err.status) === 409) {
+                    window.activeTicketsLoaded = false;
+                    carregarTicketsAtivos(true);
+                }
+            } finally {
+                if (triggerButton && triggerButton.isConnected) {
+                    triggerButton.disabled = false;
+                    triggerButton.innerHTML = originalButtonHtml;
+                }
+            }
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
         function fecharChatTicket() { const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
