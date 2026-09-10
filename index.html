@@ -1018,6 +1018,378 @@
         .btn-remove-client:hover { color: #fff; background: var(--danger-red); }
         .clients-empty { color: var(--text-muted) !important; }
 
+        /* Painel operacional de tickets */
+        .tickets-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(150px, 1fr));
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        .ticket-summary-card {
+            min-height: 112px;
+            padding: 18px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            box-shadow: var(--shadow-sm);
+        }
+        .ticket-summary-copy { min-width: 0; }
+        .ticket-summary-label {
+            margin-bottom: 8px;
+            color: var(--text-muted);
+            font-size: .72rem;
+            font-weight: 750;
+            letter-spacing: .055em;
+            text-transform: uppercase;
+        }
+        .ticket-summary-value {
+            color: var(--adv-blue);
+            font-size: 1.75rem;
+            line-height: 1;
+            font-weight: 780;
+            letter-spacing: -.035em;
+        }
+        .ticket-summary-icon {
+            width: 40px;
+            height: 40px;
+            flex: 0 0 40px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            color: var(--adv-blue);
+            background: #f1f3f6;
+            font-size: 1.05rem;
+        }
+        .ticket-summary-card.is-pending .ticket-summary-icon { color: #9a6700; background: #fff7e1; }
+        .ticket-summary-card.is-human .ticket-summary-icon { color: #2667a5; background: #eef6ff; }
+        .ticket-summary-card.is-client .ticket-summary-icon { color: #66717e; background: #f1f3f6; }
+        .ticket-summary-card.is-alert .ticket-summary-icon { color: var(--danger-red); background: #fff3f2; }
+
+        .tickets-panel-card { padding: 22px !important; }
+        .tickets-toolbar {
+            display: grid;
+            grid-template-columns: minmax(240px, 1.4fr) minmax(190px, .7fr) minmax(190px, .7fr) auto;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .tickets-search { position: relative; }
+        .tickets-search input { padding-left: 42px; }
+        .tickets-search .search-icon { left: 14px; }
+        .tickets-refresh-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            color: var(--text-muted);
+            font-size: .78rem;
+            font-weight: 650;
+        }
+        .tickets-refresh-status::before {
+            content: '';
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #22a35a;
+            box-shadow: 0 0 0 4px rgba(34,163,90,.10);
+        }
+        .tickets-table-wrap {
+            overflow-x: auto;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+        }
+        .tickets-table {
+            min-width: 1120px;
+            margin-bottom: 0;
+        }
+        .tickets-table thead th {
+            padding: 13px 14px;
+            color: #6a7280;
+            background: #f8f9fb;
+            border-color: var(--border);
+            font-size: .68rem;
+            font-weight: 760;
+            letter-spacing: .055em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .tickets-table tbody td {
+            padding: 14px;
+            color: #4f5865;
+            border-color: #edf0f3;
+            vertical-align: middle;
+        }
+        .tickets-table tbody tr:hover { background: #fbfcfd; }
+        .ticket-number {
+            color: var(--adv-blue);
+            font-weight: 780;
+            white-space: nowrap;
+        }
+        .ticket-client-name { color: var(--text); font-weight: 700; }
+        .ticket-client-phone { margin-top: 2px; color: var(--text-muted); font-size: .78rem; }
+        .ticket-area { max-width: 210px; color: #3f4854; font-weight: 650; }
+        .ticket-status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 9px;
+            border: 1px solid transparent;
+            border-radius: 999px;
+            font-size: .72rem;
+            font-weight: 760;
+            white-space: nowrap;
+        }
+        .ticket-status-pill::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+        .ticket-status-pill.pending { color: #8a6108; background: #fff8e7; border-color: #f1dfb5; }
+        .ticket-status-pill.human { color: #245f95; background: #eef6ff; border-color: #d9eaff; }
+        .ticket-status-pill.client { color: #626d79; background: #f3f5f7; border-color: #e2e6eb; }
+        .ticket-status-pill.other { color: #8c5a4e; background: #fff5f1; border-color: #f0ded7; }
+        .ticket-stage { margin-top: 5px; color: var(--text-muted); font-size: .73rem; }
+        .ticket-progress-line { min-width: 130px; }
+        .ticket-progress-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 5px;
+            color: var(--text-muted);
+            font-size: .72rem;
+            font-weight: 650;
+        }
+        .ticket-progress-track {
+            height: 6px;
+            overflow: hidden;
+            background: #edf0f3;
+            border-radius: 999px;
+        }
+        .ticket-progress-bar {
+            height: 100%;
+            background: var(--adv-gold);
+            border-radius: inherit;
+        }
+        .ticket-time-main { color: #414a55; font-weight: 650; white-space: nowrap; }
+        .ticket-time-sub { margin-top: 3px; color: var(--text-muted); font-size: .73rem; white-space: nowrap; }
+        .ticket-time-sub.is-alert { color: var(--danger-red); font-weight: 750; }
+        .ticket-view-btn {
+            min-height: 36px;
+            padding: 7px 10px;
+            color: var(--adv-blue);
+            background: #fff;
+            border: 1px solid var(--border-strong);
+            border-radius: 9px;
+            font-size: .78rem;
+            font-weight: 750;
+            white-space: nowrap;
+        }
+        .ticket-view-btn:hover { background: #f5f6f8; border-color: #bfc5cd; }
+        .tickets-empty {
+            padding: 50px 20px !important;
+            color: var(--text-muted) !important;
+            text-align: center;
+        }
+
+        #ticket-detail-dialog {
+            width: min(760px, calc(100vw - 28px));
+            max-height: min(84vh, 860px);
+            padding: 0;
+            overflow: hidden;
+            color: var(--text);
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            box-shadow: 0 30px 90px rgba(17,22,30,.28);
+        }
+        #ticket-detail-dialog::backdrop { background: rgba(17,22,30,.52); backdrop-filter: blur(2px); }
+        .ticket-dialog-header {
+            padding: 20px 22px;
+            display: flex;
+            justify-content: space-between;
+            gap: 18px;
+            align-items: flex-start;
+            border-bottom: 1px solid var(--border);
+        }
+        .ticket-dialog-title { margin: 0; color: var(--adv-blue); font-size: 1.15rem; font-weight: 780; }
+        .ticket-dialog-subtitle { margin-top: 4px; color: var(--text-muted); font-size: .82rem; }
+        .ticket-dialog-close {
+            width: 36px;
+            height: 36px;
+            flex: 0 0 36px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #69727f;
+            background: #f6f7f9;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+        }
+        .ticket-dialog-body { max-height: calc(84vh - 78px); padding: 22px; overflow-y: auto; }
+        .ticket-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .ticket-detail-field {
+            padding: 12px 13px;
+            background: #f8f9fb;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+        .ticket-detail-label {
+            margin-bottom: 4px;
+            color: var(--text-muted);
+            font-size: .67rem;
+            font-weight: 760;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+        }
+        .ticket-detail-value { color: #39424d; font-size: .88rem; font-weight: 650; word-break: break-word; }
+        .ticket-detail-section { margin-top: 20px; }
+        .ticket-detail-section h6 { margin-bottom: 10px; color: var(--adv-blue); font-size: .86rem; font-weight: 780; }
+        .ticket-answer-item {
+            padding: 12px 14px;
+            margin-bottom: 8px;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+        .ticket-answer-question { margin-bottom: 5px; color: #58616e; font-size: .77rem; font-weight: 750; }
+        .ticket-answer-response { color: #303842; font-size: .88rem; white-space: pre-wrap; word-break: break-word; }
+        .ticket-current-question {
+            padding: 13px 14px;
+            color: #6b4d0b;
+            background: #fff9e9;
+            border: 1px solid #f0deb2;
+            border-radius: 12px;
+            font-size: .85rem;
+        }
+        .ticket-dialog-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 20px; }
+        .ticket-wa-link {
+            min-height: 40px;
+            padding: 9px 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #167541;
+            background: #ecfaf2;
+            border: 1px solid #caecd9;
+            border-radius: 10px;
+            font-size: .82rem;
+            font-weight: 750;
+            text-decoration: none;
+        }
+        .ticket-wa-link:hover { color: #0f6436; background: #e4f7ed; }
+
+        .ticket-doc-mini {
+            margin-top: 5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: #7d642f;
+            font-size: .72rem;
+            font-weight: 700;
+        }
+        .ticket-doc-card {
+            margin-bottom: 10px;
+            overflow: hidden;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+        }
+        .ticket-doc-header {
+            padding: 13px 14px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            background: #fafbfc;
+            border-bottom: 1px solid var(--border);
+        }
+        .ticket-doc-title-wrap { min-width: 0; }
+        .ticket-doc-name {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #303842;
+            font-size: .87rem;
+            font-weight: 760;
+            word-break: break-word;
+        }
+        .ticket-doc-name i { color: var(--adv-gold); }
+        .ticket-doc-meta { margin-top: 4px; color: var(--text-muted); font-size: .72rem; }
+        .ticket-doc-status {
+            flex: 0 0 auto;
+            padding: 6px 9px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            font-size: .67rem;
+            font-weight: 780;
+            white-space: nowrap;
+        }
+        .ticket-doc-status.success { color: #167541; background: #ecfaf2; border-color: #caecd9; }
+        .ticket-doc-status.processing { color: #8a6108; background: #fff8e7; border-color: #f1dfb5; }
+        .ticket-doc-status.error { color: #a13f39; background: #fff3f2; border-color: #efd5d2; }
+        .ticket-doc-body { padding: 14px; }
+        .ticket-doc-type { margin-bottom: 9px; color: var(--adv-blue); font-size: .80rem; font-weight: 780; }
+        .ticket-doc-summary {
+            color: #37404a;
+            font-size: .86rem;
+            white-space: pre-wrap;
+            line-height: 1.55;
+        }
+        .ticket-doc-subsection { margin-top: 13px; }
+        .ticket-doc-subsection-title {
+            margin-bottom: 6px;
+            color: #68717d;
+            font-size: .70rem;
+            font-weight: 780;
+            letter-spacing: .045em;
+            text-transform: uppercase;
+        }
+        .ticket-doc-list { margin: 0; padding-left: 18px; color: #3e4752; font-size: .82rem; }
+        .ticket-doc-list li { margin-bottom: 4px; }
+        .ticket-doc-note {
+            padding: 11px 12px;
+            color: #6d561f;
+            background: #fff9e9;
+            border: 1px solid #f0deb2;
+            border-radius: 10px;
+            font-size: .81rem;
+        }
+        .ticket-doc-error {
+            padding: 11px 12px;
+            color: #8f3934;
+            background: #fff4f3;
+            border: 1px solid #efd5d2;
+            border-radius: 10px;
+            font-size: .81rem;
+            word-break: break-word;
+        }
+
+        @media (max-width: 1199.98px) {
+            .tickets-summary-grid { grid-template-columns: repeat(3, 1fr); }
+            .tickets-toolbar { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 767.98px) {
+            .tickets-summary-grid { grid-template-columns: repeat(2, 1fr); }
+            .tickets-toolbar { grid-template-columns: 1fr; }
+            .tickets-refresh-status { order: 5; }
+            .ticket-detail-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 479.98px) {
+            .tickets-summary-grid { grid-template-columns: 1fr; }
+        }
+
         /* Business days as pills */
         #business-days-container { gap: 8px !important; }
         #business-days-container .form-check { margin: 0; padding: 0; }
@@ -1215,6 +1587,10 @@
                     <span class="nav-icon"><i class="bi bi-sliders2"></i></span>
                     <span>Opções de atendimento</span>
                 </div>
+                <div class="nav-link" onclick="switchTab('tab-tickets', this)">
+                    <span class="nav-icon"><i class="bi bi-inboxes"></i></span>
+                    <span>Tickets ativos</span>
+                </div>
                 <div class="nav-link" onclick="switchTab('tab-clientes', this)">
                     <span class="nav-icon"><i class="bi bi-people"></i></span>
                     <span>Clientes</span>
@@ -1381,6 +1757,84 @@
             </div>
         </div>
 
+        <div id="tab-tickets" class="content-section hidden">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                <div>
+                    <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Tickets ativos</h4>
+                    <p class="text-muted mb-0">Visão operacional dos atendimentos em aberto. Arquivos enviados pelo cliente são lidos automaticamente pelo Gemini e resumidos nos detalhes do ticket.</p>
+                </div>
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <span id="tickets-refresh-status" class="tickets-refresh-status">Atualização automática</span>
+                    <button type="button" class="btn btn-outline-secondary" onclick="carregarTicketsAtivos(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
+                </div>
+            </div>
+
+            <div class="tickets-summary-grid" aria-label="Resumo dos tickets ativos">
+                <div class="ticket-summary-card">
+                    <div class="ticket-summary-copy"><div class="ticket-summary-label">Tickets ativos</div><div class="ticket-summary-value" id="tickets-metric-total">0</div></div>
+                    <span class="ticket-summary-icon"><i class="bi bi-inboxes"></i></span>
+                </div>
+                <div class="ticket-summary-card is-pending">
+                    <div class="ticket-summary-copy"><div class="ticket-summary-label">Pendentes da equipe</div><div class="ticket-summary-value" id="tickets-metric-pending">0</div></div>
+                    <span class="ticket-summary-icon"><i class="bi bi-person-exclamation"></i></span>
+                </div>
+                <div class="ticket-summary-card is-human">
+                    <div class="ticket-summary-copy"><div class="ticket-summary-label">Em atendimento</div><div class="ticket-summary-value" id="tickets-metric-human">0</div></div>
+                    <span class="ticket-summary-icon"><i class="bi bi-headset"></i></span>
+                </div>
+                <div class="ticket-summary-card is-client">
+                    <div class="ticket-summary-copy"><div class="ticket-summary-label">Aguardando cliente</div><div class="ticket-summary-value" id="tickets-metric-client">0</div></div>
+                    <span class="ticket-summary-icon"><i class="bi bi-hourglass-split"></i></span>
+                </div>
+                <div class="ticket-summary-card is-alert">
+                    <div class="ticket-summary-copy"><div class="ticket-summary-label">Pendentes +2h</div><div class="ticket-summary-value" id="tickets-metric-alert">0</div></div>
+                    <span class="ticket-summary-icon"><i class="bi bi-alarm"></i></span>
+                </div>
+            </div>
+
+            <div class="card-custom text-start tickets-panel-card" style="width: 100%;">
+                <div class="tickets-toolbar">
+                    <div class="tickets-search">
+                        <span class="search-icon"><i class="bi bi-search"></i></span>
+                        <input type="text" id="tickets-search-input" class="form-control" placeholder="Buscar ticket, cliente, CPF, WhatsApp ou área..." oninput="filtrarTicketsAtivos()">
+                    </div>
+                    <select id="tickets-filter-status" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar situação">
+                        <option value="">Todas as situações</option>
+                        <option value="advogado">Pendente da equipe</option>
+                        <option value="atendimento">Em atendimento</option>
+                        <option value="cliente">Aguardando cliente</option>
+                        <option value="outro">Revisar estado</option>
+                    </select>
+                    <select id="tickets-filter-area" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar área">
+                        <option value="">Todas as áreas</option>
+                    </select>
+                    <button type="button" class="btn btn-outline-secondary" onclick="limparFiltrosTickets()"><i class="bi bi-x-circle me-1"></i> Limpar</button>
+                </div>
+
+                <div id="tickets-status" class="menu-save-status text-muted mb-2"></div>
+
+                <div class="tickets-table-wrap">
+                    <table class="table tickets-table align-middle">
+                        <thead>
+                            <tr>
+                                <th>Ticket</th>
+                                <th>Cliente</th>
+                                <th>Área</th>
+                                <th>Situação</th>
+                                <th>Triagem</th>
+                                <th>Última atividade</th>
+                                <th>Aberto há</th>
+                                <th class="text-end">Detalhes</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tickets-table-body">
+                            <tr><td colspan="8" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <div id="tab-clientes" class="content-section hidden">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                 <div>
@@ -1491,6 +1945,17 @@
 
 
 
+    <dialog id="ticket-detail-dialog">
+        <div class="ticket-dialog-header">
+            <div>
+                <h5 class="ticket-dialog-title" id="ticket-detail-title">Detalhes do ticket</h5>
+                <div class="ticket-dialog-subtitle" id="ticket-detail-subtitle"></div>
+            </div>
+            <button type="button" class="ticket-dialog-close" onclick="fecharDetalheTicket()" aria-label="Fechar detalhes"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="ticket-dialog-body" id="ticket-detail-body"></div>
+    </dialog>
+
     <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     
@@ -1528,6 +1993,7 @@
             if (window.innerWidth < 992) toggleSidebar(false);
             if(tabId === 'tab-ia') carregarConhecimento();
             if(tabId === 'tab-opcoes') carregarOpcoesAtendimento();
+            if(tabId === 'tab-tickets') carregarTicketsAtivos();
             if(tabId === 'tab-clientes') carregarClientes();
             if(tabId === 'tab-horario') carregarHorarioFuncionamento();
         }
@@ -1559,6 +2025,21 @@
 
         socket.on('disconnected', () => {
             window.location.reload();
+        });
+
+        socket.on('ticket_document_ai_updated', ({ ticketNumber } = {}) => {
+            const tab = document.getElementById('tab-tickets');
+            if (!tab || tab.classList.contains('hidden')) return;
+
+            clearTimeout(window.ticketDocumentAIRefreshTimer);
+            window.ticketDocumentAIRefreshTimer = setTimeout(() => {
+                window.activeTicketsLoaded = false;
+                if (window.activeTicketsLoading) {
+                    setTimeout(() => carregarTicketsAtivos(true), 600);
+                } else {
+                    carregarTicketsAtivos(true);
+                }
+            }, 250);
         });
 
         async function salvarConhecimento() {
@@ -2302,6 +2783,604 @@ function renderizarLista(itens) {
                 alert(err.message || 'Erro ao excluir a opção.');
             }
         }
+
+        const TICKETS_REFRESH_INTERVAL_MS = 30 * 1000;
+
+        function normalizarBuscaTicket(valor = '') {
+            return String(valor || '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .trim();
+        }
+
+        function formatarDataTicket(valor, apenasData = false) {
+            if (!valor) return '—';
+            const data = new Date(Number(valor) || valor);
+            if (Number.isNaN(data.getTime())) return '—';
+            return data.toLocaleString('pt-BR', {
+                timeZone: 'America/Sao_Paulo',
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                ...(apenasData ? {} : { hour: '2-digit', minute: '2-digit' })
+            });
+        }
+
+        function formatarDuracaoTicket(ms) {
+            if (ms === null || ms === undefined || Number.isNaN(Number(ms))) return '—';
+            const totalMin = Math.max(0, Math.floor(Number(ms) / 60000));
+            if (totalMin < 1) return 'agora';
+            if (totalMin < 60) return `${totalMin} min`;
+
+            const horas = Math.floor(totalMin / 60);
+            if (horas < 24) {
+                const minutos = totalMin % 60;
+                return minutos ? `${horas}h ${minutos}min` : `${horas}h`;
+            }
+
+            const dias = Math.floor(horas / 24);
+            const horasRestantes = horas % 24;
+            return horasRestantes ? `${dias}d ${horasRestantes}h` : `${dias}d`;
+        }
+
+        function classeStatusTicket(tipo) {
+            if (tipo === 'advogado') return 'pending';
+            if (tipo === 'atendimento') return 'human';
+            if (tipo === 'cliente') return 'client';
+            return 'other';
+        }
+
+        function formatarOrigemTicket(origem = '') {
+            const valor = String(origem || '').toLowerCase();
+            if (valor === 'lead_anuncio') return 'Lead de anúncio';
+            if (valor === 'organico') return 'Orgânico';
+            return origem || '—';
+        }
+
+        function atualizarResumoTickets(resumo = {}) {
+            document.getElementById('tickets-metric-total').textContent = Number(resumo.total || 0);
+            document.getElementById('tickets-metric-pending').textContent = Number(resumo.pendentesEquipe || 0);
+            document.getElementById('tickets-metric-human').textContent = Number(resumo.emAtendimento || 0);
+            document.getElementById('tickets-metric-client').textContent = Number(resumo.aguardandoCliente || 0);
+            document.getElementById('tickets-metric-alert').textContent = Number(resumo.pendentesMaisDe2h || 0);
+        }
+
+        function preencherFiltroAreasTickets(tickets = []) {
+            const select = document.getElementById('tickets-filter-area');
+            if (!select) return;
+
+            const valorAtual = select.value;
+            const areas = [...new Set(tickets.map(item => String(item.area || '').trim()).filter(Boolean))]
+                .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+            select.innerHTML = '';
+            const todas = document.createElement('option');
+            todas.value = '';
+            todas.textContent = 'Todas as áreas';
+            select.appendChild(todas);
+
+            areas.forEach(area => {
+                const option = document.createElement('option');
+                option.value = area;
+                option.textContent = area;
+                select.appendChild(option);
+            });
+
+            if ([...select.options].some(option => option.value === valorAtual)) select.value = valorAtual;
+        }
+
+        function criarTextoCelulaTicket(texto, classe = '') {
+            const td = document.createElement('td');
+            if (classe) td.className = classe;
+            td.textContent = texto;
+            return td;
+        }
+
+        function renderizarTicketsAtivos(tickets = []) {
+            const tbody = document.getElementById('tickets-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            if (!tickets.length) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = 8;
+                td.className = 'tickets-empty';
+                td.textContent = 'Nenhum ticket corresponde aos filtros selecionados.';
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+                return;
+            }
+
+            const agora = Date.now();
+
+            tickets.forEach(ticket => {
+                const tr = document.createElement('tr');
+
+                const numeroTd = document.createElement('td');
+                const numero = document.createElement('div');
+                numero.className = 'ticket-number';
+                numero.textContent = ticket.ticketNumber || '—';
+                const origem = document.createElement('div');
+                origem.className = 'ticket-time-sub';
+                origem.textContent = formatarOrigemTicket(ticket.origem);
+                numeroTd.append(numero, origem);
+                const docsResumo = ticket.documentosResumo || {};
+                if (Number(docsResumo.total || 0) > 0) {
+                    const docsMini = document.createElement('div');
+                    docsMini.className = 'ticket-doc-mini';
+                    const processando = Number(docsResumo.processando || 0);
+                    docsMini.innerHTML = `<i class="bi bi-stars"></i><span>${docsResumo.total} arquivo${Number(docsResumo.total) === 1 ? '' : 's'} IA${processando ? ` • ${processando} analisando` : ''}</span>`;
+                    numeroTd.appendChild(docsMini);
+                }
+
+                const clienteTd = document.createElement('td');
+                const nome = document.createElement('div');
+                nome.className = 'ticket-client-name';
+                nome.textContent = ticket.clienteNome || 'Cliente não cadastrado';
+                const telefone = document.createElement('div');
+                telefone.className = 'ticket-client-phone';
+                telefone.textContent = ticket.whatsapp ? formatarWhatsAppCliente(ticket.whatsapp) : (ticket.cpf ? formatarCPFCliente(ticket.cpf) : 'WhatsApp não identificado');
+                clienteTd.append(nome, telefone);
+
+                const areaTd = criarTextoCelulaTicket(ticket.area || ticket.menuOptionTitle || 'Ainda não definida', 'ticket-area');
+
+                const situacaoTd = document.createElement('td');
+                const pill = document.createElement('span');
+                pill.className = `ticket-status-pill ${classeStatusTicket(ticket.pendenciaTipo)}`;
+                pill.textContent = ticket.pendenciaLabel || 'Revisar';
+                const etapa = document.createElement('div');
+                etapa.className = 'ticket-stage';
+                etapa.textContent = ticket.statusLabel || ticket.status || '—';
+                situacaoTd.append(pill, etapa);
+
+                const triagemTd = document.createElement('td');
+                const progress = document.createElement('div');
+                progress.className = 'ticket-progress-line';
+                const meta = document.createElement('div');
+                meta.className = 'ticket-progress-meta';
+                const triagem = ticket.triagem || {};
+                const metaLeft = document.createElement('span');
+                const metaRight = document.createElement('span');
+                if (triagem.possuiFluxo) {
+                    metaLeft.textContent = `${triagem.respondidas || 0}/${triagem.total || 0}`;
+                    metaRight.textContent = `${triagem.percentual || 0}%`;
+                } else {
+                    metaLeft.textContent = ticket.pendenciaTipo === 'advogado' || ticket.pendenciaTipo === 'atendimento' ? 'Concluída' : 'Sem fluxo';
+                    metaRight.textContent = '';
+                }
+                meta.append(metaLeft, metaRight);
+                const track = document.createElement('div');
+                track.className = 'ticket-progress-track';
+                const bar = document.createElement('div');
+                bar.className = 'ticket-progress-bar';
+                bar.style.width = `${Math.max(0, Math.min(100, Number(triagem.percentual || 0)))}%`;
+                track.appendChild(bar);
+                progress.append(meta, track);
+                triagemTd.appendChild(progress);
+
+                const ultimaTd = document.createElement('td');
+                const ultimaMain = document.createElement('div');
+                ultimaMain.className = 'ticket-time-main';
+                ultimaMain.textContent = formatarDataTicket(ticket.lastActivity);
+                const ultimaSub = document.createElement('div');
+                ultimaSub.className = `ticket-time-sub${ticket.pendenteHaMaisDe2h ? ' is-alert' : ''}`;
+                ultimaSub.textContent = `há ${formatarDuracaoTicket(ticket.idadeUltimaAtividadeMs)}`;
+                ultimaTd.append(ultimaMain, ultimaSub);
+
+                const abertoTd = document.createElement('td');
+                const idadeTicket = ticket.createdAt ? Math.max(0, agora - Number(ticket.createdAt)) : null;
+                const abertoMain = document.createElement('div');
+                abertoMain.className = 'ticket-time-main';
+                abertoMain.textContent = formatarDuracaoTicket(idadeTicket);
+                const abertoSub = document.createElement('div');
+                abertoSub.className = 'ticket-time-sub';
+                abertoSub.textContent = ticket.createdAt ? `desde ${formatarDataTicket(ticket.createdAt)}` : '—';
+                abertoTd.append(abertoMain, abertoSub);
+
+                const acaoTd = document.createElement('td');
+                acaoTd.className = 'text-end';
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'ticket-view-btn';
+                btn.innerHTML = '<i class="bi bi-eye me-1"></i> Ver';
+                btn.onclick = () => abrirDetalheTicket(ticket.ticketNumber);
+                acaoTd.appendChild(btn);
+
+                tr.append(numeroTd, clienteTd, areaTd, situacaoTd, triagemTd, ultimaTd, abertoTd, acaoTd);
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filtrarTicketsAtivos() {
+            const termo = normalizarBuscaTicket(document.getElementById('tickets-search-input')?.value || '');
+            const status = document.getElementById('tickets-filter-status')?.value || '';
+            const area = document.getElementById('tickets-filter-area')?.value || '';
+            const apenasNumeros = termo.replace(/\D/g, '');
+            const tickets = Array.isArray(window.activeTicketsData) ? window.activeTicketsData : [];
+
+            const filtrados = tickets.filter(ticket => {
+                if (status && ticket.pendenciaTipo !== status) return false;
+                if (area && String(ticket.area || '') !== area) return false;
+                if (!termo) return true;
+
+                const camposTexto = [
+                    ticket.ticketNumber,
+                    ticket.clienteNome,
+                    ticket.area,
+                    ticket.menuOptionTitle,
+                    ticket.statusLabel,
+                    ticket.pendenciaLabel,
+                    ticket.origem
+                ].map(normalizarBuscaTicket);
+
+                const numeros = [ticket.cpf, ticket.whatsapp]
+                    .map(valor => String(valor || '').replace(/\D/g, ''))
+                    .filter(Boolean);
+
+                return camposTexto.some(campo => campo.includes(termo)) ||
+                    (!!apenasNumeros && numeros.some(numero => numero.includes(apenasNumeros)));
+            });
+
+            renderizarTicketsAtivos(filtrados);
+        }
+
+        function limparFiltrosTickets() {
+            const busca = document.getElementById('tickets-search-input');
+            const status = document.getElementById('tickets-filter-status');
+            const area = document.getElementById('tickets-filter-area');
+            if (busca) busca.value = '';
+            if (status) status.value = '';
+            if (area) area.value = '';
+            filtrarTicketsAtivos();
+        }
+
+        async function carregarTicketsAtivos(forcar = false) {
+            if (window.activeTicketsLoading) return;
+            if (window.activeTicketsLoaded && !forcar) {
+                filtrarTicketsAtivos();
+                return;
+            }
+
+            const status = document.getElementById('tickets-status');
+            const refresh = document.getElementById('tickets-refresh-status');
+            window.activeTicketsLoading = true;
+
+            if (status) {
+                status.className = 'menu-save-status text-muted mb-2';
+                status.textContent = 'Carregando tickets ativos...';
+            }
+
+            try {
+                const res = await fetch('/api/tickets/active', { cache: 'no-store' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar os tickets ativos.');
+
+                window.activeTicketsData = Array.isArray(data.tickets) ? data.tickets : [];
+                window.activeTicketsLoaded = true;
+                window.activeTicketsLastUpdate = Number(data.generatedAt || Date.now());
+
+                atualizarResumoTickets(data.resumo || {});
+                preencherFiltroAreasTickets(window.activeTicketsData);
+                filtrarTicketsAtivos();
+
+                const dialogAberto = document.getElementById('ticket-detail-dialog');
+                if (dialogAberto?.open && window.activeTicketDialogNumber) {
+                    abrirDetalheTicket(window.activeTicketDialogNumber);
+                }
+
+                if (status) status.textContent = '';
+                if (refresh) refresh.textContent = `Atualizado ${new Date(window.activeTicketsLastUpdate).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
+            } catch (err) {
+                console.error(err);
+                if (status) {
+                    status.className = 'menu-save-status text-danger mb-2';
+                    status.textContent = err.message || 'Erro ao carregar os tickets.';
+                }
+            } finally {
+                window.activeTicketsLoading = false;
+            }
+        }
+
+        function adicionarCampoDetalheTicket(container, label, value) {
+            const field = document.createElement('div');
+            field.className = 'ticket-detail-field';
+            const lbl = document.createElement('div');
+            lbl.className = 'ticket-detail-label';
+            lbl.textContent = label;
+            const val = document.createElement('div');
+            val.className = 'ticket-detail-value';
+            val.textContent = value || '—';
+            field.append(lbl, val);
+            container.appendChild(field);
+        }
+
+        function formatarTamanhoArquivoTicket(bytes) {
+            const valor = Number(bytes || 0);
+            if (!valor) return 'tamanho não informado';
+            if (valor < 1024) return `${valor} B`;
+            if (valor < 1024 * 1024) return `${(valor / 1024).toFixed(1)} KB`;
+            return `${(valor / 1024 / 1024).toFixed(1)} MB`;
+        }
+
+        function rotuloStatusDocumentoIA(status) {
+            const mapa = {
+                analisando: 'Preparando análise',
+                processando_ia: 'Gemini analisando',
+                concluida: 'Análise concluída',
+                erro: 'Falha na análise',
+                nao_suportado: 'Tipo não suportado'
+            };
+            return mapa[status] || 'Processando';
+        }
+
+        function classeStatusDocumentoIA(status) {
+            if (status === 'concluida') return 'success';
+            if (status === 'erro' || status === 'nao_suportado') return 'error';
+            return 'processing';
+        }
+
+        function iconeDocumentoIA(doc = {}) {
+            const mime = String(doc.mimeType || '').toLowerCase();
+            if (mime === 'application/pdf') return 'bi-file-earmark-pdf';
+            if (mime.startsWith('image/')) return 'bi-file-earmark-image';
+            if (mime.startsWith('audio/')) return 'bi-file-earmark-music';
+            if (mime.startsWith('video/')) return 'bi-file-earmark-play';
+            if (mime.startsWith('text/')) return 'bi-file-earmark-text';
+            return 'bi-file-earmark';
+        }
+
+        function adicionarListaDocumentoIA(container, titulo, itens = []) {
+            const lista = Array.isArray(itens) ? itens.filter(Boolean) : [];
+            if (!lista.length) return;
+
+            const bloco = document.createElement('div');
+            bloco.className = 'ticket-doc-subsection';
+            const h = document.createElement('div');
+            h.className = 'ticket-doc-subsection-title';
+            h.textContent = titulo;
+            const ul = document.createElement('ul');
+            ul.className = 'ticket-doc-list';
+            lista.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = String(item);
+                ul.appendChild(li);
+            });
+            bloco.append(h, ul);
+            container.appendChild(bloco);
+        }
+
+        function renderizarDocumentosIATicket(body, ticket) {
+            const documentos = Array.isArray(ticket.documentosIA) ? ticket.documentosIA : [];
+            if (!documentos.length) return;
+
+            const section = document.createElement('div');
+            section.className = 'ticket-detail-section';
+            const h6 = document.createElement('h6');
+            h6.innerHTML = `<i class="bi bi-stars me-1"></i> Documentos e análise por IA (${documentos.length})`;
+            section.appendChild(h6);
+
+            documentos.forEach(doc => {
+                const card = document.createElement('div');
+                card.className = 'ticket-doc-card';
+
+                const header = document.createElement('div');
+                header.className = 'ticket-doc-header';
+                const titleWrap = document.createElement('div');
+                titleWrap.className = 'ticket-doc-title-wrap';
+                const nome = document.createElement('div');
+                nome.className = 'ticket-doc-name';
+                const icon = document.createElement('i');
+                icon.className = `bi ${iconeDocumentoIA(doc)}`;
+                const nomeText = document.createElement('span');
+                nomeText.textContent = doc.nomeArquivo || 'Arquivo recebido';
+                nome.append(icon, nomeText);
+
+                const meta = document.createElement('div');
+                meta.className = 'ticket-doc-meta';
+                const partesMeta = [
+                    doc.mimeType || null,
+                    formatarTamanhoArquivoTicket(doc.tamanhoBytes),
+                    doc.recebidoEm ? `recebido em ${formatarDataTicket(doc.recebidoEm)}` : null
+                ].filter(Boolean);
+                meta.textContent = partesMeta.join(' • ');
+                titleWrap.append(nome, meta);
+
+                const status = document.createElement('span');
+                status.className = `ticket-doc-status ${classeStatusDocumentoIA(doc.statusAnalise)}`;
+                status.textContent = rotuloStatusDocumentoIA(doc.statusAnalise);
+                header.append(titleWrap, status);
+                card.appendChild(header);
+
+                const docBody = document.createElement('div');
+                docBody.className = 'ticket-doc-body';
+
+                if (doc.statusAnalise === 'concluida') {
+                    if (doc.tipoDocumento) {
+                        const tipo = document.createElement('div');
+                        tipo.className = 'ticket-doc-type';
+                        tipo.textContent = `Tipo identificado: ${doc.tipoDocumento}`;
+                        docBody.appendChild(tipo);
+                    }
+
+                    if (doc.resumoExecutivo) {
+                        const resumoTitulo = document.createElement('div');
+                        resumoTitulo.className = 'ticket-doc-subsection-title';
+                        resumoTitulo.textContent = 'Resumo executivo';
+                        const resumo = document.createElement('div');
+                        resumo.className = 'ticket-doc-summary';
+                        resumo.textContent = doc.resumoExecutivo;
+                        docBody.append(resumoTitulo, resumo);
+                    }
+
+                    adicionarListaDocumentoIA(docBody, 'Partes / pessoas identificadas', doc.partesPessoas);
+                    adicionarListaDocumentoIA(docBody, 'Pontos relevantes', doc.pontosRelevantes);
+                    adicionarListaDocumentoIA(docBody, 'Datas e valores', doc.datasValores);
+                    adicionarListaDocumentoIA(docBody, 'Obrigações e prazos', doc.obrigacoesPrazos);
+                    adicionarListaDocumentoIA(docBody, 'Pontos para conferência do advogado', doc.alertasAdvogado);
+                    adicionarListaDocumentoIA(docBody, 'Informações não identificadas', doc.informacoesNaoIdentificadas);
+                } else if (doc.statusAnalise === 'erro' || doc.statusAnalise === 'nao_suportado') {
+                    const erro = document.createElement('div');
+                    erro.className = 'ticket-doc-error';
+                    erro.textContent = doc.erro || 'Não foi possível concluir a análise automática deste arquivo.';
+                    docBody.appendChild(erro);
+                } else {
+                    const note = document.createElement('div');
+                    note.className = 'ticket-doc-note';
+                    note.textContent = doc.statusAnalise === 'processando_ia'
+                        ? 'O arquivo já foi baixado e está sendo analisado pelo Gemini. Esta tela será atualizada automaticamente quando o resumo estiver pronto.'
+                        : 'O arquivo foi recebido e está sendo preparado para análise. Esta tela será atualizada automaticamente.';
+                    docBody.appendChild(note);
+                }
+
+                if (doc.caption) {
+                    const legenda = document.createElement('div');
+                    legenda.className = 'ticket-doc-subsection';
+                    const legendaTitulo = document.createElement('div');
+                    legendaTitulo.className = 'ticket-doc-subsection-title';
+                    legendaTitulo.textContent = 'Legenda enviada pelo cliente';
+                    const legendaTexto = document.createElement('div');
+                    legendaTexto.className = 'ticket-doc-summary';
+                    legendaTexto.textContent = doc.caption;
+                    legenda.append(legendaTitulo, legendaTexto);
+                    docBody.appendChild(legenda);
+                }
+
+                card.appendChild(docBody);
+                section.appendChild(card);
+            });
+
+            body.appendChild(section);
+        }
+
+        function abrirDetalheTicket(ticketNumber) {
+            const ticket = (window.activeTicketsData || []).find(item => String(item.ticketNumber) === String(ticketNumber));
+            const dialog = document.getElementById('ticket-detail-dialog');
+            const body = document.getElementById('ticket-detail-body');
+            if (!ticket || !dialog || !body) return;
+
+            window.activeTicketDialogNumber = ticket.ticketNumber;
+
+            document.getElementById('ticket-detail-title').textContent = ticket.ticketNumber || 'Detalhes do ticket';
+            document.getElementById('ticket-detail-subtitle').textContent = `${ticket.pendenciaLabel || 'Situação'} • ${ticket.statusLabel || ticket.status || '—'}`;
+            body.innerHTML = '';
+
+            const grid = document.createElement('div');
+            grid.className = 'ticket-detail-grid';
+            adicionarCampoDetalheTicket(grid, 'Cliente', ticket.clienteNome || 'Cliente não cadastrado');
+            adicionarCampoDetalheTicket(grid, 'WhatsApp', ticket.whatsapp ? formatarWhatsAppCliente(ticket.whatsapp) : 'Não identificado');
+            adicionarCampoDetalheTicket(grid, 'CPF', ticket.cpf ? formatarCPFCliente(ticket.cpf) : 'Não cadastrado');
+            adicionarCampoDetalheTicket(grid, 'Área', ticket.area || ticket.menuOptionTitle || 'Ainda não definida');
+            adicionarCampoDetalheTicket(grid, 'Origem', formatarOrigemTicket(ticket.origem));
+            adicionarCampoDetalheTicket(grid, 'Criado em', formatarDataTicket(ticket.createdAt));
+            adicionarCampoDetalheTicket(grid, 'Última atividade', `${formatarDataTicket(ticket.lastActivity)} • há ${formatarDuracaoTicket(ticket.idadeUltimaAtividadeMs)}`);
+            adicionarCampoDetalheTicket(grid, 'Triagem', ticket.triagem?.possuiFluxo ? `${ticket.triagem.respondidas}/${ticket.triagem.total} respostas (${ticket.triagem.percentual}%)` : (ticket.pendenciaTipo === 'advogado' || ticket.pendenciaTipo === 'atendimento' ? 'Concluída / fluxo simples' : 'Sem perguntas sequenciais'));
+            body.appendChild(grid);
+
+            if (ticket.perguntaAtual) {
+                const section = document.createElement('div');
+                section.className = 'ticket-detail-section';
+                const h6 = document.createElement('h6');
+                h6.textContent = 'Pergunta atualmente aguardada';
+                const box = document.createElement('div');
+                box.className = 'ticket-current-question';
+                box.textContent = ticket.perguntaAtual;
+                section.append(h6, box);
+                body.appendChild(section);
+            }
+
+            const respostas = Array.isArray(ticket.respostasTriagem) ? ticket.respostasTriagem : [];
+            if (respostas.length) {
+                const section = document.createElement('div');
+                section.className = 'ticket-detail-section';
+                const h6 = document.createElement('h6');
+                h6.textContent = 'Respostas da triagem';
+                section.appendChild(h6);
+
+                respostas.forEach((item, index) => {
+                    const box = document.createElement('div');
+                    box.className = 'ticket-answer-item';
+                    const pergunta = document.createElement('div');
+                    pergunta.className = 'ticket-answer-question';
+                    pergunta.textContent = item.pergunta || `Pergunta ${index + 1}`;
+                    const resposta = document.createElement('div');
+                    resposta.className = 'ticket-answer-response';
+                    resposta.textContent = item.resposta || 'Sem resposta textual registrada.';
+                    box.append(pergunta, resposta);
+                    section.appendChild(box);
+                });
+
+                body.appendChild(section);
+            }
+
+            if (ticket.relatoForaHorario) {
+                const section = document.createElement('div');
+                section.className = 'ticket-detail-section';
+                const h6 = document.createElement('h6');
+                h6.textContent = 'Relato recebido fora do horário';
+                const box = document.createElement('div');
+                box.className = 'ticket-answer-item';
+                const resposta = document.createElement('div');
+                resposta.className = 'ticket-answer-response';
+                resposta.textContent = ticket.relatoForaHorario;
+                box.appendChild(resposta);
+                section.append(h6, box);
+                body.appendChild(section);
+            }
+
+            renderizarDocumentosIATicket(body, ticket);
+
+            if (!respostas.length && !ticket.relatoForaHorario && !ticket.perguntaAtual) {
+                const section = document.createElement('div');
+                section.className = 'ticket-detail-section';
+                const h6 = document.createElement('h6');
+                h6.textContent = 'Informações da triagem';
+                const box = document.createElement('div');
+                box.className = 'ticket-current-question';
+                box.textContent = 'Este ticket não possui respostas sequenciais registradas no estado atual.';
+                section.append(h6, box);
+                body.appendChild(section);
+            }
+
+            const actions = document.createElement('div');
+            actions.className = 'ticket-dialog-actions';
+            if (ticket.whatsapp) {
+                const link = document.createElement('a');
+                link.className = 'ticket-wa-link';
+                link.href = `https://wa.me/${String(ticket.whatsapp).replace(/\D/g, '')}`;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.innerHTML = '<i class="bi bi-whatsapp"></i> Abrir conversa no WhatsApp';
+                actions.appendChild(link);
+            }
+            body.appendChild(actions);
+
+            if (!dialog.open) {
+                if (typeof dialog.showModal === 'function') dialog.showModal();
+                else dialog.setAttribute('open', '');
+            }
+        }
+
+        function fecharDetalheTicket() {
+            const dialog = document.getElementById('ticket-detail-dialog');
+            window.activeTicketDialogNumber = null;
+            if (!dialog) return;
+            if (typeof dialog.close === 'function') dialog.close();
+            else dialog.removeAttribute('open');
+        }
+
+        function inicializarAtualizacaoTickets() {
+            if (window.activeTicketsTimer) return;
+            window.activeTicketsTimer = setInterval(() => {
+                const tab = document.getElementById('tab-tickets');
+                if (!tab || tab.classList.contains('hidden')) return;
+                window.activeTicketsLoaded = false;
+                carregarTicketsAtivos(true);
+            }, TICKETS_REFRESH_INTERVAL_MS);
+        }
+
+        inicializarAtualizacaoTickets();
 
         function formatarCPFCliente(cpf = '') {
             const numeros = String(cpf || '').replace(/\D/g, '').slice(0, 11);

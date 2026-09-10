@@ -4,7 +4,8 @@ const {
     fetchLatestBaileysVersion, 
     BufferJSON, 
     initAuthCreds,
-    jidNormalizedUser 
+    jidNormalizedUser,
+    downloadMediaMessage 
 } = require('@whiskeysockets/baileys');
 const { MongoClient, ObjectId } = require('mongodb');
 const express = require('express');
@@ -20,6 +21,464 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 let genAI = null;
 let geminiModel = null;
 let apiKeysColl;
+
+// -----------------------------------------------------------------------------
+// LEITURA AUTOMÁTICA DE DOCUMENTOS / ARQUIVOS COM GEMINI
+// -----------------------------------------------------------------------------
+// O arquivo recebido pelo WhatsApp é baixado apenas para a memória do processo,
+// enviado ao Gemini e descartado em seguida. O MongoDB armazena somente metadados
+// e o resumo estruturado; o binário do documento não é persistido nesta rotina.
+const DOCUMENT_AI_MAX_PDF_BYTES = 48 * 1024 * 1024;
+const DOCUMENT_AI_MAX_OTHER_BYTES = 70 * 1024 * 1024;
+const DOCUMENT_AI_MAX_ITEMS = 30;
+const DOCUMENT_AI_PROMPT_VERSION = 'aj-doc-v1';
+
+const DOCUMENT_AI_MIME_EXACT = new Set([
+    'application/pdf',
+    'application/json',
+    'application/rtf',
+    'application/x-javascript',
+    'application/x-typescript',
+    'application/x-python-code',
+    'application/x-ipynb+json',
+    'text/plain',
+    'text/html',
+    'text/css',
+    'text/javascript',
+    'text/x-typescript',
+    'text/csv',
+    'text/markdown',
+    'text/x-python',
+    'text/xml',
+    'text/rtf'
+]);
+
+function limitarTextoDocumentoIA(valor, max = 5000) {
+    return String(valor ?? '').trim().slice(0, max);
+}
+
+function limitarListaDocumentoIA(valor, maxItens = 20, maxChars = 1000) {
+    if (!Array.isArray(valor)) return [];
+    return valor
+        .map(item => limitarTextoDocumentoIA(item, maxChars))
+        .filter(Boolean)
+        .slice(0, maxItens);
+}
+
+function numeroSeguroDeLong(valor) {
+    if (valor === null || valor === undefined) return null;
+    if (typeof valor === 'number') return Number.isFinite(valor) ? valor : null;
+    if (typeof valor === 'bigint') return Number(valor);
+    if (typeof valor?.toNumber === 'function') {
+        try { return valor.toNumber(); } catch (_) { return null; }
+    }
+    const convertido = Number(valor);
+    return Number.isFinite(convertido) ? convertido : null;
+}
+
+function conteudoMensagemDesembrulhado(msg) {
+    let conteudo = msg?.message || null;
+
+    for (let i = 0; conteudo && i < 5; i++) {
+        const proximo =
+            conteudo.ephemeralMessage?.message ||
+            conteudo.viewOnceMessage?.message ||
+            conteudo.viewOnceMessageV2?.message ||
+            conteudo.viewOnceMessageV2Extension?.message ||
+            conteudo.documentWithCaptionMessage?.message ||
+            null;
+
+        if (!proximo) break;
+        conteudo = proximo;
+    }
+
+    return conteudo || {};
+}
+
+function mimePorExtensao(nomeArquivo = '') {
+    const ext = String(nomeArquivo).toLowerCase().split('.').pop();
+    const mapa = {
+        pdf: 'application/pdf',
+        txt: 'text/plain',
+        csv: 'text/csv',
+        json: 'application/json',
+        html: 'text/html',
+        htm: 'text/html',
+        md: 'text/markdown',
+        xml: 'text/xml',
+        rtf: 'text/rtf',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        webp: 'image/webp',
+        gif: 'image/gif',
+        heic: 'image/heic',
+        heif: 'image/heif',
+        mp3: 'audio/mpeg',
+        m4a: 'audio/mp4',
+        wav: 'audio/wav',
+        ogg: 'audio/ogg',
+        opus: 'audio/ogg',
+        mp4: 'video/mp4',
+        mov: 'video/quicktime',
+        webm: 'video/webm'
+    };
+    return mapa[ext] || null;
+}
+
+function extrairMidiaAnalisavel(msg) {
+    const conteudo = conteudoMensagemDesembrulhado(msg);
+    let payload = null;
+    let tipo = null;
+
+    if (conteudo.documentMessage) {
+        payload = conteudo.documentMessage;
+        tipo = 'documento';
+    } else if (conteudo.imageMessage) {
+        payload = conteudo.imageMessage;
+        tipo = 'imagem';
+    } else if (conteudo.audioMessage) {
+        payload = conteudo.audioMessage;
+        tipo = 'audio';
+    } else if (conteudo.videoMessage) {
+        payload = conteudo.videoMessage;
+        tipo = 'video';
+    }
+
+    if (!payload || !tipo) return null;
+
+    const nomesPadrao = {
+        documento: 'documento',
+        imagem: 'imagem.jpg',
+        audio: 'audio',
+        video: 'video.mp4'
+    };
+
+    const nomeArquivo = limitarTextoDocumentoIA(
+        payload.fileName || payload.title || nomesPadrao[tipo],
+        240
+    );
+    const mimeDeclarado = limitarTextoDocumentoIA(payload.mimetype || '', 120).toLowerCase().split(';')[0].trim();
+    const mimeExtensao = mimePorExtensao(nomeArquivo);
+    const mimeType = (!mimeDeclarado || mimeDeclarado === 'application/octet-stream' ? mimeExtensao : mimeDeclarado) || (
+        tipo === 'imagem' ? 'image/jpeg' :
+        tipo === 'audio' ? 'audio/ogg' :
+        tipo === 'video' ? 'video/mp4' :
+        'application/octet-stream'
+    );
+
+    return {
+        payload,
+        tipo,
+        nomeArquivo,
+        mimeType,
+        tamanhoDeclarado: numeroSeguroDeLong(payload.fileLength),
+        caption: limitarTextoDocumentoIA(payload.caption || '', 1500)
+    };
+}
+
+function mimeSuportadoDiretamentePeloGemini(mimeType = '') {
+    const mime = String(mimeType || '').toLowerCase().split(';')[0].trim();
+    return mime.startsWith('image/') ||
+        mime.startsWith('audio/') ||
+        mime.startsWith('video/') ||
+        mime.startsWith('text/') ||
+        DOCUMENT_AI_MIME_EXACT.has(mime);
+}
+
+function mimeEhTextoParaGemini(mimeType = '') {
+    const mime = String(mimeType || '').toLowerCase().split(';')[0].trim();
+    return mime.startsWith('text/') || [
+        'application/json',
+        'application/rtf',
+        'application/x-javascript',
+        'application/x-typescript',
+        'application/x-python-code',
+        'application/x-ipynb+json'
+    ].includes(mime);
+}
+
+function limiteArquivoGemini(mimeType = '') {
+    return String(mimeType).toLowerCase().startsWith('application/pdf')
+        ? DOCUMENT_AI_MAX_PDF_BYTES
+        : DOCUMENT_AI_MAX_OTHER_BYTES;
+}
+
+function mensagemMimeNaoSuportado(nomeArquivo, mimeType) {
+    return `O arquivo ${nomeArquivo || ''} foi registrado no ticket, mas o tipo ${mimeType || 'desconhecido'} não é aceito diretamente pela rotina atual do Gemini. PDFs, imagens, áudios, vídeos e formatos textuais comuns são analisados automaticamente.`;
+}
+
+function normalizarAnaliseDocumentoIA(parsed, textoFallback = '') {
+    const dados = parsed && typeof parsed === 'object' ? parsed : {};
+
+    const partes = Array.isArray(dados.partesPessoas)
+        ? dados.partesPessoas.map(item => {
+            if (typeof item === 'string') return limitarTextoDocumentoIA(item, 500);
+            const nome = limitarTextoDocumentoIA(item?.nome, 250);
+            const papel = limitarTextoDocumentoIA(item?.papel, 250);
+            return [nome, papel].filter(Boolean).join(' — ');
+        }).filter(Boolean).slice(0, 20)
+        : [];
+
+    const datasValores = Array.isArray(dados.datasValores)
+        ? dados.datasValores.map(item => {
+            if (typeof item === 'string') return limitarTextoDocumentoIA(item, 700);
+            const descricao = limitarTextoDocumentoIA(item?.descricao, 350);
+            const valor = limitarTextoDocumentoIA(item?.valor, 200);
+            return [descricao, valor].filter(Boolean).join(': ');
+        }).filter(Boolean).slice(0, 30)
+        : [];
+
+    return {
+        tipoDocumento: limitarTextoDocumentoIA(dados.tipoDocumento || 'Não identificado', 300),
+        resumoExecutivo: limitarTextoDocumentoIA(dados.resumoExecutivo || textoFallback || 'Não foi possível gerar um resumo estruturado.', 8000),
+        partesPessoas: partes,
+        pontosRelevantes: limitarListaDocumentoIA(dados.pontosRelevantes, 25, 1200),
+        datasValores,
+        obrigacoesPrazos: limitarListaDocumentoIA(dados.obrigacoesPrazos, 25, 1200),
+        alertasAdvogado: limitarListaDocumentoIA(dados.alertasAdvogado, 25, 1200),
+        informacoesNaoIdentificadas: limitarListaDocumentoIA(dados.informacoesNaoIdentificadas, 20, 700)
+    };
+}
+
+function montarPromptAnaliseDocumento(ticket, media) {
+    const area = limitarTextoDocumentoIA(ticket?.area || ticket?.menuOptionTitle || 'não definida', 180);
+    const legenda = media.caption ? `\nLEGENDA ENVIADA COM O ARQUIVO: ${JSON.stringify(media.caption)}` : '';
+
+    return `Você atua somente como leitor e organizador de documentos para um escritório de advocacia brasileiro.
+
+Analise EXCLUSIVAMENTE o arquivo anexado. Não dê parecer jurídico, não conclua procedência, não invente fatos e não preencha lacunas por suposição.
+
+CONTEXTO INTERNO DO TICKET:
+Área informada: ${JSON.stringify(area)}${legenda}
+
+Retorne SOMENTE JSON válido, sem markdown, neste formato:
+{
+  "tipoDocumento":"",
+  "partesPessoas":[{"nome":"","papel":""}],
+  "resumoExecutivo":"",
+  "pontosRelevantes":[""],
+  "datasValores":[{"descricao":"","valor":""}],
+  "obrigacoesPrazos":[""],
+  "alertasAdvogado":[""],
+  "informacoesNaoIdentificadas":[""]
+}
+
+REGRAS:
+1. O resumo executivo deve ser objetivo, fiel e compreensível em até 8 parágrafos curtos.
+2. Identifique nomes, empresas e papéis somente quando constarem do arquivo.
+3. Destaque fatos, cláusulas, pedidos, obrigações, prazos, datas, valores, números de processo, protocolos e documentos citados quando existirem.
+4. Em alertasAdvogado, aponte somente pontos do próprio arquivo que merecem conferência humana: ausência aparente de assinatura, divergência interna, página ilegível, prazo mencionado, cláusula relevante ou informação incompleta. Não dê orientação jurídica conclusiva.
+5. Quando uma informação não existir ou não puder ser lida, registre isso em informacoesNaoIdentificadas.
+6. Não reproduza integralmente o documento e não faça transcrição extensa.
+7. Preserve números, datas e valores exatamente como forem identificados no arquivo.
+8. Se o arquivo for áudio ou vídeo, resuma também o conteúdo falado relevante.
+9. Se o arquivo for uma imagem/print, descreva apenas o que estiver visualmente legível.
+10. Se não conseguir ler o conteúdo, deixe isso explícito e não invente.`;
+}
+
+async function registrarDocumentoIANoTicket(ticket, documento) {
+    if (!ticket?._id || !ticket?.ticketNumber || !documento?.messageId) return false;
+
+    const filtroNovo = {
+        _id: ticket._id,
+        'documentosIA.messageId': { $ne: documento.messageId }
+    };
+
+    const resultado = await ticketsColl.updateOne(
+        filtroNovo,
+        { $push: { documentosIA: { $each: [documento], $slice: -DOCUMENT_AI_MAX_ITEMS } } }
+    );
+
+    if (!resultado.modifiedCount) return false;
+
+    if (ticketHistoryColl) {
+        await ticketHistoryColl.updateOne(
+            {
+                _id: ticket.ticketNumber,
+                'documentosIA.messageId': { $ne: documento.messageId }
+            },
+            {
+                $push: { documentosIA: { $each: [documento], $slice: -DOCUMENT_AI_MAX_ITEMS } },
+                $set: { updatedAt: Date.now() }
+            }
+        );
+    }
+
+    io.emit('ticket_document_ai_updated', {
+        ticketNumber: ticket.ticketNumber,
+        messageId: documento.messageId,
+        status: documento.statusAnalise
+    });
+
+    return true;
+}
+
+async function atualizarDocumentoIA(ticket, messageId, campos = {}) {
+    if (!ticket?.ticketNumber || !messageId) return;
+
+    const sets = {};
+    for (const [chave, valor] of Object.entries(campos)) {
+        sets[`documentosIA.$.${chave}`] = valor;
+    }
+
+    const tarefas = [];
+    if (ticket?._id && ticketsColl) {
+        tarefas.push(
+            ticketsColl.updateOne(
+                { _id: ticket._id, 'documentosIA.messageId': messageId },
+                { $set: sets }
+            )
+        );
+    }
+
+    if (ticketHistoryColl) {
+        tarefas.push(
+            ticketHistoryColl.updateOne(
+                { _id: ticket.ticketNumber, 'documentosIA.messageId': messageId },
+                { $set: { ...sets, updatedAt: Date.now() } }
+            )
+        );
+    }
+
+    await Promise.allSettled(tarefas);
+
+    io.emit('ticket_document_ai_updated', {
+        ticketNumber: ticket.ticketNumber,
+        messageId,
+        status: campos.statusAnalise || null
+    });
+}
+
+async function processarArquivoRecebidoComIA(ticket, msg) {
+    const media = extrairMidiaAnalisavel(msg);
+    if (!media || !ticket?.ticketNumber) return;
+
+    const messageId = String(msg?.key?.id || '').trim();
+    if (!messageId) return;
+
+    const agora = Date.now();
+    const documentoInicial = {
+        id: `wa_${messageId}`,
+        messageId,
+        nomeArquivo: media.nomeArquivo,
+        mimeType: media.mimeType,
+        tipoMidia: media.tipo,
+        tamanhoBytes: media.tamanhoDeclarado,
+        caption: media.caption || null,
+        recebidoEm: agora,
+        statusAnalise: 'analisando',
+        promptVersion: DOCUMENT_AI_PROMPT_VERSION,
+        analisadoEm: null,
+        erro: null
+    };
+
+    const registrado = await registrarDocumentoIANoTicket(ticket, documentoInicial);
+    if (!registrado) return; // idempotência para eventual upsert duplicado do WhatsApp
+
+    if (!geminiModel) {
+        await atualizarDocumentoIA(ticket, messageId, {
+            statusAnalise: 'erro',
+            erro: 'Gemini indisponível. Verifique a chave configurada em api_keys.',
+            analisadoEm: Date.now()
+        });
+        return;
+    }
+
+    if (!mimeSuportadoDiretamentePeloGemini(media.mimeType)) {
+        await atualizarDocumentoIA(ticket, messageId, {
+            statusAnalise: 'nao_suportado',
+            erro: mensagemMimeNaoSuportado(media.nomeArquivo, media.mimeType),
+            analisadoEm: Date.now()
+        });
+        return;
+    }
+
+    const limite = limiteArquivoGemini(media.mimeType);
+    if (media.tamanhoDeclarado && media.tamanhoDeclarado > limite) {
+        await atualizarDocumentoIA(ticket, messageId, {
+            statusAnalise: 'erro',
+            erro: `Arquivo acima do limite automático configurado (${Math.round(limite / 1024 / 1024)} MB).`,
+            analisadoEm: Date.now()
+        });
+        return;
+    }
+
+    try {
+        const buffer = await downloadMediaMessage(
+            msg,
+            'buffer',
+            {},
+            {
+                logger: P({ level: 'silent' }),
+                reuploadRequest: sock?.updateMediaMessage
+            }
+        );
+
+        if (!Buffer.isBuffer(buffer) || !buffer.length) {
+            throw new Error('O WhatsApp não retornou conteúdo para este arquivo.');
+        }
+
+        if (buffer.length > limite) {
+            throw new Error(`Arquivo acima do limite automático configurado (${Math.round(limite / 1024 / 1024)} MB).`);
+        }
+
+        await atualizarDocumentoIA(ticket, messageId, {
+            tamanhoBytes: buffer.length,
+            statusAnalise: 'processando_ia',
+            erro: null
+        });
+
+        const prompt = montarPromptAnaliseDocumento(ticket, media);
+        const partesEntrada = [{ text: prompt }];
+
+        // A API do Gemini orienta que arquivos textuais sejam enviados como texto,
+        // enquanto PDF/imagem/áudio/vídeo seguem como inlineData.
+        if (mimeEhTextoParaGemini(media.mimeType)) {
+            const conteudoTexto = buffer.toString('utf8').slice(0, 5_000_000);
+            partesEntrada.push({
+                text: `\n\nCONTEÚDO DO ARQUIVO ${JSON.stringify(media.nomeArquivo)}:\n${conteudoTexto}`
+            });
+        } else {
+            partesEntrada.push({
+                inlineData: {
+                    mimeType: media.mimeType,
+                    data: buffer.toString('base64')
+                }
+            });
+        }
+
+        const resultado = await geminiModel.generateContent(partesEntrada);
+
+        const resposta = await resultado.response;
+        const textoResposta = String(resposta.text() || '').trim();
+        const parsed = extrairJsonIA(textoResposta);
+        const analise = normalizarAnaliseDocumentoIA(parsed, textoResposta);
+
+        await atualizarDocumentoIA(ticket, messageId, {
+            ...analise,
+            statusAnalise: 'concluida',
+            analisadoEm: Date.now(),
+            erro: null
+        });
+
+        console.log(`[Ticket ${ticket.ticketNumber}] Arquivo ${media.nomeArquivo} analisado pelo Gemini.`);
+    } catch (err) {
+        console.error(`[Ticket ${ticket.ticketNumber}] Falha na análise de arquivo com Gemini:`, err?.message || err);
+        await atualizarDocumentoIA(ticket, messageId, {
+            statusAnalise: 'erro',
+            erro: limitarTextoDocumentoIA(err?.message || 'Não foi possível analisar o arquivo.', 1000),
+            analisadoEm: Date.now()
+        });
+    }
+}
+
+function iniciarAnaliseArquivoSemBloquearFluxo(ticket, msg) {
+    if (!ticket || !extrairMidiaAnalisavel(msg)) return;
+    processarArquivoRecebidoComIA(ticket, msg).catch(err => {
+        console.error('[Documentos IA] Erro não tratado:', err?.message || err);
+    });
+}
 
 // Cache curto da base de conhecimento para evitar leitura integral do MongoDB
 // a cada mensagem recebida. O cache é invalidado quando a base é alterada.
@@ -1753,6 +2212,10 @@ async function startBot() {
             ticketHistoryColl.createIndex({ ticketNumber: 1 }, { unique: true }),
             ticketHistoryColl.createIndex({ identificadores: 1 }),
             ticketsColl.createIndex({ ticketNumber: 1 }, { unique: true, sparse: true }),
+            ticketsColl.createIndex({ status: 1, lastActivity: 1 }),
+            ticketsColl.createIndex({ area: 1, lastActivity: 1 }),
+            ticketsColl.createIndex({ 'documentosIA.messageId': 1 }),
+            ticketHistoryColl.createIndex({ 'documentosIA.messageId': 1 }),
             menuOptionsColl.createIndex({ ordem: 1 })
         ]);
         
@@ -1804,12 +2267,7 @@ sock.ev.on('messages.upsert', async m => {
         msg.message.documentMessage?.caption ||
         '';
     const texto = textoRaw.trim();
-    const isMedia = !!(
-        msg.message.imageMessage ||
-        msg.message.videoMessage ||
-        msg.message.documentMessage ||
-        msg.message.audioMessage
-    );
+    const isMedia = !!extrairMidiaAnalisavel(msg);
 
     const timeoutNovoAtendimento = 2 * 60 * 60 * 1000;
     const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
@@ -1879,6 +2337,19 @@ sock.ev.on('messages.upsert', async m => {
             ticket = null;
         }
 
+        // Se já existe um ticket válido, qualquer PDF/imagem/áudio/vídeo/documento
+        // recebido do cliente é analisado em paralelo pelo Gemini. A rotina é
+        // idempotente pelo messageId e não altera o estado da triagem.
+        let analiseArquivoDisparada = false;
+        const dispararAnaliseArquivo = (ticketAtual) => {
+            if (analiseArquivoDisparada || !ticketAtual) return;
+            if (!extrairMidiaAnalisavel(msg)) return;
+            analiseArquivoDisparada = true;
+            iniciarAnaliseArquivoSemBloquearFluxo(ticketAtual, msg);
+        };
+
+        dispararAnaliseArquivo(ticket);
+
         const situacaoHorario = await verificarHorarioFuncionamento();
         const atendimentoHumanoJaAtivo = ticket?.status === 'em_atendimento_humano';
         const jaAguardandoEspecialista = ticket?.status === 'aguardando_especialista';
@@ -1907,6 +2378,8 @@ sock.ev.on('messages.upsert', async m => {
                     paused: false
                 });
             }
+
+            dispararAnaliseArquivo(ticket);
 
             await encaminharAutomaticamenteForaDoHorario(ticket, rawJid, {
                 texto,
@@ -1981,6 +2454,8 @@ sock.ev.on('messages.upsert', async m => {
                 cliente,
                 paused: false
             });
+
+            dispararAnaliseArquivo(ticket);
 
             await sendBotMsg(rawJid, {
                 text: await mensagemRecepcao(cliente, ticket.ticketNumber)
@@ -3171,6 +3646,291 @@ async function resolverWhatsAppCliente(cliente) {
 
     return numero;
 }
+
+// Painel operacional de tickets ativos.
+// A classificação abaixo separa o que depende da equipe do que ainda depende do cliente.
+const TICKET_STATUS_LABELS = {
+    aguardando_opcao: 'Aguardando opção do cliente',
+    aguardando_pergunta_fluxo: 'Triagem em andamento',
+    aguardando_detalhes: 'Aguardando relato do cliente',
+    aguardando_detalhes_fora_horario: 'Aguardando relato fora do horário',
+    aguardando_cadastro: 'Aguardando decisão de cadastro',
+    aguardando_whatsapp_cadastro: 'Aguardando WhatsApp do cliente',
+    aguardando_especialista: 'Aguardando especialista',
+    em_atendimento_humano: 'Em atendimento humano'
+};
+
+function classificarPendenciaTicket(ticket = {}) {
+    const status = String(ticket.status || '').trim();
+
+    if (status === 'aguardando_especialista') {
+        return {
+            tipo: 'advogado',
+            label: 'Pendente da equipe',
+            ordem: 1,
+            statusLabel: TICKET_STATUS_LABELS[status]
+        };
+    }
+
+    if (status === 'em_atendimento_humano') {
+        return {
+            tipo: 'atendimento',
+            label: 'Em atendimento',
+            ordem: 2,
+            statusLabel: TICKET_STATUS_LABELS[status]
+        };
+    }
+
+    const estadosCliente = new Set([
+        'aguardando_opcao',
+        'aguardando_pergunta_fluxo',
+        'aguardando_detalhes',
+        'aguardando_detalhes_fora_horario',
+        'aguardando_cadastro',
+        'aguardando_whatsapp_cadastro'
+    ]);
+
+    if (estadosCliente.has(status)) {
+        return {
+            tipo: 'cliente',
+            label: 'Aguardando cliente',
+            ordem: 3,
+            statusLabel: TICKET_STATUS_LABELS[status] || 'Aguardando cliente'
+        };
+    }
+
+    return {
+        tipo: 'outro',
+        label: 'Revisar estado',
+        ordem: 4,
+        statusLabel: TICKET_STATUS_LABELS[status] || status || 'Estado não informado'
+    };
+}
+
+function progressoTriagemTicket(ticket = {}, respostas = []) {
+    const perguntas = Array.isArray(ticket.perguntasFluxo) ? ticket.perguntasFluxo : [];
+    const total = perguntas.length;
+    const respondidas = Math.min(
+        total || Number.MAX_SAFE_INTEGER,
+        Array.isArray(respostas) ? respostas.length : 0
+    );
+
+    if (!total) {
+        return {
+            total: 0,
+            respondidas: 0,
+            percentual: ticket.status === 'aguardando_especialista' || ticket.status === 'em_atendimento_humano' ? 100 : 0,
+            possuiFluxo: false
+        };
+    }
+
+    return {
+        total,
+        respondidas,
+        percentual: Math.round((respondidas / total) * 100),
+        possuiFluxo: true
+    };
+}
+
+function whatsappDoTicket(ticket = {}) {
+    return extrairNumeroWhatsAppDeFontes(
+        ticket.numeroReal,
+        ticket.whatsappNumbers,
+        ticket.identificadores,
+        ticket.lastRawJid
+    );
+}
+
+app.get('/api/tickets/active', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!ticketsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
+
+    try {
+        const tickets = await ticketsColl.find(
+            {},
+            {
+                projection: {
+                    id: 1,
+                    ticketNumber: 1,
+                    status: 1,
+                    origem: 1,
+                    clienteId: 1,
+                    clienteNome: 1,
+                    cpf: 1,
+                    clienteCadastrado: 1,
+                    numeroReal: 1,
+                    whatsappNumbers: 1,
+                    identificadores: 1,
+                    lastRawJid: 1,
+                    area: 1,
+                    menuOptionId: 1,
+                    menuOptionTitle: 1,
+                    menuOptionEmoji: 1,
+                    perguntasFluxo: 1,
+                    indicePerguntaFluxo: 1,
+                    respostasFluxo: 1,
+                    foraHorario: 1,
+                    paused: 1,
+                    until: 1,
+                    lastActivity: 1,
+                    createdAt: 1,
+                    documentosIA: 1
+                }
+            }
+        ).toArray();
+
+        const ticketNumbers = tickets.map(ticket => ticket.ticketNumber).filter(Boolean);
+        const historicos = ticketHistoryColl && ticketNumbers.length
+            ? await ticketHistoryColl.find(
+                { _id: { $in: ticketNumbers } },
+                {
+                    projection: {
+                        ticketNumber: 1,
+                        respostasTriagem: 1,
+                        perguntasTriagem: 1,
+                        ultimoRelatoForaHorario: 1,
+                        ultimoRelatoForaHorarioPossuiMidia: 1,
+                        triagemConcluidaEm: 1,
+                        cadastroRealizado: 1,
+                        cadastroRecusado: 1,
+                        fluxoForaHorarioIniciadoEm: 1,
+                        documentosIA: 1
+                    }
+                }
+            ).toArray()
+            : [];
+
+        const historicoPorTicket = new Map(
+            historicos.map(item => [String(item.ticketNumber || item._id), item])
+        );
+
+        const agora = Date.now();
+        const duasHorasMs = 2 * 60 * 60 * 1000;
+
+        const itens = tickets.map(ticket => {
+            const historico = historicoPorTicket.get(String(ticket.ticketNumber)) || {};
+            const classificacao = classificarPendenciaTicket(ticket);
+            const respostas = Array.isArray(ticket.respostasFluxo) && ticket.respostasFluxo.length
+                ? ticket.respostasFluxo
+                : (Array.isArray(historico.respostasTriagem) ? historico.respostasTriagem : []);
+            const triagem = progressoTriagemTicket(ticket, respostas);
+            const ultimaAtividade = Number(ticket.lastActivity || ticket.createdAt || 0) || null;
+            const criadoEm = Number(ticket.createdAt || 0) || null;
+            const idadeUltimaAtividadeMs = ultimaAtividade ? Math.max(0, agora - ultimaAtividade) : null;
+            const perguntaAtual = perguntaAtualDoTicket(ticket);
+
+            // A cópia do histórico pode ter sido atualizada depois da cópia ativa.
+            // Mesclamos por messageId e damos preferência ao registro mais recente/concluído.
+            const docsAtivos = Array.isArray(ticket.documentosIA) ? ticket.documentosIA : [];
+            const docsHistorico = Array.isArray(historico.documentosIA) ? historico.documentosIA : [];
+            const documentosPorMensagem = new Map();
+            [...docsAtivos, ...docsHistorico].forEach(doc => {
+                const chave = String(doc?.messageId || doc?.id || '');
+                if (!chave) return;
+                const anterior = documentosPorMensagem.get(chave);
+                const peso = estado => ({ concluida: 5, erro: 4, nao_suportado: 4, processando_ia: 3, analisando: 2 }[estado] || 1);
+                if (!anterior || peso(doc?.statusAnalise) >= peso(anterior?.statusAnalise)) {
+                    documentosPorMensagem.set(chave, doc);
+                }
+            });
+            const documentosIA = [...documentosPorMensagem.values()]
+                .sort((a, b) => Number(b?.recebidoEm || 0) - Number(a?.recebidoEm || 0))
+                .slice(0, DOCUMENT_AI_MAX_ITEMS)
+                .map(doc => ({
+                    id: doc?.id || null,
+                    messageId: doc?.messageId || null,
+                    nomeArquivo: doc?.nomeArquivo || 'arquivo',
+                    mimeType: doc?.mimeType || null,
+                    tipoMidia: doc?.tipoMidia || null,
+                    tamanhoBytes: numeroSeguroDeLong(doc?.tamanhoBytes),
+                    caption: doc?.caption || null,
+                    recebidoEm: doc?.recebidoEm || null,
+                    statusAnalise: doc?.statusAnalise || 'analisando',
+                    analisadoEm: doc?.analisadoEm || null,
+                    tipoDocumento: doc?.tipoDocumento || null,
+                    resumoExecutivo: doc?.resumoExecutivo || null,
+                    partesPessoas: Array.isArray(doc?.partesPessoas) ? doc.partesPessoas : [],
+                    pontosRelevantes: Array.isArray(doc?.pontosRelevantes) ? doc.pontosRelevantes : [],
+                    datasValores: Array.isArray(doc?.datasValores) ? doc.datasValores : [],
+                    obrigacoesPrazos: Array.isArray(doc?.obrigacoesPrazos) ? doc.obrigacoesPrazos : [],
+                    alertasAdvogado: Array.isArray(doc?.alertasAdvogado) ? doc.alertasAdvogado : [],
+                    informacoesNaoIdentificadas: Array.isArray(doc?.informacoesNaoIdentificadas) ? doc.informacoesNaoIdentificadas : [],
+                    erro: doc?.erro || null
+                }));
+
+            return {
+                id: ticket.id || null,
+                ticketNumber: ticket.ticketNumber || null,
+                status: ticket.status || null,
+                statusLabel: classificacao.statusLabel,
+                pendenciaTipo: classificacao.tipo,
+                pendenciaLabel: classificacao.label,
+                pendenciaOrdem: classificacao.ordem,
+                pendenteHaMaisDe2h: classificacao.tipo === 'advogado' && idadeUltimaAtividadeMs !== null && idadeUltimaAtividadeMs >= duasHorasMs,
+                origem: ticket.origem || 'organico',
+                clienteNome: ticket.clienteNome || null,
+                cpf: ticket.cpf || null,
+                clienteCadastrado: ticket.clienteCadastrado === true,
+                whatsapp: whatsappDoTicket(ticket),
+                area: ticket.area || null,
+                menuOptionTitle: ticket.menuOptionTitle || null,
+                menuOptionEmoji: ticket.menuOptionEmoji || '',
+                foraHorario: ticket.foraHorario === true,
+                paused: ticket.paused === true,
+                until: ticket.until || null,
+                createdAt: criadoEm,
+                lastActivity: ultimaAtividade,
+                idadeUltimaAtividadeMs,
+                triagem,
+                perguntaAtual: perguntaAtual?.texto || null,
+                respostasTriagem: respostas.map(item => ({
+                    pergunta: String(item?.pergunta || '').trim(),
+                    resposta: String(item?.resposta || '').trim(),
+                    tipo: String(item?.tipo || 'texto').trim(),
+                    respondidaEm: item?.respondidaEm || null
+                })),
+                relatoForaHorario: historico.ultimoRelatoForaHorario || null,
+                relatoForaHorarioPossuiMidia: historico.ultimoRelatoForaHorarioPossuiMidia === true,
+                triagemConcluidaEm: historico.triagemConcluidaEm || null,
+                documentosIA,
+                documentosResumo: {
+                    total: documentosIA.length,
+                    concluidos: documentosIA.filter(doc => doc.statusAnalise === 'concluida').length,
+                    processando: documentosIA.filter(doc => ['analisando', 'processando_ia'].includes(doc.statusAnalise)).length,
+                    comErro: documentosIA.filter(doc => ['erro', 'nao_suportado'].includes(doc.statusAnalise)).length
+                }
+            };
+        });
+
+        itens.sort((a, b) => {
+            if (a.pendenciaOrdem !== b.pendenciaOrdem) return a.pendenciaOrdem - b.pendenciaOrdem;
+
+            // Na fila pendente da equipe, os mais antigos aparecem primeiro.
+            if (a.pendenciaTipo === 'advogado') {
+                return Number(a.lastActivity || 0) - Number(b.lastActivity || 0);
+            }
+
+            return Number(b.lastActivity || 0) - Number(a.lastActivity || 0);
+        });
+
+        const resumo = {
+            total: itens.length,
+            pendentesEquipe: itens.filter(item => item.pendenciaTipo === 'advogado').length,
+            emAtendimento: itens.filter(item => item.pendenciaTipo === 'atendimento').length,
+            aguardandoCliente: itens.filter(item => item.pendenciaTipo === 'cliente').length,
+            pendentesMaisDe2h: itens.filter(item => item.pendenteHaMaisDe2h).length
+        };
+
+        res.json({
+            generatedAt: agora,
+            resumo,
+            tickets: itens
+        });
+    } catch (err) {
+        console.error('[Tickets] Erro ao carregar painel de tickets ativos:', err);
+        res.status(500).json({ erro: 'Não foi possível carregar os tickets ativos.' });
+    }
+});
 
 // Clientes cadastrados no atendimento.
 app.get('/api/clients', async (req, res) => {
