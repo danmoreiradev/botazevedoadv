@@ -630,6 +630,9 @@
             padding: 0;
             overflow-y: auto;
             overflow-x: hidden;
+            /* Reserva o espaço da barra de rolagem mesmo em telas curtas.
+               Evita o cabeçalho/conteúdo "encolher" quando a página fica longa. */
+            scrollbar-gutter: stable;
         }
 
         .topbar {
@@ -637,6 +640,10 @@
             top: 0;
             z-index: 1010;
             height: 78px;
+            min-height: 78px;
+            max-height: 78px;
+            flex: 0 0 78px;
+            width: 100%;
             padding: 0 34px;
             display: flex;
             align-items: center;
@@ -997,6 +1004,99 @@
             color: #59626f;
             background: var(--surface-soft);
             border-color: #cfd5dc;
+        }
+
+
+        /* Paginação das opções de atendimento */
+        .menu-pagination {
+            margin: 16px 0;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            color: var(--text-soft);
+            background: #f8f9fb;
+            border: 1px solid var(--border);
+            border-radius: 13px;
+            scroll-margin-top: 96px;
+        }
+        .menu-pagination:first-of-type { margin-top: 0; }
+        .menu-pagination-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-size: .78rem;
+            font-weight: 650;
+        }
+        .menu-pagination-info strong { color: var(--adv-blue); }
+        .menu-page-size-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            color: var(--text-muted);
+            font-size: .74rem;
+        }
+        .menu-page-size {
+            width: auto;
+            min-width: 72px;
+            min-height: 34px;
+            padding: 5px 28px 5px 9px;
+            border-radius: 9px;
+            font-size: .76rem;
+        }
+        .menu-pagination-pages {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .menu-page-btn {
+            min-width: 36px;
+            height: 36px;
+            padding: 0 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #5f6874;
+            background: #fff;
+            border: 1px solid var(--border-strong);
+            border-radius: 9px;
+            font-size: .76rem;
+            font-weight: 750;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .menu-page-btn:hover:not(:disabled) {
+            color: var(--adv-blue);
+            background: #f2f4f6;
+            border-color: #bcc4cd;
+        }
+        .menu-page-btn.active {
+            color: #fff;
+            background: var(--adv-blue);
+            border-color: var(--adv-blue);
+            box-shadow: 0 5px 12px rgba(41,45,56,.13);
+        }
+        .menu-page-btn:disabled {
+            opacity: .42;
+            cursor: not-allowed;
+        }
+        .menu-page-ellipsis {
+            min-width: 22px;
+            text-align: center;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+
+        @media (max-width: 575.98px) {
+            .menu-pagination { align-items: stretch; }
+            .menu-pagination-info,
+            .menu-pagination-pages { width: 100%; }
+            .menu-pagination-pages { justify-content: flex-start; }
         }
 
         /* Dynamic option editor */
@@ -2226,7 +2326,9 @@
                 </div>
 
                 <div id="menu-options-loading" class="text-muted py-4 text-center">Carregando opções...</div>
+                <div id="menu-options-pagination-top" class="menu-pagination hidden" aria-label="Paginação das opções de atendimento"></div>
                 <div id="menu-options-list"></div>
+                <div id="menu-options-pagination-bottom" class="menu-pagination hidden" aria-label="Paginação das opções de atendimento"></div>
             </div>
         </div>
 
@@ -3443,6 +3545,7 @@ function renderizarLista(itens) {
                 status.textContent = '✓ Nova opção criada.';
                 limparFormularioNovaOpcao();
                 alternarFormularioNovaOpcao(false);
+                window.menuOptionsGoLastAfterLoad = true;
                 window.menuOptionsLoaded = false;
                 await carregarOpcoesAtendimento(true);
             } catch (err) {
@@ -3455,16 +3558,194 @@ function renderizarLista(itens) {
             }
         }
 
+        const MENU_OPTIONS_DEFAULT_PAGE_SIZE = 2;
+        const MENU_OPTIONS_PAGE_SIZE_KEY = 'aj_menu_options_page_size';
+        window.menuOptionsPage = Number.isInteger(window.menuOptionsPage) ? window.menuOptionsPage : 1;
+        window.menuOptionDrafts = window.menuOptionDrafts || {};
+
+        function obterTamanhoPaginaOpcoes() {
+            const salvo = Number.parseInt(localStorage.getItem(MENU_OPTIONS_PAGE_SIZE_KEY) || '', 10);
+            return [2, 4, 6].includes(salvo) ? salvo : MENU_OPTIONS_DEFAULT_PAGE_SIZE;
+        }
+
+        function capturarRascunhosVisiveisOpcoes() {
+            const container = document.getElementById('menu-options-list');
+            if (!container) return;
+
+            container.querySelectorAll('.menu-option-card').forEach(card => {
+                const id = String(card.dataset.optionId || '');
+                if (!id) return;
+
+                const emoji = card.querySelector('.menu-emoji');
+                const titulo = card.querySelector('.menu-titulo');
+                const area = card.querySelector('.menu-area');
+                const resposta = card.querySelector('.menu-resposta');
+                const ativo = card.querySelector('.menu-ativo');
+                const perguntasContainer = card.querySelector('.menu-perguntas-list');
+
+                if (!emoji || !titulo || !area || !resposta || !ativo) return;
+
+                window.menuOptionDrafts[id] = {
+                    emoji: emoji.value,
+                    titulo: titulo.value,
+                    area: area.value,
+                    resposta: resposta.value,
+                    ativo: ativo.checked,
+                    perguntas: perguntasContainer ? coletarPerguntasDoEditor(perguntasContainer) : []
+                };
+            });
+        }
+
+        function opcaoComRascunho(opcao = {}) {
+            const id = String(opcao?._id || '');
+            const draft = id ? window.menuOptionDrafts?.[id] : null;
+            return draft ? { ...opcao, ...draft } : opcao;
+        }
+
+        function montarNumerosPaginacao(totalPaginas, paginaAtual) {
+            if (totalPaginas <= 7) return Array.from({ length: totalPaginas }, (_, i) => i + 1);
+
+            const paginas = new Set([1, totalPaginas, paginaAtual]);
+            if (paginaAtual > 2) paginas.add(paginaAtual - 1);
+            if (paginaAtual < totalPaginas - 1) paginas.add(paginaAtual + 1);
+            if (paginaAtual <= 3) [2, 3, 4].forEach(p => paginas.add(p));
+            if (paginaAtual >= totalPaginas - 2) [totalPaginas - 3, totalPaginas - 2, totalPaginas - 1].forEach(p => paginas.add(p));
+
+            const ordenadas = [...paginas].filter(p => p >= 1 && p <= totalPaginas).sort((a, b) => a - b);
+            const resultado = [];
+            let anterior = 0;
+            for (const pagina of ordenadas) {
+                if (anterior && pagina - anterior > 1) resultado.push('...');
+                resultado.push(pagina);
+                anterior = pagina;
+            }
+            return resultado;
+        }
+
+        function renderizarControlePaginacaoOpcoes(elemento, totalItens, paginaAtual, tamanhoPagina, totalPaginas) {
+            if (!elemento) return;
+            if (!totalItens) {
+                elemento.classList.add('hidden');
+                elemento.innerHTML = '';
+                return;
+            }
+
+            const inicio = ((paginaAtual - 1) * tamanhoPagina) + 1;
+            const fim = Math.min(paginaAtual * tamanhoPagina, totalItens);
+            const paginas = montarNumerosPaginacao(totalPaginas, paginaAtual);
+
+            const botoes = paginas.map(item => {
+                if (item === '...') return '<span class="menu-page-ellipsis" aria-hidden="true">…</span>';
+                const ativa = item === paginaAtual ? ' active' : '';
+                const atual = item === paginaAtual ? ' aria-current="page"' : '';
+                return `<button type="button" class="menu-page-btn${ativa}"${atual} onclick="irParaPaginaOpcoes(${item})">${item}</button>`;
+            }).join('');
+
+            elemento.innerHTML = `
+                <div class="menu-pagination-info">
+                    <span>Mostrando <strong>${inicio}–${fim}</strong> de <strong>${totalItens}</strong> opções</span>
+                    <label class="menu-page-size-wrap">
+                        Exibir
+                        <select class="form-select menu-page-size" onchange="alterarTamanhoPaginaOpcoes(this.value)" aria-label="Quantidade de opções por página">
+                            <option value="2"${tamanhoPagina === 2 ? ' selected' : ''}>2</option>
+                            <option value="4"${tamanhoPagina === 4 ? ' selected' : ''}>4</option>
+                            <option value="6"${tamanhoPagina === 6 ? ' selected' : ''}>6</option>
+                        </select>
+                        por página
+                    </label>
+                </div>
+                <div class="menu-pagination-pages">
+                    <button type="button" class="menu-page-btn" onclick="irParaPaginaOpcoes(${paginaAtual - 1})" ${paginaAtual <= 1 ? 'disabled' : ''} aria-label="Página anterior"><i class="bi bi-chevron-left"></i></button>
+                    ${botoes}
+                    <button type="button" class="menu-page-btn" onclick="irParaPaginaOpcoes(${paginaAtual + 1})" ${paginaAtual >= totalPaginas ? 'disabled' : ''} aria-label="Próxima página"><i class="bi bi-chevron-right"></i></button>
+                </div>`;
+            elemento.classList.remove('hidden');
+        }
+
+        function renderizarPaginaOpcoes({ ancorar = false } = {}) {
+            const container = document.getElementById('menu-options-list');
+            const paginacaoTop = document.getElementById('menu-options-pagination-top');
+            const paginacaoBottom = document.getElementById('menu-options-pagination-bottom');
+            const dados = Array.isArray(window.menuOptionsData) ? window.menuOptionsData : [];
+            if (!container) return;
+
+            const tamanhoPagina = obterTamanhoPaginaOpcoes();
+            const totalPaginas = Math.max(1, Math.ceil(dados.length / tamanhoPagina));
+
+            if (window.menuOptionsGoLastAfterLoad) {
+                window.menuOptionsPage = totalPaginas;
+                window.menuOptionsGoLastAfterLoad = false;
+            }
+
+            window.menuOptionsPage = Math.min(Math.max(Number(window.menuOptionsPage) || 1, 1), totalPaginas);
+            const paginaAtual = window.menuOptionsPage;
+            const inicio = (paginaAtual - 1) * tamanhoPagina;
+            const fim = Math.min(inicio + tamanhoPagina, dados.length);
+
+            container.innerHTML = '';
+            if (!dados.length) {
+                container.innerHTML = '<p class="text-muted">Nenhuma opção encontrada.</p>';
+                renderizarControlePaginacaoOpcoes(paginacaoTop, 0, 1, tamanhoPagina, 1);
+                renderizarControlePaginacaoOpcoes(paginacaoBottom, 0, 1, tamanhoPagina, 1);
+                return;
+            }
+
+            // Numeração do WhatsApp continua global, mesmo exibindo só uma página do painel.
+            let numeroAtivo = 0;
+            const numeroWhatsAppPorIndice = dados.map(opcao => {
+                if (opcao.ativo !== false) numeroAtivo += 1;
+                return opcao.ativo !== false ? numeroAtivo : null;
+            });
+
+            for (let index = inicio; index < fim; index++) {
+                const opcao = opcaoComRascunho(dados[index]);
+                renderizarOpcaoAtendimento(container, opcao, index, numeroWhatsAppPorIndice[index]);
+            }
+
+            renderizarControlePaginacaoOpcoes(paginacaoTop, dados.length, paginaAtual, tamanhoPagina, totalPaginas);
+            renderizarControlePaginacaoOpcoes(paginacaoBottom, dados.length, paginaAtual, tamanhoPagina, totalPaginas);
+
+            if (ancorar) {
+                requestAnimationFrame(() => {
+                    paginacaoTop?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+            }
+        }
+
+        function irParaPaginaOpcoes(pagina) {
+            const dados = Array.isArray(window.menuOptionsData) ? window.menuOptionsData : [];
+            const tamanhoPagina = obterTamanhoPaginaOpcoes();
+            const totalPaginas = Math.max(1, Math.ceil(dados.length / tamanhoPagina));
+            const destino = Math.min(Math.max(Number(pagina) || 1, 1), totalPaginas);
+            if (destino === window.menuOptionsPage) return;
+
+            capturarRascunhosVisiveisOpcoes();
+            window.menuOptionsPage = destino;
+            renderizarPaginaOpcoes({ ancorar: true });
+        }
+
+        function alterarTamanhoPaginaOpcoes(valor) {
+            const novoTamanho = Number.parseInt(valor, 10);
+            if (![2, 4, 6].includes(novoTamanho)) return;
+
+            capturarRascunhosVisiveisOpcoes();
+            localStorage.setItem(MENU_OPTIONS_PAGE_SIZE_KEY, String(novoTamanho));
+            window.menuOptionsPage = 1;
+            renderizarPaginaOpcoes({ ancorar: true });
+        }
+
         async function carregarOpcoesAtendimento(forcar = false) {
             const container = document.getElementById('menu-options-list');
             const loading = document.getElementById('menu-options-loading');
 
             if (!container || !loading) return;
-            if (window.menuOptionsLoaded && !forcar) return;
+            if (window.menuOptionsLoaded && !forcar) {
+                renderizarPaginaOpcoes();
+                return;
+            }
 
             loading.textContent = 'Carregando opções...';
             loading.classList.remove('hidden');
-            container.innerHTML = '';
 
             try {
                 const res = await fetch('/api/menu-options');
@@ -3474,17 +3755,7 @@ function renderizarLista(itens) {
                 window.menuOptionsData = Array.isArray(opcoes) ? opcoes : [];
                 window.menuOptionsLoaded = true;
                 loading.classList.add('hidden');
-
-                if (!window.menuOptionsData.length) {
-                    container.innerHTML = '<p class="text-muted">Nenhuma opção encontrada.</p>';
-                    return;
-                }
-
-                let numeroAtivo = 0;
-                window.menuOptionsData.forEach((opcao, index) => {
-                    if (opcao.ativo !== false) numeroAtivo += 1;
-                    renderizarOpcaoAtendimento(container, opcao, index, opcao.ativo !== false ? numeroAtivo : null);
-                });
+                renderizarPaginaOpcoes();
             } catch (err) {
                 console.error(err);
                 loading.textContent = 'Não foi possível carregar as opções do atendimento.';
@@ -3691,6 +3962,7 @@ function renderizarLista(itens) {
 
                 status.className = 'menu-save-status text-success';
                 status.textContent = '✓ Alterações salvas. Novos atendimentos já usarão este fluxo.';
+                delete window.menuOptionDrafts?.[String(id)];
                 window.menuOptionsLoaded = false;
                 setTimeout(() => carregarOpcoesAtendimento(true), 350);
             } catch (err) {
@@ -3704,6 +3976,7 @@ function renderizarLista(itens) {
         }
 
         async function moverOpcaoAtendimento(id, direcao) {
+            capturarRascunhosVisiveisOpcoes();
             const opcoes = Array.isArray(window.menuOptionsData) ? [...window.menuOptionsData] : [];
             const atual = opcoes.findIndex(item => String(item._id) === String(id));
             const destino = atual + direcao;
@@ -3719,6 +3992,8 @@ function renderizarLista(itens) {
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.erro || 'Não foi possível alterar a ordem.');
+                const tamanhoPagina = obterTamanhoPaginaOpcoes();
+                window.menuOptionsPage = Math.floor(destino / tamanhoPagina) + 1;
                 window.menuOptionsLoaded = false;
                 await carregarOpcoesAtendimento(true);
             } catch (err) {
@@ -3734,6 +4009,7 @@ function renderizarLista(itens) {
                 const res = await fetch(`/api/menu-options/${encodeURIComponent(id)}`, { method: 'DELETE' });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.erro || 'Não foi possível excluir a opção.');
+                delete window.menuOptionDrafts?.[String(id)];
                 window.menuOptionsLoaded = false;
                 await carregarOpcoesAtendimento(true);
             } catch (err) {
