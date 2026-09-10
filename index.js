@@ -2730,37 +2730,61 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
         const cortesia = analiseIA.cortesia || detectarCortesiaMensagem(mensagemCliente);
         const aguardandoEquipe = ticket?.paused || ticket?.status === 'aguardando_especialista';
 
-        let baseCortesia = 'Olá!';
-        if (cortesia.saudacao && cortesia.agradecimento) {
-            baseCortesia = `${cortesia.saudacao}! Nós que agradecemos pelo contato.`;
-        } else if (cortesia.saudacao) {
-            baseCortesia = `${cortesia.saudacao}!`;
-        } else if (cortesia.agradecimento) {
-            baseCortesia = 'Nós que agradecemos pelo contato!';
+        // Cortesias curtas NÃO passam pelo Gemini. Para "bom dia", "obrigado",
+        // "valeu" etc., uma resposta pequena e previsível soa mais humana e evita
+        // que a IA repita nome, ticket ou o estado do atendimento sem necessidade.
+        // Cada categoria é respondida apenas UMA VEZ por ticket. Repetições posteriores
+        // são consumidas silenciosamente, sem disparar confirmação automática novamente.
+        const jaRespondeuSaudacao = !!ticket?.saudacaoAutomaticaRespondidaEm;
+        const jaRespondeuAgradecimento = !!ticket?.agradecimentoAutomaticoRespondidoEm;
+        const responderSaudacao = !!cortesia.saudacao && !jaRespondeuSaudacao;
+        const responderAgradecimento = !!cortesia.agradecimento && !jaRespondeuAgradecimento;
+        const agora = Date.now();
+
+        if (!responderSaudacao && !responderAgradecimento) {
+            await ticketsColl.updateOne(
+                { _id: ticket._id },
+                { $set: { lastActivity: agora } }
+            );
+            return true;
         }
 
-        if (aguardandoEquipe) {
-            baseCortesia += ` Seu ticket *${ticket.ticketNumber}* segue com nossa equipe, e o atendimento continuará por aqui.`;
+        let respostaCortesia = '';
+        if (responderSaudacao && responderAgradecimento) {
+            respostaCortesia = `${cortesia.saudacao}! Por nada.`;
+        } else if (responderSaudacao) {
+            respostaCortesia = `${cortesia.saudacao}!`;
+        } else if (responderAgradecimento) {
+            respostaCortesia = 'Por nada!';
         }
 
-        const respostaCortesia = await gerarRespostaHumanizadaIA({
-            tipo: 'cortesia_cliente',
-            mensagemCliente,
-            ticket,
-            mensagemBase: baseCortesia
-        });
-
+        // Só retomamos uma pergunta realmente pendente. Se o ticket já está com a equipe,
+        // não repetimos número do ticket nem status operacional após um simples agradecimento.
         const deveRetomarFluxo = !aguardandoEquipe && ticket?.status !== 'em_atendimento_humano';
         const retomada = deveRetomarFluxo ? await mensagemRetomadaFluxo(ticket) : '';
+        const textoFinal = `${respostaCortesia}${retomada}`.trim();
 
-        await sendBotMsg(jid, { text: `${respostaCortesia}${retomada}` });
+        if (textoFinal) {
+            await sendBotMsg(jid, { text: textoFinal });
+        }
+
+        const camposTicket = { lastActivity: agora };
+        const camposHistorico = { ultimaRespostaCortesiaEm: agora };
+
+        if (responderSaudacao) {
+            camposTicket.saudacaoAutomaticaRespondidaEm = agora;
+            camposHistorico.saudacaoAutomaticaRespondidaEm = agora;
+        }
+        if (responderAgradecimento) {
+            camposTicket.agradecimentoAutomaticoRespondidoEm = agora;
+            camposHistorico.agradecimentoAutomaticoRespondidoEm = agora;
+        }
+
         await ticketsColl.updateOne(
             { _id: ticket._id },
-            { $set: { lastActivity: Date.now() } }
+            { $set: camposTicket }
         );
-        await atualizarHistorico(ticket.ticketNumber, {
-            ultimaRespostaCortesiaEm: Date.now()
-        });
+        await atualizarHistorico(ticket.ticketNumber, camposHistorico);
         return true;
     }
 
