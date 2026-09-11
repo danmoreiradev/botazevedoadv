@@ -1932,7 +1932,7 @@ Se precisar enviar algum documento, pode anexar por aqui.`
     }
 ];
 
-const PERGUNTA_CADASTRO_CLIENTE = `Antes de finalizar a triagem, deseja se cadastrar como cliente para facilitar seus próximos atendimentos?
+const PERGUNTA_CADASTRO_CLIENTE = `Se quiser, posso deixar seu cadastro pronto para facilitar os próximos contatos com o escritório. Deseja se cadastrar?
 
 1️⃣ Sim
 2️⃣ Não`;
@@ -2457,27 +2457,24 @@ function detectarCortesiaMensagem(texto = '') {
     };
 }
 
-function aplicarCortesiaAoFallback(mensagemBase = '', mensagemCliente = '') {
-    let resposta = String(mensagemBase || '').trim();
-    if (!resposta) return resposta;
+function aplicarCortesiaAoFallback(mensagemBase = '') {
+    // Mensagens operacionais são continuação da conversa, e não uma nova abertura.
+    // Saudações/agradecimentos isolados são tratados em responderInterrupcaoIA().
+    return String(mensagemBase || '').trim();
+}
 
-    const cortesia = detectarCortesiaMensagem(mensagemCliente);
-    const prefixos = [];
+function removerSaudacaoDeMensagemOperacional(texto = '') {
+    const original = String(texto || '').trim();
+    if (!original) return original;
 
-    if (cortesia.saudacao) {
-        const saudacaoCorreta = /^(bom dia|boa tarde|boa noite)$/i.test(cortesia.saudacao)
-            ? saudacaoAtualEscritorio()
-            : cortesia.saudacao;
-        if (!normalizarTexto(resposta).startsWith(normalizarTexto(saudacaoCorreta))) {
-            prefixos.push(`${saudacaoCorreta}!`);
-        }
-    }
+    // Remove apenas uma saudação no início. Isso impede que a IA reabra a conversa
+    // com "Bom dia"/"Boa tarde" em cada etapa do fluxo.
+    const limpo = original.replace(
+        /^\s*(?:(?:bom\s+dia|boa\s+tarde|boa\s+noite|ol[aá]|oi|opa)(?:\s*[,!:.\-–—]+)?\s*)+/i,
+        ''
+    ).trim();
 
-    if (cortesia.agradecimento && !/agradec|obrigad|por nada|disposicao/i.test(normalizarTexto(resposta))) {
-        prefixos.push('Nós que agradecemos pelo retorno.');
-    }
-
-    return [...prefixos, resposta].filter(Boolean).join(' ');
+    return limpo || original;
 }
 
 function literaisProtegidosDaMensagem(mensagemBase = '', ticket = null) {
@@ -2520,12 +2517,10 @@ async function gerarRespostaHumanizadaIA({
     const base = String(mensagemBase || '').trim();
     if (!base) return '';
 
-    const fallback = aplicarCortesiaAoFallback(base, mensagemCliente);
-    if (!geminiModel) return fallback;
+    const fallback = aplicarCortesiaAoFallback(base);
+    if (!geminiModel) return removerSaudacaoDeMensagemOperacional(fallback);
 
     const literaisProtegidos = literaisProtegidosDaMensagem(base, ticket);
-    const cortesia = detectarCortesiaMensagem(mensagemCliente);
-    const saudacaoCorretaAgora = saudacaoAtualEscritorio();
     const nome = String(nomeCliente || ticket?.clienteNome || '').trim().slice(0, 120);
 
     const prompt = `Você revisa mensagens automáticas de WhatsApp de um escritório de advocacia brasileiro.
@@ -2539,23 +2534,24 @@ NOME DO CLIENTE, SE CONHECIDO: ${JSON.stringify(nome || null)}
 NÚMERO DO TICKET: ${JSON.stringify(ticket?.ticketNumber || null)}
 MENSAGEM-BASE: ${JSON.stringify(base)}
 
-SINAIS DE CORTESIA IDENTIFICADOS:
-- saudação recebida: ${JSON.stringify(cortesia.saudacao)}
-- saudação temporal correta AGORA em ${BUSINESS_HOURS_TIMEZONE}: ${JSON.stringify(saudacaoCorretaAgora)}
-- agradecimento: ${cortesia.agradecimento ? 'sim' : 'não'}
+CONTEXTO DE CONVERSA:
+Esta é uma mensagem de MEIO DE FLUXO. O atendimento já foi iniciado e o cliente não deve ser cumprimentado novamente nesta etapa.
+A saudação inicial é controlada separadamente pelo sistema.
 
 REGRAS OBRIGATÓRIAS:
 1. Preserve integralmente o sentido operacional da MENSAGEM-BASE. Não remova informação importante.
 2. Preserve EXATAMENTE números de ticket, horários, nomes e demais dados concretos presentes na MENSAGEM-BASE.
-3. Se usar saudação temporal, use EXCLUSIVAMENTE a "saudação temporal correta AGORA" informada acima. Nunca escreva "Bom dia", "Boa tarde" ou "Boa noite" em desacordo com esse valor. Não invente saudação temporal quando ela não for necessária.
-4. Se o cliente agradecer, retribua o agradecimento de forma natural.
-5. Não invente prazo, data, valor, análise jurídica, resultado, prioridade, urgência, disponibilidade de advogado ou promessa de retorno.
-6. Não diga "em breve", "logo", "aguarde um momento" ou equivalentes, salvo se essas expressões já estiverem na MENSAGEM-BASE.
-7. Não dê orientação jurídica e não acrescente fatos sobre o caso.
-8. Evite linguagem robótica como "um especialista dará continuidade ao atendimento". Prefira construções humanas como "nossa equipe seguirá com o atendimento por aqui", desde que mantenha o sentido da base.
-9. Use de 1 a 3 frases curtas. Pode usar no máximo 1 emoji, apenas se ficar natural. Não exagere em exclamações.
-10. O WhatsApp aceita *negrito*; mantenha o número do ticket destacado se ele já estiver destacado na base.
-11. Retorne SOMENTE a mensagem final, sem aspas, JSON, explicações ou markdown em bloco.`;
+3. É PROIBIDO começar esta resposta com "Bom dia", "Boa tarde", "Boa noite", "Olá", "Oi" ou "Opa". Não acrescente nenhuma saudação nesta rotina.
+4. Trate a mensagem como continuação natural da conversa. Não reabra o atendimento e não repita informações que a MENSAGEM-BASE não exige.
+5. Não responda automaticamente "nós que agradecemos" só porque o cliente usou uma expressão de cortesia junto com uma informação. Agradecimentos isolados são tratados em outra rotina.
+6. Evite frases burocráticas e repetitivas como "recebemos suas informações", "seu atendimento foi encaminhado", "um especialista dará continuidade" e "nossa equipe seguirá com o atendimento", salvo quando forem indispensáveis ao sentido da MENSAGEM-BASE.
+7. Prefira português conversacional, profissional e direto, como uma recepcionista jurídica experiente escrevendo no WhatsApp. Use aberturas como "Certo", "Tudo certo" ou "Sem problema" somente quando fizer sentido e sem transformar toda resposta em uma confirmação formal.
+8. Não invente prazo, data, valor, análise jurídica, resultado, prioridade, urgência, disponibilidade de advogado ou promessa de retorno.
+9. Não diga "em breve", "logo", "aguarde um momento" ou equivalentes, salvo se essas expressões já estiverem na MENSAGEM-BASE.
+10. Não dê orientação jurídica e não acrescente fatos sobre o caso.
+11. Use de 1 a 3 frases curtas. Evite emoji em mensagens operacionais, salvo se ele já fizer parte da MENSAGEM-BASE.
+12. O WhatsApp aceita *negrito*; preserve os trechos destacados da MENSAGEM-BASE.
+13. Retorne SOMENTE a mensagem final, sem aspas, JSON, explicações ou markdown em bloco.`;
 
     try {
         const timeout = new Promise((_, reject) => {
@@ -2569,10 +2565,19 @@ REGRAS OBRIGATÓRIAS:
         const response = await result.response;
         const humanizada = limparRespostaHumanizadaIA(response.text());
 
-        if (!humanizada) return fallback;
+        if (!humanizada) return removerSaudacaoDeMensagemOperacional(fallback);
+
+        // Em mensagens operacionais, qualquer saudação gerada pela IA é considerada
+        // uma reabertura indevida da conversa. Usamos o texto-base seguro em vez de
+        // deixar a mensagem soar repetitiva ou robótica.
+        if (/\b(?:bom\s+dia|boa\s+tarde|boa\s+noite|ol[aá]|oi|opa)\b/i.test(humanizada)) {
+            console.warn('[Humanização IA] Resposta descartada por inserir saudação no meio do fluxo.');
+            return removerSaudacaoDeMensagemOperacional(fallback);
+        }
+
         if (literaisProtegidos.some(literal => !humanizada.includes(literal))) {
             console.warn('[Humanização IA] Resposta descartada por alterar/remover dado protegido.');
-            return fallback;
+            return removerSaudacaoDeMensagemOperacional(fallback);
         }
 
         // Última proteção contra promessas que não existiam no texto-base.
@@ -2582,24 +2587,15 @@ REGRAS OBRIGATÓRIAS:
             !/\b(em breve|logo|aguarde um momento|ainda hoje|nas proximas horas)\b/.test(baseNormalizada);
         if (adicionouPromessaTemporal) {
             console.warn('[Humanização IA] Resposta descartada por adicionar promessa temporal.');
-            return fallback;
+            return removerSaudacaoDeMensagemOperacional(fallback);
         }
 
-        // Proteção determinística contra saudações incompatíveis com o horário real
-        // do escritório. Ex.: 09:53 em São Paulo nunca pode sair como "Boa tarde".
-        const saudacoesTemporais = ['Bom dia', 'Boa tarde', 'Boa noite'];
-        const saudacaoTemporalEncontrada = saudacoesTemporais.find(item =>
-            new RegExp(`\\b${item.replace(' ', '\\s+')}\\b`, 'i').test(humanizada)
-        );
-        if (saudacaoTemporalEncontrada && normalizarTexto(saudacaoTemporalEncontrada) !== normalizarTexto(saudacaoCorretaAgora)) {
-            console.warn(`[Humanização IA] Resposta descartada por saudação fora do horário: ${saudacaoTemporalEncontrada}; esperado: ${saudacaoCorretaAgora}.`);
-            return fallback;
-        }
-
-        return humanizada;
+        // Camada determinística adicional: mesmo que o modelo ignore o prompt,
+        // uma saudação não reaparece no meio do fluxo.
+        return removerSaudacaoDeMensagemOperacional(humanizada);
     } catch (err) {
         console.warn('[Humanização IA] Usando fallback seguro:', err?.message || err);
-        return fallback;
+        return removerSaudacaoDeMensagemOperacional(fallback);
     }
 }
 
@@ -3664,7 +3660,7 @@ async function concluirTriagemEAvancar(ticket, jid, mensagemCliente = '') {
         await encaminharParaEspecialista(
             ticket,
             jid,
-            `Perfeito, recebemos as informações. O ticket *${ticket.ticketNumber}* já foi encaminhado à nossa equipe jurídica, que seguirá com o atendimento por aqui.`,
+            `Tudo certo. Registrei essas informações no ticket *${ticket.ticketNumber}*. Seu atendimento continua por aqui.`,
             { mensagemCliente, tipo: 'triagem_concluida_cliente_cadastrado' }
         );
         return;
@@ -3674,7 +3670,7 @@ async function concluirTriagemEAvancar(ticket, jid, mensagemCliente = '') {
         tipo: 'triagem_concluida_antes_cadastro',
         mensagemCliente,
         ticket,
-        mensagemBase: `Perfeito, recebemos as informações. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.`
+        mensagemBase: `Obrigado. Já deixei essas informações registradas no ticket *${ticket.ticketNumber}*.`
     });
 
     await sendBotMsg(jid, {
@@ -4132,9 +4128,25 @@ sock.ev.on('messages.upsert', async m => {
             });
             dispararAnaliseArquivo(ticket);
 
-            await sendBotMsg(rawJid, {
+            const recepcaoEnviada = await sendBotMsg(rawJid, {
                 text: await mensagemRecepcao(cliente, ticket.ticketNumber, texto)
             });
+
+            // A recepção já contém a saudação do atendimento. Marcamos isso no ticket
+            // para que nenhuma rotina posterior trate uma etapa do fluxo como nova abertura.
+            if (recepcaoEnviada) {
+                const agoraRecepcao = Date.now();
+                await Promise.allSettled([
+                    ticketsColl.updateOne(
+                        { _id: ticket._id },
+                        { $set: { saudacaoAutomaticaRespondidaEm: agoraRecepcao } }
+                    ),
+                    atualizarHistorico(ticket.ticketNumber, {
+                        saudacaoAutomaticaRespondidaEm: agoraRecepcao
+                    })
+                ]);
+                ticket.saudacaoAutomaticaRespondidaEm = agoraRecepcao;
+            }
 
             console.log(`[Ticket ${ticket.ticketNumber}] Novo atendimento aberto${cliente ? ` para ${cliente.nome}` : ''}.`);
             return;
@@ -4195,7 +4207,7 @@ sock.ev.on('messages.upsert', async m => {
                 await encaminharParaEspecialista(
                     ticket,
                     rawJid,
-                    `Recebemos as informações. O ticket *${ticket.ticketNumber}* ficou registrado com nossa equipe e terá continuidade no próximo período de atendimento.`,
+                    `Certo. As informações ficaram registradas no ticket *${ticket.ticketNumber}*. Nossa equipe poderá consultá-las no próximo período de atendimento.`,
                     { mensagemCliente: texto, tipo: 'encaminhamento_fora_horario' }
                 );
                 return;
@@ -4205,7 +4217,7 @@ sock.ev.on('messages.upsert', async m => {
                 tipo: 'relato_fora_horario_recebido_antes_cadastro',
                 mensagemCliente: texto,
                 ticket,
-                mensagemBase: `Recebemos as informações do seu caso. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.`
+                mensagemBase: `Certo. Deixei as informações do seu caso registradas no ticket *${ticket.ticketNumber}*.`
             });
 
             await sendBotMsg(rawJid, {
@@ -4466,7 +4478,7 @@ sock.ev.on('messages.upsert', async m => {
                 await encaminharParaEspecialista(
                     ticket,
                     rawJid,
-                    `Perfeito, recebemos seu relato. O ticket *${ticket.ticketNumber}* já está com nossa equipe jurídica, que seguirá com o atendimento por aqui.`,
+                    `Certo. Registrei seu relato no ticket *${ticket.ticketNumber}*. Seu atendimento continua por aqui.`,
                     { mensagemCliente: texto, tipo: 'relato_recebido_cliente_cadastrado' }
                 );
                 return;
@@ -4476,7 +4488,7 @@ sock.ev.on('messages.upsert', async m => {
                 tipo: 'relato_recebido_antes_cadastro',
                 mensagemCliente: texto,
                 ticket,
-                mensagemBase: `Perfeito, recebemos seu relato. Seu atendimento está registrado no ticket *${ticket.ticketNumber}*.`
+                mensagemBase: `Certo. Registrei seu relato no ticket *${ticket.ticketNumber}*.`
             });
 
             await sendBotMsg(rawJid, {
@@ -4507,7 +4519,7 @@ sock.ev.on('messages.upsert', async m => {
                 await encaminharParaEspecialista(
                     ticket,
                     rawJid,
-                    `Sem problema, o cadastro é opcional. Seu ticket *${ticket.ticketNumber}* já foi encaminhado à nossa equipe, e o atendimento seguirá por aqui.`,
+                    `Sem problema. O cadastro é opcional e seu atendimento continua normalmente por aqui.`,
                     { mensagemCliente: texto, tipo: 'cadastro_opcional_recusado' }
                 );
                 return;
@@ -4515,13 +4527,13 @@ sock.ev.on('messages.upsert', async m => {
 
             if (!respostaPositiva(texto)) {
                 await sendBotMsg(rawJid, {
-                    text: `Deseja se cadastrar como cliente?\n\n1️⃣ Sim\n2️⃣ Não`
+                    text: `Para eu seguir, escolha uma das opções abaixo:\n\n1️⃣ Sim\n2️⃣ Não`
                 });
                 return;
             }
 
             await sendBotMsg(rawJid, {
-                text: `Perfeito. Informe seu *nome e sobrenome*:`
+                text: `Certo. Para fazer o cadastro, me informe seu *nome e sobrenome*:`
             });
 
             await ticketsColl.updateOne(
@@ -4640,7 +4652,7 @@ sock.ev.on('messages.upsert', async m => {
                 mensagemCliente: texto,
                 ticket,
                 nomeCliente: nomeInfo.nome,
-                mensagemBase: `Perfeito, ${nomeInfo.nome}. Seu cadastro foi concluído e, nos próximos atendimentos, conseguiremos identificá-lo automaticamente. O ticket *${ticket.ticketNumber}* já está com nossa equipe, que seguirá com o atendimento por aqui.`
+                mensagemBase: `Cadastro concluído, ${nomeInfo.nome}. Nos próximos contatos, conseguiremos localizar seus dados automaticamente. Seu atendimento continua por aqui.`
             });
 
             await sendBotMsg(rawJid, { text: mensagemCadastroConcluido });
@@ -4707,7 +4719,7 @@ sock.ev.on('messages.upsert', async m => {
                 mensagemCliente: texto,
                 ticket,
                 nomeCliente: nomeInfo.nome,
-                mensagemBase: `Perfeito, ${nomeInfo.nome}. Seu cadastro foi concluído e, nos próximos atendimentos, conseguiremos identificá-lo automaticamente. O ticket *${ticket.ticketNumber}* já está com nossa equipe, que seguirá com o atendimento por aqui.`
+                mensagemBase: `Cadastro concluído, ${nomeInfo.nome}. Nos próximos contatos, conseguiremos localizar seus dados automaticamente. Seu atendimento continua por aqui.`
             });
 
             await sendBotMsg(rawJid, { text: mensagemCadastroConcluido });
