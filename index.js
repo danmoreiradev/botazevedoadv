@@ -850,6 +850,86 @@ const panelMessageIds = new Set();
 const panelPendingJids = new Set();
 const processing = new Set();
 
+// -----------------------------------------------------------------------------
+// FILA DE MENSAGENS / RESPONSIVIDADE DO FLUXO
+// -----------------------------------------------------------------------------
+// Mensagens do mesmo contato são processadas em série. Isso evita que duas respostas
+// enviadas em sequência leiam o mesmo estado do ticket e avancem o fluxo fora de ordem.
+const inboundContactLocks = new Map();
+
+// Se o cliente repetir exatamente a mesma resposta em poucos segundos porque ainda não
+// viu o retorno do bot, a segunda cópia é descartada. Sem esta proteção, por exemplo,
+// dois "1" rápidos poderiam selecionar o menu e depois responder indevidamente à
+// primeira pergunta da triagem.
+const INBOUND_DUPLICATE_WINDOW_MS = 3500;
+const recentInboundText = new Map();
+
+// Cache leve de LID -> PN. O vínculo quase nunca muda durante a sessão e não há motivo
+// para consultar o repositório Signal em toda mensagem recebida.
+const LID_PN_RUNTIME_CACHE_TTL_MS = 30 * 60 * 1000;
+const lidPnRuntimeCache = new Map();
+
+function chaveFilaContato(msg, rawJid = '') {
+    const candidatos = [
+        msg?.key?.remoteJidAlt,
+        msg?.key?.senderPn,
+        msg?.key?.participantPn,
+        msg?.senderPn,
+        rawJid
+    ].filter(Boolean);
+
+    const pn = candidatos
+        .map(valor => normalizarJid(String(valor)))
+        .find(jid => jid?.endsWith('@s.whatsapp.net'));
+
+    return pn || normalizarJid(rawJid) || String(rawJid || 'desconhecido');
+}
+
+async function adquirirLockContato(chave) {
+    const key = String(chave || 'desconhecido');
+
+    // Mutex assíncrono simples, sem polling. Quando a mensagem anterior termina, apenas
+    // uma das aguardando assume o lock; as demais continuam na fila.
+    while (inboundContactLocks.has(key)) {
+        try { await inboundContactLocks.get(key); } catch (_) {}
+    }
+
+    let liberar;
+    const lock = new Promise(resolve => { liberar = resolve; });
+    inboundContactLocks.set(key, lock);
+
+    return () => {
+        if (inboundContactLocks.get(key) === lock) inboundContactLocks.delete(key);
+        liberar();
+    };
+}
+
+function repeticaoRapidaTexto(chave, texto, isMedia = false) {
+    if (isMedia) return false;
+    const normalizado = normalizarTexto(String(texto || '')).replace(/\s+/g, ' ').trim();
+    if (!normalizado) return false;
+
+    const key = String(chave || 'desconhecido');
+    const agora = Date.now();
+    const anterior = recentInboundText.get(key);
+    const duplicada = !!(
+        anterior &&
+        anterior.texto === normalizado &&
+        (agora - anterior.recebidaEm) <= INBOUND_DUPLICATE_WINDOW_MS
+    );
+
+    recentInboundText.set(key, { texto: normalizado, recebidaEm: agora });
+
+    // Limpeza oportunista para impedir crescimento indefinido do Map.
+    if (recentInboundText.size > 1000) {
+        for (const [id, item] of recentInboundText) {
+            if ((agora - Number(item?.recebidaEm || 0)) > 60_000) recentInboundText.delete(id);
+        }
+    }
+
+    return duplicada;
+}
+
 let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl, ticketMessagesColl;
 
 // -----------------------------------------------------------------------------
@@ -1767,6 +1847,11 @@ async function sendBotMsg(jid, content) {
         registrarMensagemAutomaticaChat(jid, sent, content).catch(err => {
             console.warn('[Chat] Falha ao registrar mensagem automática:', err?.message || err);
         });
+
+        // Remove o indicador de digitação sem bloquear a entrega da mensagem.
+        if (sock?.sendPresenceUpdate) {
+            Promise.resolve(sock.sendPresenceUpdate('paused', jid)).catch(() => {});
+        }
 
         return sent;
     } catch (err) {
@@ -3202,10 +3287,19 @@ async function resolverPnDeLids(...fontes) {
     }
 
     for (const lid of lids) {
+        const cache = lidPnRuntimeCache.get(lid);
+        if (cache && (Date.now() - Number(cache.salvoEm || 0)) < LID_PN_RUNTIME_CACHE_TTL_MS) {
+            return { numero: cache.numero, pnJid: cache.pnJid, lid };
+        }
+
         try {
             const pn = await sock.signalRepository.lidMapping.getPNForLID(lid);
             const numero = normalizarNumeroWhatsApp(pn);
-            if (numero) return { numero, pnJid: normalizarJid(pn), lid };
+            if (numero) {
+                const pnJid = normalizarJid(pn);
+                lidPnRuntimeCache.set(lid, { numero, pnJid, salvoEm: Date.now() });
+                return { numero, pnJid, lid };
+            }
         } catch (err) {
             console.warn(`[LID] Não foi possível resolver ${lid}:`, err?.message || err);
         }
@@ -3313,19 +3407,34 @@ async function obterIdentificadoresContato(msg, rawJid) {
     // par no repositório do Baileys. Isso evita perder a relação antes do cadastro.
     const lidsObservados = [...jids].filter(jid => String(jid).endsWith('@lid'));
     const pnsObservados = [...jids].filter(jid => String(jid).endsWith('@s.whatsapp.net'));
-    if (lidsObservados.length && pnsObservados.length && sock?.signalRepository?.lidMapping?.storeLIDPNMappings) {
-        try {
-            await sock.signalRepository.lidMapping.storeLIDPNMappings(
-                lidsObservados.flatMap(lid => pnsObservados.map(pn => ({ lid, pn })))
-            );
-        } catch (err) {
-            console.warn('[LID] Não foi possível persistir o par LID/PN observado:', err?.message || err);
+    if (lidsObservados.length && pnsObservados.length) {
+        // Se a própria mensagem já trouxe PN e LID, não bloqueamos o fluxo consultando
+        // novamente o Signal. Alimentamos o cache local imediatamente e persistimos o
+        // mapeamento em segundo plano.
+        const pnPreferido = pnsObservados[0];
+        const numeroPn = normalizarNumeroWhatsApp(pnPreferido);
+        if (numeroPn) {
+            for (const lid of lidsObservados) {
+                lidPnRuntimeCache.set(lid, { numero: numeroPn, pnJid: pnPreferido, salvoEm: Date.now() });
+            }
+        }
+
+        if (sock?.signalRepository?.lidMapping?.storeLIDPNMappings) {
+            Promise.resolve(
+                sock.signalRepository.lidMapping.storeLIDPNMappings(
+                    lidsObservados.flatMap(lid => pnsObservados.map(pn => ({ lid, pn })))
+                )
+            ).catch(err => {
+                console.warn('[LID] Não foi possível persistir o par LID/PN observado:', err?.message || err);
+            });
         }
     }
 
-    // Tenta resolver qualquer LID observado na mensagem para o PN real.
-    const mapeamentoLid = await resolverPnDeLids([...jids]);
-    if (mapeamentoLid?.pnJid) adicionarJid(mapeamentoLid.pnJid);
+    // Só consulta o repositório quando a mensagem trouxe LID sem nenhum PN.
+    if (lidsObservados.length && !pnsObservados.length) {
+        const mapeamentoLid = await resolverPnDeLids([...jids]);
+        if (mapeamentoLid?.pnJid) adicionarJid(mapeamentoLid.pnJid);
+    }
 
     // O número telefônico é um identificador adicional. Nunca tratamos o número interno do @lid como telefone.
     for (const numero of numeros) {
@@ -3907,6 +4016,25 @@ sock.ev.on('messages.upsert', async m => {
     const texto = textoRaw.trim();
     const isMedia = !!extrairMidiaAnalisavel(msg);
 
+    const chaveFila = chaveFilaContato(msg, rawJid);
+
+    // O usuário não precisa reenviar a mesma resposta enquanto o servidor trabalha.
+    // A primeira mensagem continua sendo processada normalmente; a repetição imediata
+    // é apenas ignorada para não avançar duas etapas do fluxo.
+    if (!isMe && repeticaoRapidaTexto(chaveFila, texto, isMedia)) {
+        console.log(`[Fluxo] Repetição rápida ignorada para ${chaveFila}: ${JSON.stringify(texto.slice(0, 80))}`);
+        return;
+    }
+
+    // Feedback visual imediato no WhatsApp. É fire-and-forget para nunca aumentar a
+    // latência da resposta real.
+    if (!isMe && sock?.sendPresenceUpdate) {
+        Promise.resolve(sock.sendPresenceUpdate('composing', rawJid)).catch(() => {});
+    }
+
+    const inicioProcessamentoMensagem = Date.now();
+    const liberarFilaContato = await adquirirLockContato(chaveFila);
+
     const timeoutNovoAtendimento = 2 * 60 * 60 * 1000;
     const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
 
@@ -3994,7 +4122,7 @@ sock.ev.on('messages.upsert', async m => {
         // Registra a mensagem do cliente uma única vez quando já existe ticket.
         // Chamadas adicionais abaixo são seguras por causa do índice único messageId.
         if (ticket) {
-            await registrarMensagemClienteChat(ticket, msg).catch(err => {
+            registrarMensagemClienteChat(ticket, msg).catch(err => {
                 console.warn('[Chat] Falha ao registrar mensagem recebida:', err?.message || err);
             });
         }
@@ -4043,7 +4171,7 @@ sock.ev.on('messages.upsert', async m => {
                 });
             }
 
-            await registrarMensagemClienteChat(ticket, msg).catch(err => {
+            registrarMensagemClienteChat(ticket, msg).catch(err => {
                 console.warn('[Chat] Falha ao registrar primeira mensagem fora do horário:', err?.message || err);
             });
             dispararAnaliseArquivo(ticket);
@@ -4123,7 +4251,7 @@ sock.ev.on('messages.upsert', async m => {
                 notificarPainel: true
             });
 
-            await registrarMensagemClienteChat(ticket, msg).catch(err => {
+            registrarMensagemClienteChat(ticket, msg).catch(err => {
                 console.warn('[Chat] Falha ao registrar primeira mensagem do ticket:', err?.message || err);
             });
             dispararAnaliseArquivo(ticket);
@@ -4153,7 +4281,9 @@ sock.ev.on('messages.upsert', async m => {
         }
 
         // Atualiza os identificadores observados no ticket ativo. Isso ajuda a ligar PN e LID do mesmo contato.
-        await ticketsColl.updateOne(
+        // Metadados de identidade não fazem parte do caminho crítico da resposta.
+        // Persistimos em paralelo; os updates de estado abaixo continuam sendo aguardados.
+        ticketsColl.updateOne(
             { _id: ticket._id },
             {
                 $set: {
@@ -4166,7 +4296,9 @@ sock.ev.on('messages.upsert', async m => {
                     whatsappNumbers: { $each: contato.whatsappNumbers }
                 }
             }
-        );
+        ).catch(err => {
+            console.warn('[Performance] Falha ao atualizar identificadores em segundo plano:', err?.message || err);
+        });
 
         // Se a mensagem atual era uma dúvida respondível pela base, responde agora e mantém
         // exatamente o mesmo passo do fluxo para a próxima mensagem do cliente.
@@ -4283,7 +4415,7 @@ sock.ev.on('messages.upsert', async m => {
                     }
                 );
 
-                await atualizarHistorico(ticket.ticketNumber, {
+                atualizarHistorico(ticket.ticketNumber, {
                     area,
                     menuOptionId: opcaoSelecionada._id,
                     menuOptionTitle: opcaoSelecionada.titulo,
@@ -4291,7 +4423,7 @@ sock.ev.on('messages.upsert', async m => {
                     status: 'aguardando_pergunta_fluxo',
                     perguntasTriagem: perguntasFluxo.map(({ id, texto, respostasAceitas, ordem }) => ({ id, texto, respostasAceitas: respostasAceitas || [], ordem })),
                     respostasTriagem: []
-                });
+                }).catch(err => console.warn('[Histórico] Falha ao registrar seleção de menu:', err?.message || err));
 
                 if (respostaArea) {
                     await sendBotMsg(rawJid, { text: respostaArea });
@@ -4433,12 +4565,12 @@ sock.ev.on('messages.upsert', async m => {
                 }
             );
 
-            await atualizarHistorico(ticket.ticketNumber, {
+            atualizarHistorico(ticket.ticketNumber, {
                 respostasTriagem: respostasAtualizadas,
                 triagemPerguntaAtual: proximoIndice,
                 triagemTotalPerguntas: perguntas.length,
                 ...(temProximaPergunta ? {} : { triagemConcluidaEm: Date.now() })
-            });
+            }).catch(err => console.warn('[Histórico] Falha ao registrar etapa da triagem:', err?.message || err));
 
             if (temProximaPergunta) {
                 await sendBotMsg(rawJid, { text: formatarPerguntaParaEnvio(perguntas[proximoIndice]) });
@@ -4532,10 +4664,6 @@ sock.ev.on('messages.upsert', async m => {
                 return;
             }
 
-            await sendBotMsg(rawJid, {
-                text: `Certo. Para fazer o cadastro, me informe seu *nome e sobrenome*:`
-            });
-
             await ticketsColl.updateOne(
                 { _id: ticket._id },
                 {
@@ -4546,6 +4674,10 @@ sock.ev.on('messages.upsert', async m => {
                     }
                 }
             );
+
+            await sendBotMsg(rawJid, {
+                text: `Certo. Para fazer o cadastro, me informe seu *nome e sobrenome*:`
+            });
             return;
         }
 
@@ -4560,10 +4692,6 @@ sock.ev.on('messages.upsert', async m => {
                 return;
             }
 
-            await sendBotMsg(rawJid, {
-                text: `Obrigado, ${nomeInfo.nome}. Agora digite seu *CPF* com 11 números:`
-            });
-
             await ticketsColl.updateOne(
                 { _id: ticket._id },
                 {
@@ -4576,6 +4704,10 @@ sock.ev.on('messages.upsert', async m => {
                     }
                 }
             );
+
+            await sendBotMsg(rawJid, {
+                text: `Obrigado, ${nomeInfo.nome}. Agora digite seu *CPF* com 11 números:`
+            });
             return;
         }
 
@@ -4761,6 +4893,12 @@ sock.ev.on('messages.upsert', async m => {
         );
     } catch (err) {
         console.error('Erro interno no atendimento:', err);
+    } finally {
+        liberarFilaContato();
+        const duracao = Date.now() - inicioProcessamentoMensagem;
+        if (duracao >= 1200) {
+            console.warn(`[Performance] Mensagem ${msgId} de ${chaveFila} levou ${duracao}ms para ser processada.`);
+        }
     }
 });
 
@@ -4775,6 +4913,11 @@ sock.ev.on('messages.upsert', async m => {
 
                 if (!lidNormalizado || !numero) return;
                 const agora = Date.now();
+                lidPnRuntimeCache.set(lidNormalizado, {
+                    numero,
+                    pnJid: pnNormalizado || `${numero}@s.whatsapp.net`,
+                    salvoEm: agora
+                });
 
                 // Importante: o evento pode chegar ANTES de o usuário aceitar virar
                 // cliente. Por isso atualizamos também ticket ativo e histórico, e não
