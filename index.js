@@ -846,6 +846,11 @@ let lastQr = null;
 let currentUser = null;
 let sock;
 const botMessageIds = new Set();
+// Proteção contra corrida: o Baileys pode emitir o upsert da própria mensagem antes
+// de sendMessage() resolver e antes de termos o messageId em botMessageIds. Enquanto
+// um envio automático estiver pendente para o JID, qualquer upsert fromMe desse JID
+// é tratado como automático, nunca como intervenção humana.
+const botPendingJids = new Set();
 const panelMessageIds = new Set();
 const panelPendingJids = new Set();
 const processing = new Set();
@@ -857,12 +862,16 @@ const processing = new Set();
 // enviadas em sequência leiam o mesmo estado do ticket e avancem o fluxo fora de ordem.
 const inboundContactLocks = new Map();
 
-// Se o cliente repetir exatamente a mesma resposta em poucos segundos porque ainda não
-// viu o retorno do bot, a segunda cópia é descartada. Sem esta proteção, por exemplo,
-// dois "1" rápidos poderiam selecionar o menu e depois responder indevidamente à
-// primeira pergunta da triagem.
-const INBOUND_DUPLICATE_WINDOW_MS = 3500;
-const recentInboundText = new Map();
+// Deduplicação por ID real da mensagem. O Baileys pode reenviar o mesmo upsert em
+// reconexões/atualizações; o mesmo messageId nunca deve avançar o fluxo duas vezes.
+const PROCESSED_MESSAGE_TTL_MS = 10 * 60 * 1000;
+const processedMessageIds = new Map();
+
+// Enquanto uma mensagem textual ainda está em processamento, uma segunda cópia
+// idêntica do MESMO contato é ignorada. Diferente da versão anterior, não usamos uma
+// janela fixa depois do recebimento: assim uma resposta legítima igual à anterior
+// pode ser usada na pergunta seguinte assim que o bot efetivamente terminar a etapa.
+const inboundPayloadInFlight = new Set();
 
 // Cache leve de LID -> PN. O vínculo quase nunca muda durante a sessão e não há motivo
 // para consultar o repositório Signal em toda mensagem recebida.
@@ -904,30 +913,70 @@ async function adquirirLockContato(chave) {
     };
 }
 
-function repeticaoRapidaTexto(chave, texto, isMedia = false) {
-    if (isMedia) return false;
-    const normalizado = normalizarTexto(String(texto || '')).replace(/\s+/g, ' ').trim();
-    if (!normalizado) return false;
-
-    const key = String(chave || 'desconhecido');
-    const agora = Date.now();
-    const anterior = recentInboundText.get(key);
-    const duplicada = !!(
-        anterior &&
-        anterior.texto === normalizado &&
-        (agora - anterior.recebidaEm) <= INBOUND_DUPLICATE_WINDOW_MS
-    );
-
-    recentInboundText.set(key, { texto: normalizado, recebidaEm: agora });
-
-    // Limpeza oportunista para impedir crescimento indefinido do Map.
-    if (recentInboundText.size > 1000) {
-        for (const [id, item] of recentInboundText) {
-            if ((agora - Number(item?.recebidaEm || 0)) > 60_000) recentInboundText.delete(id);
+function limparCacheMensagensProcessadas(agora = Date.now()) {
+    if (processedMessageIds.size < 1000) return;
+    for (const [id, processadaEm] of processedMessageIds) {
+        if ((agora - Number(processadaEm || 0)) > PROCESSED_MESSAGE_TTL_MS) {
+            processedMessageIds.delete(id);
         }
     }
+}
 
-    return duplicada;
+function reservarMensagemParaProcessamento(messageId) {
+    const id = String(messageId || '').trim();
+    if (!id) return false;
+
+    const agora = Date.now();
+    const processadaEm = processedMessageIds.get(id);
+    if (processing.has(id)) return false;
+    if (processadaEm && (agora - processadaEm) <= PROCESSED_MESSAGE_TTL_MS) return false;
+
+    if (processadaEm) processedMessageIds.delete(id);
+    processing.add(id);
+    limparCacheMensagensProcessadas(agora);
+    return true;
+}
+
+function concluirMensagemProcessada(messageId) {
+    const id = String(messageId || '').trim();
+    if (!id) return;
+    processing.delete(id);
+    processedMessageIds.set(id, Date.now());
+}
+
+function timestampMensagemMs(msg) {
+    const numero = numeroSeguroDeLong(msg?.messageTimestamp);
+    if (!numero) return null;
+    // messageTimestamp do WhatsApp é normalmente expresso em segundos Unix.
+    return numero < 10_000_000_000 ? numero * 1000 : numero;
+}
+
+function mensagemUpsertEhRecente(msg, upsertType = 'notify') {
+    // "notify" representa mensagem nova em tempo real. "append" também pode carregar
+    // mensagem recente após reconexão, mas não devemos reprocessar histórico antigo.
+    if (String(upsertType || '').toLowerCase() !== 'append') return true;
+    const ts = timestampMensagemMs(msg);
+    if (!ts) return true;
+    return (Date.now() - ts) <= 5 * 60 * 1000;
+}
+
+function criarFingerprintPayload(chave, texto = '', isMedia = false, messageId = '') {
+    if (isMedia) return null; // anexos são deduplicados pelo messageId, nunca pelo nome/conteúdo
+    const normalizado = normalizarTexto(String(texto || '')).replace(/\s+/g, ' ').trim();
+    if (!normalizado) return null;
+    return `${String(chave || 'desconhecido')}::${normalizado}`;
+}
+
+function reservarPayloadEntrada(chave, texto = '', isMedia = false, messageId = '') {
+    const fingerprint = criarFingerprintPayload(chave, texto, isMedia, messageId);
+    if (!fingerprint) return { fingerprint: null, duplicado: false };
+    if (inboundPayloadInFlight.has(fingerprint)) return { fingerprint, duplicado: true };
+    inboundPayloadInFlight.add(fingerprint);
+    return { fingerprint, duplicado: false };
+}
+
+function liberarPayloadEntrada(fingerprint) {
+    if (fingerprint) inboundPayloadInFlight.delete(fingerprint);
 }
 
 let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl, ticketMessagesColl;
@@ -1832,9 +1881,21 @@ function emitirNotificacaoPainel({
 }
 
 async function sendBotMsg(jid, content) {
+    const inicioEnvio = Date.now();
+    const jidNormalizadoBot = normalizarJid(jid) || String(jid || '');
+    if (jidNormalizadoBot) {
+        botPendingJids.add(jidNormalizadoBot);
+        // Failsafe caso o envio seja interrompido antes do finally.
+        setTimeout(() => botPendingJids.delete(jidNormalizadoBot), 8000);
+    }
+
     try {
         const sent = await enviarMensagemBaileys(jid, content);
         const id = sent?.key?.id;
+        const duracaoEnvio = Date.now() - inicioEnvio;
+        if (duracaoEnvio >= 700) {
+            console.warn(`[Performance][WhatsApp] sendMessage para ${normalizarJid(jid) || jid} levou ${duracaoEnvio}ms.`);
+        }
 
         // Mantém um conjunto de IDs enviados pelo próprio bot.
         // Evita confundir mensagens simultâneas do bot com intervenção humana.
@@ -1857,6 +1918,12 @@ async function sendBotMsg(jid, content) {
     } catch (err) {
         console.error('Erro ao enviar:', err);
         return null;
+    } finally {
+        // Mantém uma pequena margem para cobrir o upsert local que pode chegar logo
+        // depois da resolução do sendMessage().
+        if (jidNormalizadoBot) {
+            setTimeout(() => botPendingJids.delete(jidNormalizadoBot), 1500);
+        }
     }
 }
 
@@ -2490,7 +2557,7 @@ function normalizarTexto(texto = '') {
 // A IA melhora somente a forma da mensagem. Dados operacionais (como número do
 // ticket e horários) são validados antes do envio. Se o Gemini estiver indisponível
 // ou ultrapassar o tempo limite, o texto-base humanizado é usado sem interromper o fluxo.
-const HUMANIZACAO_IA_TIMEOUT_MS = 6500;
+const HUMANIZACAO_IA_TIMEOUT_MS = 2200;
 const HUMANIZACAO_IA_MAX_CHARS = 1200;
 
 function saudacaoAtualEscritorio(data = new Date()) {
@@ -3367,7 +3434,7 @@ async function resolverNumeroWhatsAppCadastro(ticket, contato, rawJid, numeroInf
     };
 }
 
-async function obterIdentificadoresContato(msg, rawJid) {
+async function obterIdentificadoresContato(msg, rawJid, { resolverLid = true } = {}) {
     const jids = new Set();
     const numeros = new Set();
 
@@ -3430,10 +3497,22 @@ async function obterIdentificadoresContato(msg, rawJid) {
         }
     }
 
-    // Só consulta o repositório quando a mensagem trouxe LID sem nenhum PN.
+    // Consultar o repositório Signal para converter LID -> PN pode custar centenas de
+    // milissegundos. No caminho normal do chatbot primeiro usamos apenas IDs já presentes
+    // na própria mensagem/cache. A resolução completa fica para o fallback quando nenhum
+    // ticket é encontrado ou quando o número real é necessário para cadastro/envio.
     if (lidsObservados.length && !pnsObservados.length) {
-        const mapeamentoLid = await resolverPnDeLids([...jids]);
-        if (mapeamentoLid?.pnJid) adicionarJid(mapeamentoLid.pnJid);
+        const agoraCache = Date.now();
+        const cacheEncontrado = lidsObservados
+            .map(lid => ({ lid, cache: lidPnRuntimeCache.get(lid) }))
+            .find(item => item.cache && (agoraCache - Number(item.cache.salvoEm || 0)) < LID_PN_RUNTIME_CACHE_TTL_MS);
+
+        if (cacheEncontrado?.cache?.pnJid) {
+            adicionarJid(cacheEncontrado.cache.pnJid);
+        } else if (resolverLid) {
+            const mapeamentoLid = await resolverPnDeLids([...jids]);
+            if (mapeamentoLid?.pnJid) adicionarJid(mapeamentoLid.pnJid);
+        }
     }
 
     // O número telefônico é um identificador adicional. Nunca tratamos o número interno do @lid como telefone.
@@ -3582,7 +3661,8 @@ async function atualizarHistorico(ticketNumber, campos) {
     if (!ticketNumber) return;
     await ticketHistoryColl.updateOne(
         { _id: ticketNumber },
-        { $set: { ...campos, updatedAt: Date.now() } }
+        { $set: { ticketNumber, ...campos, updatedAt: Date.now() } },
+        { upsert: true }
     );
 }
 
@@ -3642,7 +3722,11 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
         { upsert: true }
     );
 
-    await registrarTicketHistorico(ticket);
+    // O ticket ativo já está persistido e é suficiente para continuar o fluxo.
+    // Histórico é uma escrita secundária e não deve segurar a primeira resposta ao cliente.
+    registrarTicketHistorico(ticket).catch(err => {
+        console.warn(`[Histórico] Não foi possível registrar imediatamente o ticket ${ticket.ticketNumber}:`, err?.message || err);
+    });
 
     // LEADS DE ANÚNCIO entram automaticamente no CRM no mesmo instante em que
     // o ticket é criado. A falha do CRM nunca impede a abertura do atendimento.
@@ -3657,7 +3741,7 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
     }
 
     if (cliente) {
-        await clientsColl.updateOne(
+        clientsColl.updateOne(
             { _id: cliente._id },
             {
                 $addToSet: {
@@ -3672,7 +3756,9 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
                     updatedAt: agora
                 }
             }
-        );
+        ).catch(err => {
+            console.warn(`[Clientes] Falha ao atualizar vínculo do ticket ${ticketNumber}:`, err?.message || err);
+        });
     }
 
     // Tickets iniciados pelo próprio escritório não geram alerta. Este parâmetro
@@ -3717,16 +3803,9 @@ async function encaminharParaEspecialista(ticket, jid, mensagem = null, { mensag
     const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
     const agora = Date.now();
 
-    if (mensagem) {
-        const mensagemHumanizada = await gerarRespostaHumanizadaIA({
-            tipo,
-            mensagemCliente,
-            ticket,
-            mensagemBase: mensagem
-        });
-        await sendBotMsg(jid, { text: mensagemHumanizada });
-    }
-
+    // REGRA DE CONSISTÊNCIA: o estado que receberá a PRÓXIMA mensagem do cliente
+    // precisa ser persistido ANTES de enviarmos qualquer texto ao WhatsApp. Se o
+    // cliente responder muito rápido, a resposta não pode cair no passo anterior.
     await ticketsColl.updateOne(
         { _id: ticket._id },
         {
@@ -3745,9 +3824,29 @@ async function encaminharParaEspecialista(ticket, jid, mensagem = null, { mensag
         }
     );
 
-    await atualizarHistorico(ticket.ticketNumber, {
+    ticket.status = 'aguardando_especialista';
+    ticket.paused = true;
+    ticket.until = agora + tresDiasEmMs;
+    ticket.aguardandoPerguntaFluxo = false;
+    ticket.aguardandoDetalhesForaHorario = false;
+    ticket.aguardandoCadastroCliente = false;
+    ticket.aguardandoNomeCadastro = false;
+    ticket.aguardandoCPFCadastro = false;
+    ticket.aguardandoWhatsappCadastro = false;
+
+    atualizarHistorico(ticket.ticketNumber, {
         status: 'aguardando_especialista'
-    });
+    }).catch(err => console.warn('[Histórico] Falha ao registrar encaminhamento:', err?.message || err));
+
+    if (mensagem) {
+        const mensagemHumanizada = await gerarRespostaHumanizadaIA({
+            tipo,
+            mensagemCliente,
+            ticket,
+            mensagemBase: mensagem
+        });
+        await sendBotMsg(jid, { text: mensagemHumanizada });
+    }
 }
 
 async function concluirTriagemEAvancar(ticket, jid, mensagemCliente = '') {
@@ -3760,10 +3859,14 @@ async function concluirTriagemEAvancar(ticket, jid, mensagemCliente = '') {
                 aguardandoPerguntaFluxo: false,
                 indicePerguntaFluxo: Array.isArray(ticket.perguntasFluxo) ? ticket.perguntasFluxo.length : 0,
                 status: ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro',
+                aguardandoCadastroCliente: !ticket.clienteCadastrado,
                 lastActivity: agora
             }
         }
     );
+
+    ticket.aguardandoPerguntaFluxo = false;
+    ticket.aguardandoCadastroCliente = !ticket.clienteCadastrado;
 
     if (ticket.clienteCadastrado) {
         await encaminharParaEspecialista(
@@ -3783,24 +3886,15 @@ async function concluirTriagemEAvancar(ticket, jid, mensagemCliente = '') {
     });
 
     await sendBotMsg(jid, {
-        text: `${confirmacaoTriagem}\n\n${PERGUNTA_CADASTRO_CLIENTE}`
+        text: `${confirmacaoTriagem}
+
+${PERGUNTA_CADASTRO_CLIENTE}`
     });
 
-    await ticketsColl.updateOne(
-        { _id: ticket._id },
-        {
-            $set: {
-                aguardandoCadastroCliente: true,
-                status: 'aguardando_cadastro',
-                lastActivity: agora
-            }
-        }
-    );
-
-    await atualizarHistorico(ticket.ticketNumber, {
+    atualizarHistorico(ticket.ticketNumber, {
         status: 'aguardando_cadastro',
         triagemConcluidaEm: agora
-    });
+    }).catch(err => console.warn('[Histórico] Falha ao registrar conclusão da triagem:', err?.message || err));
 }
 
 async function salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo, numeroInformado = null) {
@@ -3931,6 +4025,12 @@ async function startBot() {
             ticketHistoryColl.createIndex({ ticketNumber: 1 }, { unique: true }),
             ticketHistoryColl.createIndex({ identificadores: 1 }),
             ticketsColl.createIndex({ ticketNumber: 1 }, { unique: true, sparse: true }),
+            // Estes campos são consultados em TODA mensagem recebida. Sem índices, o MongoDB
+            // precisa varrer active_tickets e a resposta do chatbot cresce conforme o uso.
+            ticketsColl.createIndex({ identificadores: 1 }),
+            ticketsColl.createIndex({ whatsappNumbers: 1 }),
+            ticketsColl.createIndex({ numeroReal: 1 }),
+            ticketsColl.createIndex({ lastRawJid: 1 }),
             ticketsColl.createIndex({ status: 1, lastActivity: 1 }),
             ticketsColl.createIndex({ area: 1, lastActivity: 1 }),
             ticketsColl.createIndex({ advogadoResponsavelId: 1, status: 1, lastActivity: -1 }),
@@ -3992,54 +4092,56 @@ async function startBot() {
 
         sock.ev.on('creds.update', saveCreds);
 
-sock.ev.on('messages.upsert', async m => {
-    const msg = m.messages?.[0];
-    if (!msg?.message || msg.key.remoteJid === 'status@broadcast') return;
+async function processarMensagemUpsert(msg, upsertType = 'notify') {
+    if (!msg?.message || msg.key?.remoteJid === 'status@broadcast') return;
+    if (!mensagemUpsertEhRecente(msg, upsertType)) return;
 
-    const rawJid = msg.key.remoteJid;
+    const rawJid = msg.key?.remoteJid;
     if (!rawJid || rawJid.endsWith('@g.us') || rawJid.endsWith('@newsletter')) return;
 
-    const msgId = msg.key.id;
-    if (!msgId || processing.has(msgId)) return;
-
-    processing.add(msgId);
-    setTimeout(() => processing.delete(msgId), 10 * 1000);
-
-    const isMe = !!msg.key.fromMe;
-    const textoRaw =
-        msg.message.conversation ||
-        msg.message.extendedTextMessage?.text ||
-        msg.message.imageMessage?.caption ||
-        msg.message.videoMessage?.caption ||
-        msg.message.documentMessage?.caption ||
-        '';
-    const texto = textoRaw.trim();
-    const isMedia = !!extrairMidiaAnalisavel(msg);
-
-    const chaveFila = chaveFilaContato(msg, rawJid);
-
-    // O usuário não precisa reenviar a mesma resposta enquanto o servidor trabalha.
-    // A primeira mensagem continua sendo processada normalmente; a repetição imediata
-    // é apenas ignorada para não avançar duas etapas do fluxo.
-    if (!isMe && repeticaoRapidaTexto(chaveFila, texto, isMedia)) {
-        console.log(`[Fluxo] Repetição rápida ignorada para ${chaveFila}: ${JSON.stringify(texto.slice(0, 80))}`);
-        return;
-    }
-
-    // Feedback visual imediato no WhatsApp. É fire-and-forget para nunca aumentar a
-    // latência da resposta real.
-    if (!isMe && sock?.sendPresenceUpdate) {
-        Promise.resolve(sock.sendPresenceUpdate('composing', rawJid)).catch(() => {});
-    }
+    const msgId = String(msg.key?.id || '').trim();
+    if (!msgId || !reservarMensagemParaProcessamento(msgId)) return;
 
     const inicioProcessamentoMensagem = Date.now();
-    const liberarFilaContato = await adquirirLockContato(chaveFila);
-
-    const timeoutNovoAtendimento = 2 * 60 * 60 * 1000;
-    const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+    const isMe = !!msg.key?.fromMe;
+    const conteudoEntrada = conteudoMensagemDesembrulhado(msg);
+    const textoRaw =
+        conteudoEntrada.conversation ||
+        conteudoEntrada.extendedTextMessage?.text ||
+        conteudoEntrada.imageMessage?.caption ||
+        conteudoEntrada.videoMessage?.caption ||
+        conteudoEntrada.documentMessage?.caption ||
+        '';
+    const texto = String(textoRaw || '').trim();
+    const isMedia = !!extrairMidiaAnalisavel(msg);
+    const chaveFila = chaveFilaContato(msg, rawJid);
+    let liberarFilaContato = null;
+    let fingerprintEntrada = null;
 
     try {
-        const contato = await obterIdentificadoresContato(msg, rawJid);
+        // Mensagens técnicas/sem conteúdo útil não devem entrar no fluxo jurídico.
+        if (!texto && !isMedia && !isMe) return;
+
+        if (!isMe) {
+            const reservaPayload = reservarPayloadEntrada(chaveFila, texto, isMedia, msgId);
+            fingerprintEntrada = reservaPayload.fingerprint;
+            if (reservaPayload.duplicado) {
+                console.log(`[Fluxo] Cópia idêntica ignorada enquanto a primeira ainda está em processamento para ${chaveFila}.`);
+                return;
+            }
+
+            // Feedback visual imediato no WhatsApp. Fire-and-forget para não aumentar latência.
+            if (sock?.sendPresenceUpdate) {
+                Promise.resolve(sock.sendPresenceUpdate('composing', rawJid)).catch(() => {});
+            }
+        }
+
+        liberarFilaContato = await adquirirLockContato(chaveFila);
+
+        const timeoutNovoAtendimento = 2 * 60 * 60 * 1000;
+        const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+
+        const contato = await obterIdentificadoresContato(msg, rawJid, { resolverLid: false });
         if (!isMe) {
             const cacheAgora = Date.now();
             const candidatosCache = [
@@ -4054,6 +4156,23 @@ sock.ev.on('messages.upsert', async m => {
         }
         let ticket = await buscarTicketAtivo(contato);
 
+        // Fallback: somente quando o identificador rápido (normalmente @lid) não achou
+        // ticket algum, fazemos a resolução LID -> telefone potencialmente mais lenta.
+        // Em conversas já abertas esta chamada deixa de ocorrer a cada mensagem.
+        if (!ticket && !contato.numeroPrincipal) {
+            const mapeamentoLid = await resolverPnDeLids(contato.identificadores);
+            if (mapeamentoLid?.numero) {
+                contato.numeroPrincipal = mapeamentoLid.numero;
+                contato.whatsappNumbers = [...new Set([...(contato.whatsappNumbers || []), mapeamentoLid.numero])];
+                if (mapeamentoLid.pnJid) {
+                    contato.identificadores = [...new Set([...(contato.identificadores || []), mapeamentoLid.pnJid])];
+                    contato.jidPreferencial = mapeamentoLid.pnJid;
+                }
+                contato.chaveAtiva = mapeamentoLid.numero || contato.chaveAtiva;
+                ticket = await buscarTicketAtivo(contato);
+            }
+        }
+
         // Tickets criados pelo fluxo antigo não possuem ticketNumber.
         // Em vez de tentar reaproveitar estados incompatíveis, iniciamos o novo fluxo limpo.
         if (ticket && !ticket.ticketNumber) {
@@ -4064,7 +4183,12 @@ sock.ev.on('messages.upsert', async m => {
         // Mensagem enviada manualmente pelo escritório.
         if (isMe) {
             const jidMensagemNormalizado = normalizarJid(rawJid) || rawJid;
-            if (botMessageIds.has(msgId) || panelMessageIds.has(msgId) || panelPendingJids.has(jidMensagemNormalizado)) return;
+            if (
+                botMessageIds.has(msgId) ||
+                botPendingJids.has(jidMensagemNormalizado) ||
+                panelMessageIds.has(msgId) ||
+                panelPendingJids.has(jidMensagemNormalizado)
+            ) return;
 
             let cliente = await buscarClientePorContato(contato);
 
@@ -4322,6 +4446,7 @@ sock.ev.on('messages.upsert', async m => {
                 {
                     $set: {
                         aguardandoDetalhesForaHorario: false,
+                        aguardandoCadastroCliente: !ticket.clienteCadastrado,
                         status: ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro',
                         lastActivity: agora
                     }
@@ -4352,25 +4477,15 @@ sock.ev.on('messages.upsert', async m => {
                 mensagemBase: `Certo. Deixei as informações do seu caso registradas no ticket *${ticket.ticketNumber}*.`
             });
 
+            ticket.aguardandoCadastroCliente = true;
             await sendBotMsg(rawJid, {
                 text: `${confirmacaoForaHorario}\n\n${PERGUNTA_CADASTRO_CLIENTE}`
             });
 
-            await ticketsColl.updateOne(
-                { _id: ticket._id },
-                {
-                    $set: {
-                        aguardandoCadastroCliente: true,
-                        status: 'aguardando_cadastro',
-                        lastActivity: agora
-                    }
-                }
-            );
-
-            await atualizarHistorico(ticket.ticketNumber, {
+            atualizarHistorico(ticket.ticketNumber, {
                 status: 'aguardando_cadastro',
                 triagemForaHorarioConcluidaEm: agora
-            });
+            }).catch(err => console.warn('[Histórico] Falha ao registrar triagem fora do horário:', err?.message || err));
             return;
         }
 
@@ -4425,24 +4540,15 @@ sock.ev.on('messages.upsert', async m => {
                     respostasTriagem: []
                 }).catch(err => console.warn('[Histórico] Falha ao registrar seleção de menu:', err?.message || err));
 
-                if (respostaArea) {
-                    await sendBotMsg(rawJid, { text: respostaArea });
-                }
-
-                await sendBotMsg(rawJid, { text: formatarPerguntaParaEnvio(perguntasFluxo[0]) });
+                const primeiraPergunta = formatarPerguntaParaEnvio(perguntasFluxo[0]);
+                await sendBotMsg(rawJid, {
+                    text: respostaArea ? `${respostaArea}\n\n${primeiraPergunta}` : primeiraPergunta
+                });
                 return;
             }
 
-            // Compatibilidade: opções antigas, sem perguntas configuradas, continuam usando
-            // a mensagem única de detalhes exatamente como antes.
-            if (respostaArea) {
-                await sendBotMsg(rawJid, { text: respostaArea });
-            } else {
-                await sendBotMsg(rawJid, {
-                    text: `Conte brevemente o que aconteceu no seu caso. Pode responder por texto ou áudio.`
-                });
-            }
-
+            // Compatibilidade: opções antigas, sem perguntas configuradas. Primeiro
+            // gravamos o estado que receberá a próxima resposta; só então enviamos o prompt.
             await ticketsColl.updateOne(
                 { _id: ticket._id },
                 {
@@ -4460,13 +4566,21 @@ sock.ev.on('messages.upsert', async m => {
                 }
             );
 
-            await atualizarHistorico(ticket.ticketNumber, {
+            atualizarHistorico(ticket.ticketNumber, {
                 area,
                 menuOptionId: opcaoSelecionada._id,
                 menuOptionTitle: opcaoSelecionada.titulo,
                 menuOptionEmoji: opcaoSelecionada.emoji || '',
                 status: 'aguardando_detalhes'
-            });
+            }).catch(err => console.warn('[Histórico] Falha ao registrar etapa de detalhes:', err?.message || err));
+
+            if (respostaArea) {
+                await sendBotMsg(rawJid, { text: respostaArea });
+            } else {
+                await sendBotMsg(rawJid, {
+                    text: `Conte brevemente o que aconteceu no seu caso. Pode responder por texto ou áudio.`
+                });
+            }
             return;
         }
 
@@ -4531,10 +4645,10 @@ sock.ev.on('messages.upsert', async m => {
             }
 
             let tipoResposta = 'texto';
-            if (msg.message.audioMessage) tipoResposta = 'audio';
-            else if (msg.message.imageMessage) tipoResposta = 'imagem';
-            else if (msg.message.videoMessage) tipoResposta = 'video';
-            else if (msg.message.documentMessage) tipoResposta = 'documento';
+            if (conteudoEntrada.audioMessage) tipoResposta = 'audio';
+            else if (conteudoEntrada.imageMessage) tipoResposta = 'imagem';
+            else if (conteudoEntrada.videoMessage) tipoResposta = 'video';
+            else if (conteudoEntrada.documentMessage) tipoResposta = 'documento';
 
             const respostaRegistrada = {
                 perguntaId: perguntaAtual.id,
@@ -4600,6 +4714,7 @@ sock.ev.on('messages.upsert', async m => {
                 {
                     $set: {
                         aguardandoDetalhes: false,
+                        aguardandoCadastroCliente: !ticket.clienteCadastrado,
                         status: ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro',
                         lastActivity: Date.now()
                     }
@@ -4623,24 +4738,14 @@ sock.ev.on('messages.upsert', async m => {
                 mensagemBase: `Certo. Registrei seu relato no ticket *${ticket.ticketNumber}*.`
             });
 
+            ticket.aguardandoCadastroCliente = true;
             await sendBotMsg(rawJid, {
                 text: `${confirmacaoRelato}\n\n${PERGUNTA_CADASTRO_CLIENTE}`
             });
 
-            await ticketsColl.updateOne(
-                { _id: ticket._id },
-                {
-                    $set: {
-                        aguardandoCadastroCliente: true,
-                        status: 'aguardando_cadastro',
-                        lastActivity: Date.now()
-                    }
-                }
-            );
-
-            await atualizarHistorico(ticket.ticketNumber, {
+            atualizarHistorico(ticket.ticketNumber, {
                 status: 'aguardando_cadastro'
-            });
+            }).catch(err => console.warn('[Histórico] Falha ao registrar cadastro opcional:', err?.message || err));
             return;
         }
 
@@ -4724,10 +4829,6 @@ sock.ev.on('messages.upsert', async m => {
 
             const nomeInfo = ticket.nomeCadastroTemp;
             if (!nomeInfo?.nome || !nomeInfo?.sobrenome) {
-                await sendBotMsg(rawJid, {
-                    text: `Precisamos confirmar seu nome. Informe novamente seu *nome e sobrenome*:`
-                });
-
                 await ticketsColl.updateOne(
                     { _id: ticket._id },
                     {
@@ -4738,6 +4839,10 @@ sock.ev.on('messages.upsert', async m => {
                         }
                     }
                 );
+
+                await sendBotMsg(rawJid, {
+                    text: `Precisamos confirmar seu nome. Informe novamente seu *nome e sobrenome*:`
+                });
                 return;
             }
 
@@ -4787,14 +4892,13 @@ sock.ev.on('messages.upsert', async m => {
                 mensagemBase: `Cadastro concluído, ${nomeInfo.nome}. Nos próximos contatos, conseguiremos localizar seus dados automaticamente. Seu atendimento continua por aqui.`
             });
 
-            await sendBotMsg(rawJid, { text: mensagemCadastroConcluido });
-
             ticket.clienteCadastrado = true;
             ticket.clienteNome = nomeInfo.nomeCompleto;
             ticket.cpf = cpfLimpo;
             ticket.numeroReal = resultadoCadastro.numeroPrincipal;
 
             await encaminharParaEspecialista(ticket, rawJid);
+            await sendBotMsg(rawJid, { text: mensagemCadastroConcluido });
             return;
         }
 
@@ -4812,9 +4916,6 @@ sock.ev.on('messages.upsert', async m => {
             const nomeInfo = ticket.nomeCadastroTemp;
 
             if (!validarCPF(cpfLimpo) || !nomeInfo?.nome || !nomeInfo?.sobrenome) {
-                await sendBotMsg(rawJid, {
-                    text: `Precisamos reiniciar a identificação do cadastro. Informe seu *nome e sobrenome*:`
-                });
                 await ticketsColl.updateOne(
                     { _id: ticket._id },
                     {
@@ -4827,6 +4928,9 @@ sock.ev.on('messages.upsert', async m => {
                         }
                     }
                 );
+                await sendBotMsg(rawJid, {
+                    text: `Precisamos reiniciar a identificação do cadastro. Informe seu *nome e sobrenome*:`
+                });
                 return;
             }
 
@@ -4854,14 +4958,13 @@ sock.ev.on('messages.upsert', async m => {
                 mensagemBase: `Cadastro concluído, ${nomeInfo.nome}. Nos próximos contatos, conseguiremos localizar seus dados automaticamente. Seu atendimento continua por aqui.`
             });
 
-            await sendBotMsg(rawJid, { text: mensagemCadastroConcluido });
-
             ticket.clienteCadastrado = true;
             ticket.clienteNome = nomeInfo.nomeCompleto;
             ticket.cpf = cpfLimpo;
             ticket.numeroReal = resultadoCadastro.numeroPrincipal;
 
             await encaminharParaEspecialista(ticket, rawJid);
+            await sendBotMsg(rawJid, { text: mensagemCadastroConcluido });
             return;
         }
 
@@ -4869,9 +4972,6 @@ sock.ev.on('messages.upsert', async m => {
         // mantém a conversa simples e não cria um segundo ticket por engano.
         console.warn(`[Ticket ${ticket.ticketNumber}] Estado não reconhecido. Reiniciando menu do mesmo ticket.`);
         const menuTextoSeguranca = await gerarMenuTexto();
-        await sendBotMsg(rawJid, {
-            text: `Vamos continuar pelo ticket *${ticket.ticketNumber}*. Escolha uma opção:\n\n${menuTextoSeguranca}`
-        });
         await ticketsColl.updateOne(
             { _id: ticket._id },
             {
@@ -4891,15 +4991,45 @@ sock.ev.on('messages.upsert', async m => {
                 }
             }
         );
+        await sendBotMsg(rawJid, {
+            text: `Vamos continuar pelo ticket *${ticket.ticketNumber}*. Escolha uma opção:
+
+${menuTextoSeguranca}`
+        });
     } catch (err) {
         console.error('Erro interno no atendimento:', err);
     } finally {
-        liberarFilaContato();
+        if (typeof liberarFilaContato === 'function') liberarFilaContato();
+        liberarPayloadEntrada(fingerprintEntrada);
+        concluirMensagemProcessada(msgId);
+
         const duracao = Date.now() - inicioProcessamentoMensagem;
-        if (duracao >= 1200) {
+        if (duracao >= 800) {
             console.warn(`[Performance] Mensagem ${msgId} de ${chaveFila} levou ${duracao}ms para ser processada.`);
         }
     }
+}
+
+// IMPORTANTE: messages.upsert pode trazer MAIS DE UMA mensagem no mesmo evento.
+// A versão anterior lia apenas messages[0], então uma mensagem válida podia ser
+// simplesmente descartada e o usuário só obtinha resposta quando digitava novamente.
+sock.ev.on('messages.upsert', (m = {}) => {
+    const lote = Array.isArray(m.messages) ? m.messages : [];
+    if (!lote.length) return;
+
+    if (lote.length > 1) {
+        console.log(`[WhatsApp] Upsert ${m.type || 'desconhecido'} recebido com ${lote.length} mensagens; processando todas.`);
+    }
+
+    Promise.allSettled(
+        lote.map(msg => processarMensagemUpsert(msg, m.type || 'notify'))
+    ).then(resultados => {
+        for (const resultado of resultados) {
+            if (resultado.status === 'rejected') {
+                console.error('[WhatsApp] Falha não tratada ao processar mensagem do lote:', resultado.reason);
+            }
+        }
+    });
 });
 
         // Atualiza o cadastro quando o Baileys informar um novo mapeamento LID <-> número.
