@@ -815,8 +815,15 @@ const store = new MongoDBStore({
   collection: 'sessions'
 });
 
+// Nunca usa segredo de sessão previsível. Em produção, defina SESSION_SECRET
+// com um valor longo e aleatório para preservar sessões entre reinicializações.
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(48).toString('hex');
+if (!process.env.SESSION_SECRET) {
+    console.warn('[Segurança] SESSION_SECRET não definido. Foi gerado um segredo efêmero; as sessões serão invalidadas ao reiniciar o servidor.');
+}
+
 const sessionMiddleware = session({
-    secret: process.env.SESSION_SECRET || 'azevedo-secret-key',
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
     store,
@@ -1418,11 +1425,10 @@ function identidadeAdvogadoSessao(req) {
 // -----------------------------------------------------------------------------
 // ATRIBUIÇÃO OPERACIONAL DE ATENDIMENTO
 // -----------------------------------------------------------------------------
-// O primeiro advogado que clicar em "Atender" fica registrado como responsável
-// operacional do ticket. A atribuição é apenas organizacional: outros advogados com
-// permissão de chat continuam podendo abrir, ler e responder a conversa.
-// A atualização permanece atômica para que dois cliques simultâneos não troquem o
-// responsável definido primeiro.
+// O primeiro advogado que abrir o chat fica registrado como responsável operacional.
+// IMPORTANTE: abrir/visualizar o chat NÃO interrompe a automação. O fluxo só passa
+// para atendimento humano quando houver uma intervenção real do escritório (mensagem
+// ou arquivo enviado pelo painel/WhatsApp).
 async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento = true } = {}) {
     if (!ticketsColl) {
         return { ok: false, status: 503, erro: 'Banco de dados ainda não está disponível.' };
@@ -1436,62 +1442,42 @@ async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento 
         return { ok: false, status: 400, erro: 'Não foi possível identificar o ticket ou o usuário conectado.' };
     }
 
-    // Se já é deste advogado, não fazemos nova escrita no banco. Isso reduz I/O
-    // quando o próprio responsável reabre o chat várias vezes durante o atendimento.
-    const atual = await ticketsColl.findOne(
-        { ticketNumber: numero },
-        {
-            projection: {
-                _id: 1,
-                ticketNumber: 1,
-                status: 1,
-                clienteId: 1,
-                advogadoResponsavelId: 1,
-                advogadoResponsavelNome: 1,
-                atendimentoAssumidoEm: 1,
-                lastActivity: 1
-            }
-        }
-    );
+    const projection = {
+        _id: 1,
+        ticketNumber: 1,
+        status: 1,
+        paused: 1,
+        until: 1,
+        clienteId: 1,
+        advogadoResponsavelId: 1,
+        advogadoResponsavelNome: 1,
+        atendimentoAssumidoEm: 1,
+        lastActivity: 1
+    };
 
+    const atual = await ticketsColl.findOne({ ticketNumber: numero }, { projection });
     if (!atual) {
         return { ok: false, status: 404, erro: 'Ticket ativo não encontrado.' };
     }
 
     const responsavelAtualId = String(atual.advogadoResponsavelId || '').trim();
 
-    if (responsavelAtualId && responsavelAtualId === advogadoId) {
+    if (responsavelAtualId) {
         return {
             ok: true,
-            alreadyOwned: true,
-            ticket: atual,
-            responsavel: {
-                id: advogadoId,
-                nome: atual.advogadoResponsavelNome || advogadoNome
-            }
-        };
-    }
-
-    if (responsavelAtualId && responsavelAtualId !== advogadoId) {
-        // A atribuição não bloqueia o acesso ao chat. Apenas preservamos o primeiro
-        // responsável e informamos ao painel quem está atribuído ao atendimento.
-        return {
-            ok: true,
-            alreadyOwned: false,
-            assignedElsewhere: true,
+            alreadyOwned: responsavelAtualId === advogadoId,
+            assignedElsewhere: responsavelAtualId !== advogadoId,
             ticket: atual,
             responsavel: {
                 id: responsavelAtualId,
-                nome: atual.advogadoResponsavelNome || 'Outro advogado'
+                nome: atual.advogadoResponsavelNome || (responsavelAtualId === advogadoId ? advogadoNome : 'Outro advogado')
             }
         };
     }
 
     const agora = Date.now();
-    const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
 
-    // A condição de ausência do responsável é repetida no update para garantir
-    // exclusividade mesmo em caso de clique simultâneo por dois advogados.
+    // Atribuição atômica, mas sem tocar em status/paused/until.
     const resultado = await ticketsColl.findOneAndUpdate(
         {
             ticketNumber: numero,
@@ -1503,69 +1489,45 @@ async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento 
         },
         {
             $set: {
-                status: 'em_atendimento_humano',
-                paused: true,
-                until: agora + tresDiasEmMs,
                 advogadoResponsavelId: advogadoId,
                 advogadoResponsavelNome: advogadoNome,
-                atendimentoAssumidoEm: agora
+                atendimentoAssumidoEm: agora,
+                chatAbertoEm: agora
             }
         },
-        { returnDocument: 'after' }
+        { returnDocument: 'after', projection }
     );
 
-    const atualizado = resultado?.value || resultado;
+    let atualizado = resultado?.value || resultado;
 
     if (!atualizado?.ticketNumber) {
-        // Outro usuário pode ter vencido a corrida entre o find inicial e o update.
-        const vencedor = await ticketsColl.findOne(
-            { ticketNumber: numero },
-            {
-                projection: {
-                    ticketNumber: 1,
-                    advogadoResponsavelId: 1,
-                    advogadoResponsavelNome: 1,
-                    atendimentoAssumidoEm: 1
-                }
-            }
-        );
-
-        if (!vencedor) {
+        atualizado = await ticketsColl.findOne({ ticketNumber: numero }, { projection });
+        if (!atualizado) {
             return { ok: false, status: 404, erro: 'Ticket ativo não encontrado.' };
         }
 
-        const vencedorId = String(vencedor.advogadoResponsavelId || '').trim();
-        if (vencedorId === advogadoId) {
-            return {
-                ok: true,
-                alreadyOwned: true,
-                ticket: vencedor,
-                responsavel: { id: advogadoId, nome: vencedor.advogadoResponsavelNome || advogadoNome }
-            };
-        }
-
+        const vencedorId = String(atualizado.advogadoResponsavelId || '').trim();
         return {
             ok: true,
-            alreadyOwned: false,
-            assignedElsewhere: true,
-            ticket: vencedor,
+            alreadyOwned: vencedorId === advogadoId,
+            assignedElsewhere: !!vencedorId && vencedorId !== advogadoId,
+            ticket: atualizado,
             responsavel: {
                 id: vencedorId || null,
-                nome: vencedor.advogadoResponsavelNome || 'Outro advogado'
+                nome: atualizado.advogadoResponsavelNome || (vencedorId === advogadoId ? advogadoNome : 'Outro advogado')
             }
         };
     }
 
-    // Histórico administrativo enxuto: registra a atribuição, mas não duplica mensagens.
     await atualizarHistorico(numero, {
-        status: 'em_atendimento_humano',
         advogadoResponsavelId: advogadoId,
         advogadoResponsavelNome: advogadoNome,
-        atendimentoAssumidoEm: agora
+        atendimentoAssumidoEm: agora,
+        chatAbertoEm: agora
     });
 
-    // Se o cliente ainda não possui advogado responsável cadastrado, aproveitamos
-    // a primeira assunção do ticket para preencher esse dado sem sobrescrever escolhas anteriores.
+    // O responsável do cadastro do cliente também pode ser preenchido na primeira
+    // assunção, sem alterar o fluxo automático daquele ticket.
     if (atualizado.clienteId && clientsColl) {
         await clientsColl.updateOne(
             {
@@ -1576,22 +1538,19 @@ async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento 
                     { advogadoResponsavel: '' }
                 ]
             },
-            {
-                $set: {
-                    advogadoResponsavel: advogadoNome,
-                    updatedAt: agora
-                }
-            }
+            { $set: { advogadoResponsavel: advogadoNome, updatedAt: agora } }
         ).catch(() => {});
     }
 
     if (emitirEvento) {
+        const classificacao = classificarPendenciaTicket(atualizado);
         io.emit('ticket_claimed', {
             ticketNumber: numero,
-            status: 'em_atendimento_humano',
-            pendenciaTipo: 'atendimento',
-            pendenciaLabel: 'Em atendimento',
-            statusLabel: TICKET_STATUS_LABELS.em_atendimento_humano,
+            status: atualizado.status || null,
+            paused: atualizado.paused === true,
+            pendenciaTipo: classificacao.tipo,
+            pendenciaLabel: classificacao.label,
+            statusLabel: classificacao.statusLabel,
             advogadoResponsavelId: advogadoId,
             advogadoResponsavelNome: advogadoNome,
             atendimentoAssumidoEm: agora
@@ -1601,6 +1560,7 @@ async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento 
     return {
         ok: true,
         alreadyOwned: false,
+        assignedElsewhere: false,
         ticket: atualizado,
         responsavel: { id: advogadoId, nome: advogadoNome }
     };
@@ -6111,38 +6071,65 @@ function resumoDocumentosIATicket(documentosIA = []) {
 }
 
 
-function atualizarEstadoPosEnvioChatSemBloquear({ ticket, ticketNumber, advogado, acessoTicket, agora = Date.now() }) {
-    setImmediate(async () => {
-        try {
-            const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
-            const responsavelId = acessoTicket?.responsavel?.id || ticket?.advogadoResponsavelId || advogado?.id || null;
-            const responsavelNome = acessoTicket?.responsavel?.nome || ticket?.advogadoResponsavelNome || advogado?.nome || null;
-            const tarefas = [
-                ticketsColl.updateOne({ _id: ticket._id }, { $set: {
-                    status: 'em_atendimento_humano', paused: true, until: agora + tresDiasEmMs, lastActivity: agora
-                } }),
-                atualizarHistorico(ticketNumber, {
-                    status: 'em_atendimento_humano', advogadoResponsavelId: responsavelId,
-                    advogadoResponsavelNome: responsavelNome, ultimaMensagemPainelEm: agora,
-                    ultimoAdvogadoMensagemId: advogado?.id || null,
-                    ultimoAdvogadoMensagemNome: advogado?.nome || advogado?.assinatura || null
-                })
-            ];
-            if (ticket?.clienteId && clientsColl && responsavelNome) {
-                tarefas.push(clientsColl.updateOne(
-                    { _id: ticket.clienteId, $or: [{ advogadoResponsavel: { $exists: false } }, { advogadoResponsavel: null }, { advogadoResponsavel: '' }] },
+async function atualizarEstadoPosEnvioChat({ ticket, ticketNumber, advogado, acessoTicket, agora = Date.now() }) {
+    try {
+        const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
+        const responsavelId = acessoTicket?.responsavel?.id || ticket?.advogadoResponsavelId || advogado?.id || null;
+        const responsavelNome = acessoTicket?.responsavel?.nome || ticket?.advogadoResponsavelNome || advogado?.nome || null;
+
+        const tarefas = [
+            ticketsColl.updateOne(
+                { _id: ticket._id },
+                {
+                    $set: {
+                        status: 'em_atendimento_humano',
+                        paused: true,
+                        until: agora + tresDiasEmMs,
+                        lastActivity: agora,
+                        intervencaoHumanaEm: agora
+                    }
+                }
+            ),
+            atualizarHistorico(ticketNumber, {
+                status: 'em_atendimento_humano',
+                advogadoResponsavelId: responsavelId,
+                advogadoResponsavelNome: responsavelNome,
+                ultimaMensagemPainelEm: agora,
+                ultimoAdvogadoMensagemId: advogado?.id || null,
+                ultimoAdvogadoMensagemNome: advogado?.nome || advogado?.assinatura || null,
+                intervencaoHumanaEm: agora
+            })
+        ];
+
+        if (ticket?.clienteId && clientsColl && responsavelNome) {
+            tarefas.push(
+                clientsColl.updateOne(
+                    {
+                        _id: ticket.clienteId,
+                        $or: [
+                            { advogadoResponsavel: { $exists: false } },
+                            { advogadoResponsavel: null },
+                            { advogadoResponsavel: '' }
+                        ]
+                    },
                     { $set: { advogadoResponsavel: responsavelNome, updatedAt: agora } }
-                ));
-            }
-            await Promise.allSettled(tarefas);
-            io.emit('ticket_activity_updated', {
-                ticketNumber, direction: 'out', status: 'em_atendimento_humano', lastActivity: agora,
-                advogadoResponsavelId: responsavelId, advogadoResponsavelNome: responsavelNome
-            });
-        } catch (err) {
-            console.warn('[Chat] Falha ao atualizar estado pós-envio:', err?.message || err);
+                )
+            );
         }
-    });
+
+        await Promise.allSettled(tarefas);
+
+        io.emit('ticket_activity_updated', {
+            ticketNumber,
+            direction: 'out',
+            status: 'em_atendimento_humano',
+            lastActivity: agora,
+            advogadoResponsavelId: responsavelId,
+            advogadoResponsavelNome: responsavelNome
+        });
+    } catch (err) {
+        console.warn('[Chat] Falha ao atualizar estado pós-envio:', err?.message || err);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -6261,6 +6248,7 @@ app.post('/api/tickets/:ticketNumber/claim', async (req, res) => {
             });
         }
 
+        const classificacao = classificarPendenciaTicket(resultado.ticket || {});
         res.json({
             ok: true,
             alreadyOwned: resultado.alreadyOwned === true,
@@ -6268,7 +6256,11 @@ app.post('/api/tickets/:ticketNumber/claim', async (req, res) => {
             responsavel: resultado.responsavel,
             ticket: {
                 ticketNumber: resultado.ticket?.ticketNumber || String(req.params.ticketNumber || ''),
-                status: resultado.ticket?.status || 'em_atendimento_humano',
+                status: resultado.ticket?.status || null,
+                paused: resultado.ticket?.paused === true,
+                statusLabel: classificacao.statusLabel,
+                pendenciaTipo: classificacao.tipo,
+                pendenciaLabel: classificacao.label,
                 advogadoResponsavelId: resultado.responsavel?.id || advogado.id,
                 advogadoResponsavelNome: resultado.responsavel?.nome || advogado.nome,
                 atendimentoAssumidoEm: resultado.ticket?.atendimentoAssumidoEm || Date.now()
@@ -6277,6 +6269,58 @@ app.post('/api/tickets/:ticketNumber/claim', async (req, res) => {
     } catch (err) {
         console.error('[Tickets] Erro ao assumir atendimento:', err);
         res.status(500).json({ erro: 'Não foi possível assumir o atendimento.' });
+    }
+});
+
+
+// Encerramento/arquivamento manual pelo painel. O ticket sai de active_tickets,
+// permanece registrado em ticket_history e o histórico leve do chat continua
+// disponível até o prazo normal de retenção.
+app.post('/api/tickets/:ticketNumber/archive', async (req, res) => {
+    if (!usuarioPode(req, 'tickets')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para encerrar tickets.' });
+    if (!ticketsColl || !ticketHistoryColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
+
+    try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        if (!ticketNumber) return res.status(400).json({ erro: 'Ticket inválido.' });
+
+        const ticket = await ticketsColl.findOne(
+            { ticketNumber },
+            { projection: { _id: 1, ticketNumber: 1, status: 1, advogadoResponsavelId: 1, advogadoResponsavelNome: 1 } }
+        );
+        if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+
+        const usuario = identidadeAdvogadoSessao(req);
+        const agora = Date.now();
+
+        await atualizarHistorico(ticketNumber, {
+            status: 'encerrado_painel',
+            closedAt: agora,
+            archivedAt: agora,
+            encerradoPeloPainel: true,
+            encerradoPorUsuarioId: usuario.id || null,
+            encerradoPorUsuarioNome: usuario.nome || usuario.assinatura || null,
+            statusAnteriorAoEncerramento: ticket.status || null,
+            advogadoResponsavelId: ticket.advogadoResponsavelId || null,
+            advogadoResponsavelNome: ticket.advogadoResponsavelNome || null
+        });
+
+        const removido = await ticketsColl.deleteOne({ _id: ticket._id, ticketNumber });
+        if (!removido.deletedCount) {
+            return res.status(409).json({ erro: 'O ticket já foi alterado ou encerrado por outro usuário.' });
+        }
+
+        io.emit('ticket_archived', {
+            ticketNumber,
+            archivedAt: agora,
+            archivedById: usuario.id || null,
+            archivedByName: usuario.nome || usuario.assinatura || null
+        });
+
+        return res.json({ ok: true, ticketNumber, archivedAt: agora });
+    } catch (err) {
+        console.error('[Tickets] Erro ao encerrar ticket pelo painel:', err);
+        return res.status(500).json({ erro: 'Não foi possível encerrar o ticket.' });
     }
 });
 
@@ -6316,6 +6360,10 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
             setTimeout(() => panelMessageIds.delete(sent.key.id), 2 * 60 * 1000);
         }
 
+        // A automação só é interrompida depois que o WhatsApp confirma o envio real.
+        const agora = Date.now();
+        await atualizarEstadoPosEnvioChat({ ticket, ticketNumber, advogado, acessoTicket, agora });
+
         const registrada = await registrarMensagemChat({
             ticketNumber,
             messageId,
@@ -6325,12 +6373,10 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
             texto,
             senderId: advogado.id,
             senderName: advogado.assinatura,
-            createdAt: Date.now()
+            createdAt: agora
         });
 
-        const agora = Date.now();
         res.status(201).json({ ok: true, message: registrada });
-        atualizarEstadoPosEnvioChatSemBloquear({ ticket, ticketNumber, advogado, acessoTicket, agora });
     } catch (err) {
         console.error('[Chat] Erro ao enviar mensagem:', err);
         res.status(500).json({ erro: err?.message || 'Não foi possível enviar a mensagem.' });
@@ -6406,6 +6452,10 @@ app.post(
                 setTimeout(() => panelMessageIds.delete(sent.key.id), 2 * 60 * 1000);
             }
             const mediaRefEnviada = sent ? criarReferenciaMidiaChat(sent) : null;
+            // Arquivo enviado pelo advogado também é uma intervenção humana real.
+            const agora = Date.now();
+            await atualizarEstadoPosEnvioChat({ ticket, ticketNumber, advogado, acessoTicket, agora });
+
             const registrada = await registrarMensagemChat({
                 ticketNumber,
                 messageId,
@@ -6419,12 +6469,10 @@ app.post(
                 mediaRef: mediaRefEnviada,
                 senderId: advogado.id,
                 senderName: advogado.assinatura,
-                createdAt: Date.now()
+                createdAt: agora
             });
 
-            const agora = Date.now();
             res.status(201).json({ ok: true, message: registrada });
-            atualizarEstadoPosEnvioChatSemBloquear({ ticket, ticketNumber, advogado, acessoTicket, agora });
         } catch (err) {
             console.error('[Chat] Erro ao enviar arquivo:', err);
             const status = err?.type === 'entity.too.large' ? 413 : 500;
@@ -6484,32 +6532,36 @@ app.get('/api/tickets/active', async (req, res) => {
         }
 
         const ticketNumbers = tickets.map(ticket => ticket.ticketNumber).filter(Boolean);
-        const historicos = ticketHistoryColl && ticketNumbers.length
-            ? await ticketHistoryColl.find(
-                { _id: { $in: ticketNumbers } },
-                {
-                    projection: {
-                        ticketNumber: 1,
-                        'respostasTriagem.perguntaId': 1,
-                        triagemConcluidaEm: 1,
-                        'documentosIA.messageId': 1,
-                        'documentosIA.statusAnalise': 1,
-                        'documentosIA.recebidoEm': 1
+        // As duas consultas auxiliares são independentes; executá-las em paralelo
+        // reduz a latência perceptível da tela de Tickets Ativos.
+        const [historicos, leadsCRMRelacionadosBrutos] = await Promise.all([
+            ticketHistoryColl && ticketNumbers.length
+                ? ticketHistoryColl.find(
+                    { _id: { $in: ticketNumbers } },
+                    {
+                        projection: {
+                            ticketNumber: 1,
+                            'respostasTriagem.perguntaId': 1,
+                            triagemConcluidaEm: 1,
+                            'documentosIA.messageId': 1,
+                            'documentosIA.statusAnalise': 1,
+                            'documentosIA.recebidoEm': 1
+                        }
                     }
-                }
-            ).toArray()
-            : [];
+                ).toArray()
+                : Promise.resolve([]),
+            crmLeadsColl && ticketNumbers.length
+                ? crmLeadsColl.find(
+                    { ticketNumber: { $in: ticketNumbers } },
+                    { projection: { _id: 1, crmNumber: 1, ticketNumber: 1, status: 1, origem: 1, origemTipo: 1, origemTecnica: 1 } }
+                ).toArray()
+                : Promise.resolve([])
+        ]);
 
         const historicoPorTicket = new Map(
             historicos.map(item => [String(item.ticketNumber || item._id), item])
         );
 
-        const leadsCRMRelacionadosBrutos = crmLeadsColl && ticketNumbers.length
-            ? await crmLeadsColl.find(
-                { ticketNumber: { $in: ticketNumbers } },
-                { projection: { _id: 1, crmNumber: 1, ticketNumber: 1, status: 1, origem: 1, origemTipo: 1, origemTecnica: 1 } }
-            ).toArray()
-            : [];
         const leadsCRMRelacionados = leadsCRMRelacionadosBrutos.filter(leadCRMDeAnuncio);
         const crmPorTicket = new Map(
             leadsCRMRelacionados.map(lead => [String(lead.ticketNumber), {

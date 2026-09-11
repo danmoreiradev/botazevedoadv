@@ -633,6 +633,7 @@
             /* Reserva o espaço da barra de rolagem mesmo em telas curtas.
                Evita o cabeçalho/conteúdo "encolher" quando a página fica longa. */
             scrollbar-gutter: stable;
+            overscroll-behavior: contain;
         }
 
         .topbar {
@@ -649,10 +650,11 @@
             align-items: center;
             justify-content: space-between;
             gap: 20px;
-            background: rgba(245,246,248,.88);
+            background: rgba(245,246,248,.98);
             border-bottom: 1px solid rgba(212,218,225,.80);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+            /* Blur contínuo em elemento sticky causa repaint caro durante a rolagem. */
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
         }
 
         .topbar-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
@@ -792,7 +794,7 @@
             box-shadow: var(--shadow-sm);
         }
 
-        .content-container { width: 100%; padding: 34px; }
+        .content-container { width: 100%; padding: 34px; contain: layout style; }
         .content-section {
             width: 100%;
             max-width: 1420px;
@@ -1241,7 +1243,7 @@
         .btn-client-edit:hover { background:#f5f6f8; }
 
         #client-form-dialog { width:min(900px, calc(100vw - 26px)); max-height:min(92vh, 960px); padding:0; overflow:hidden; color:var(--text); background:#fff; border:1px solid var(--border); border-radius:20px; box-shadow:0 30px 90px rgba(17,22,30,.28); }
-        #client-form-dialog::backdrop { background:rgba(17,22,30,.55); backdrop-filter:blur(2px); }
+        #client-form-dialog::backdrop { background:rgba(17,22,30,.55); }
         .client-dialog-header { padding:19px 22px; display:flex; align-items:flex-start; justify-content:space-between; gap:16px; border-bottom:1px solid var(--border); }
         .client-dialog-title { margin:0; color:var(--adv-blue); font-size:1.14rem; font-weight:790; }
         .client-dialog-subtitle { margin-top:4px; color:var(--text-muted); font-size:.78rem; }
@@ -1351,7 +1353,7 @@
             border-radius: 14px;
         }
         .tickets-table {
-            min-width: 1120px;
+            min-width: 1240px;
             margin-bottom: 0;
         }
         .tickets-table thead th {
@@ -1467,6 +1469,15 @@
             white-space: nowrap;
         }
         .ticket-view-btn:hover { background: #f5f6f8; border-color: #bfc5cd; }
+        .ticket-responsavel-name { color:#303842; font-size:.82rem; font-weight:720; white-space:nowrap; }
+        .ticket-responsavel-meta { margin-top:3px; color:var(--text-muted); font-size:.69rem; white-space:nowrap; }
+        .ticket-close-btn {
+            min-height:36px; padding:7px 10px; color:#9a4540; background:#fff;
+            border:1px solid rgba(220,76,69,.24); border-radius:9px; font-size:.78rem;
+            font-weight:750; white-space:nowrap;
+        }
+        .ticket-close-btn:hover:not(:disabled) { color:#fff; background:var(--danger-red); border-color:var(--danger-red); }
+        .ticket-close-btn:disabled { opacity:.6; cursor:wait; }
         .tickets-empty {
             padding: 50px 20px !important;
             color: var(--text-muted) !important;
@@ -1484,7 +1495,7 @@
             border-radius: 20px;
             box-shadow: 0 30px 90px rgba(17,22,30,.28);
         }
-        #ticket-detail-dialog::backdrop { background: rgba(17,22,30,.52); backdrop-filter: blur(2px); }
+        #ticket-detail-dialog::backdrop { background: rgba(17,22,30,.52); }
         .ticket-dialog-header {
             padding: 20px 22px;
             display: flex;
@@ -2176,7 +2187,7 @@
 
         /* Chat do ticket */
         #ticket-chat-dialog { width:min(920px, calc(100vw - 24px)); height:min(88vh, 900px); padding:0; overflow:hidden; color:var(--text); background:#fff; border:1px solid var(--border); border-radius:20px; box-shadow:0 30px 90px rgba(17,22,30,.30); }
-        #ticket-chat-dialog::backdrop { background:rgba(17,22,30,.56); backdrop-filter:blur(2px); }
+        #ticket-chat-dialog::backdrop { background:rgba(17,22,30,.56); }
         .ticket-chat-shell { height:100%; display:flex; flex-direction:column; min-height:0; }
         .ticket-chat-header { padding:16px 18px; display:flex; align-items:flex-start; justify-content:space-between; gap:14px; background:#fff; border-bottom:1px solid var(--border); }
         .ticket-chat-title { margin:0; color:var(--adv-blue); font-size:1.02rem; font-weight:800; }
@@ -2233,7 +2244,7 @@
         .user-permissions { max-width:330px; color:#6e7783; font-size:.72rem; }
         .user-edit-btn { min-height:35px; padding:6px 10px; border:1px solid var(--border-strong); border-radius:9px; color:var(--adv-blue); background:#fff; font-size:.74rem; font-weight:750; }
         #user-form-dialog { width:min(760px, calc(100vw - 24px)); max-height:min(90vh,900px); padding:0; overflow:hidden; color:var(--text); background:#fff; border:1px solid var(--border); border-radius:20px; box-shadow:0 30px 90px rgba(17,22,30,.28); }
-        #user-form-dialog::backdrop { background:rgba(17,22,30,.55); backdrop-filter:blur(2px); }
+        #user-form-dialog::backdrop { background:rgba(17,22,30,.55); }
         .user-dialog-header { padding:18px 20px; display:flex; justify-content:space-between; gap:14px; border-bottom:1px solid var(--border); }
         .user-dialog-body { max-height:calc(90vh - 72px); padding:20px; overflow-y:auto; }
         .permission-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
@@ -2555,6 +2566,7 @@
                                     <th>Cliente</th>
                                     <th>Área</th>
                                     <th>Situação</th>
+                                    <th>Responsável</th>
                                     <th>Triagem</th>
                                     <th>Última atividade</th>
                                     <th>Aberto há</th>
@@ -2562,7 +2574,7 @@
                                 </tr>
                             </thead>
                             <tbody id="tickets-table-body">
-                                <tr><td colspan="8" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
+                                <tr><td colspan="9" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -3370,6 +3382,17 @@
             filtrarTicketsAtivos();
         });
 
+        socket.on('ticket_archived', ({ ticketNumber } = {}) => {
+            const numero = String(ticketNumber || '').trim();
+            if (!numero) return;
+            window.activeTicketsData = (window.activeTicketsData || []).filter(item => String(item.ticketNumber || '') !== numero);
+            if (String(window.activeChatTicketNumber || '') === numero) fecharChatTicket();
+            if (String(window.activeTicketDialogNumber || '') === numero) fecharDetalheTicket();
+            preencherFiltroAreasTickets(window.activeTicketsData || []);
+            recalcularResumoTicketsLocal();
+            filtrarTicketsAtivos();
+        });
+
         socket.on('panel_users_updated', () => {
             window.panelUsersLoaded = false;
             const tab = document.getElementById('tab-usuarios');
@@ -3483,27 +3506,46 @@ async function carregarConhecimento() {
 // Função auxiliar para desenhar a lista na tela
 function renderizarLista(itens) {
     const container = document.getElementById('lista_conhecimento');
-    if(!itens || !itens.length) {
-        container.innerHTML = `<p class="text-muted p-3">Nenhum resultado encontrado.</p>`;
+    if (!container) return;
+    container.replaceChildren();
+
+    if (!itens || !itens.length) {
+        const vazio = document.createElement('p');
+        vazio.className = 'text-muted p-3';
+        vazio.textContent = 'Nenhum resultado encontrado.';
+        container.appendChild(vazio);
         return;
     }
 
-    container.innerHTML = itens.map(item => {
-        // Garante que pegamos o ID independente se vier como string ou objeto do Mongo
-        const idString = item._id.$oid || item._id; 
-        
-        return `
-            <div class="list-group-item py-3 border-bottom knowledge-item">
-                <div style="flex: 1;">
-                    <div class="fw-bold mb-1" style="color: var(--adv-blue);">${item.pergunta}</div>
-                    <div class="text-muted small">${item.resposta}</div>
-                </div>
-                <button class="btn-delete" onclick="removerConhecimento('${idString}')" title="Excluir">
-                    🗑️
-                </button>
-            </div>
-        `;
-    }).join('');
+    const fragment = document.createDocumentFragment();
+    itens.forEach(item => {
+        const idString = item?._id?.$oid || item?._id || '';
+        const row = document.createElement('div');
+        row.className = 'list-group-item py-3 border-bottom knowledge-item';
+
+        const copy = document.createElement('div');
+        copy.style.flex = '1';
+        const pergunta = document.createElement('div');
+        pergunta.className = 'fw-bold mb-1';
+        pergunta.style.color = 'var(--adv-blue)';
+        pergunta.textContent = String(item?.pergunta || '');
+        const resposta = document.createElement('div');
+        resposta.className = 'text-muted small';
+        resposta.textContent = String(item?.resposta || '');
+        copy.append(pergunta, resposta);
+
+        const excluir = document.createElement('button');
+        excluir.type = 'button';
+        excluir.className = 'btn-delete';
+        excluir.title = 'Excluir';
+        excluir.setAttribute('aria-label', 'Excluir conhecimento');
+        excluir.textContent = '🗑️';
+        excluir.onclick = () => removerConhecimento(String(idString));
+
+        row.append(copy, excluir);
+        fragment.appendChild(row);
+    });
+    container.appendChild(fragment);
 }
 
         function filtrarConhecimento() {
@@ -4458,13 +4500,12 @@ function renderizarLista(itens) {
             const ticket = window.activeTicketsData.find(item => String(item.ticketNumber || '') === numero);
             if (!ticket) return null;
 
-            ticket.status = payload.status || 'em_atendimento_humano';
-            ticket.statusLabel = payload.statusLabel || 'Em atendimento humano';
-            ticket.pendenciaTipo = payload.pendenciaTipo || 'atendimento';
-            ticket.pendenciaLabel = payload.pendenciaLabel || 'Em atendimento';
-            ticket.pendenciaOrdem = 2;
-            ticket.pendenteHaMaisDe2h = false;
-            ticket.paused = true;
+            // Abrir/assumir registra o responsável, mas preserva o passo atual do bot.
+            if (payload.status) ticket.status = payload.status;
+            if (payload.statusLabel) ticket.statusLabel = payload.statusLabel;
+            if (payload.pendenciaTipo) ticket.pendenciaTipo = payload.pendenciaTipo;
+            if (payload.pendenciaLabel) ticket.pendenciaLabel = payload.pendenciaLabel;
+            if (typeof payload.paused === 'boolean') ticket.paused = payload.paused;
             ticket.advogadoResponsavelId = payload.advogadoResponsavelId || ticket.advogadoResponsavelId || null;
             ticket.advogadoResponsavelNome = payload.advogadoResponsavelNome || ticket.advogadoResponsavelNome || null;
             ticket.atendimentoAssumidoEm = payload.atendimentoAssumidoEm || ticket.atendimentoAssumidoEm || Date.now();
@@ -4505,20 +4546,20 @@ function renderizarLista(itens) {
         function renderizarTicketsAtivos(tickets = []) {
             const tbody = document.getElementById('tickets-table-body');
             if (!tbody) return;
-            tbody.innerHTML = '';
 
             if (!tickets.length) {
                 const tr = document.createElement('tr');
                 const td = document.createElement('td');
-                td.colSpan = 8;
+                td.colSpan = 9;
                 td.className = 'tickets-empty';
                 td.textContent = 'Nenhum ticket corresponde aos filtros selecionados.';
                 tr.appendChild(td);
-                tbody.appendChild(tr);
+                tbody.replaceChildren(tr);
                 return;
             }
 
             const agora = Date.now();
+            const fragment = document.createDocumentFragment();
 
             tickets.forEach(ticket => {
                 const tr = document.createElement('tr');
@@ -4541,8 +4582,12 @@ function renderizarLista(itens) {
                 if (Number(docsResumo.total || 0) > 0) {
                     const docsMini = document.createElement('div');
                     docsMini.className = 'ticket-doc-mini';
+                    const icon = document.createElement('i');
+                    icon.className = 'bi bi-stars';
+                    const textoDocs = document.createElement('span');
                     const processando = Number(docsResumo.processando || 0);
-                    docsMini.innerHTML = `<i class="bi bi-stars"></i><span>${docsResumo.total} arquivo${Number(docsResumo.total) === 1 ? '' : 's'} IA${processando ? ` • ${processando} analisando` : ''}</span>`;
+                    textoDocs.textContent = `${docsResumo.total} arquivo${Number(docsResumo.total) === 1 ? '' : 's'} IA${processando ? ` • ${processando} analisando` : ''}`;
+                    docsMini.append(icon, textoDocs);
                     numeroTd.appendChild(docsMini);
                 }
 
@@ -4565,18 +4610,17 @@ function renderizarLista(itens) {
                 etapa.className = 'ticket-stage';
                 etapa.textContent = ticket.statusLabel || ticket.status || '—';
                 situacaoTd.append(pill, etapa);
-                if (possuiResponsavel) {
-                    const owner = document.createElement('div');
-                    owner.className = `ticket-owner-line${ehMeuAtendimento ? ' mine' : ''}`;
-                    const ownerIcon = document.createElement('i');
-                    ownerIcon.className = 'bi bi-person-check';
-                    const ownerText = document.createElement('span');
-                    ownerText.textContent = ehMeuAtendimento
-                        ? 'Meu atendimento'
-                        : (ticket.advogadoResponsavelNome || 'Advogado responsável');
-                    owner.append(ownerIcon, ownerText);
-                    situacaoTd.appendChild(owner);
-                }
+
+                const responsavelTd = document.createElement('td');
+                const responsavelNome = document.createElement('div');
+                responsavelNome.className = 'ticket-responsavel-name';
+                responsavelNome.textContent = possuiResponsavel ? (ticket.advogadoResponsavelNome || 'Usuário atribuído') : 'Não atribuído';
+                const responsavelMeta = document.createElement('div');
+                responsavelMeta.className = 'ticket-responsavel-meta';
+                responsavelMeta.textContent = possuiResponsavel
+                    ? (ehMeuAtendimento ? 'Você abriu/assumiu' : 'Chat já assumido')
+                    : 'Fluxo automático';
+                responsavelTd.append(responsavelNome, responsavelMeta);
 
                 const triagemTd = document.createElement('td');
                 const progress = document.createElement('div');
@@ -4626,38 +4670,82 @@ function renderizarLista(itens) {
                 acaoTd.className = 'text-end';
                 const actionsWrap = document.createElement('div');
                 actionsWrap.className = 'ticket-actions-inline';
+
                 if (temPermissaoPainel('chat')) {
                     const chatBtn = document.createElement('button');
                     chatBtn.type = 'button';
                     chatBtn.className = 'ticket-chat-btn';
-
                     if (!possuiResponsavel) {
                         chatBtn.innerHTML = '<i class="bi bi-chat-dots me-1"></i> Atender';
-                        chatBtn.title = 'Assumir este atendimento';
+                        chatBtn.title = 'Abrir e assumir administrativamente; o bot continua até você enviar uma mensagem.';
                     } else if (ehMeuAtendimento) {
                         chatBtn.classList.add('is-mine');
                         chatBtn.innerHTML = '<i class="bi bi-chat-dots me-1"></i> Abrir chat';
-                        chatBtn.title = 'Continuar meu atendimento';
+                        chatBtn.title = 'Abrir o chat; o fluxo automático continua se você apenas visualizar.';
                     } else {
                         chatBtn.classList.add('is-other');
                         chatBtn.innerHTML = '<i class="bi bi-chat-dots me-1"></i> Abrir chat';
-                        chatBtn.title = `Responsável atribuído: ${ticket.advogadoResponsavelNome || 'outro advogado'}. O chat permanece disponível para a equipe.`;
+                        chatBtn.title = `Responsável atribuído: ${ticket.advogadoResponsavelNome || 'outro advogado'}. Visualizar não interrompe o bot.`;
                     }
                     chatBtn.onclick = () => abrirChatTicket(ticket.ticketNumber, chatBtn);
-
                     actionsWrap.appendChild(chatBtn);
                 }
+
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'ticket-view-btn';
                 btn.innerHTML = '<i class="bi bi-eye me-1"></i> Ver';
                 btn.onclick = () => abrirDetalheTicket(ticket.ticketNumber);
                 actionsWrap.appendChild(btn);
-                acaoTd.appendChild(actionsWrap);
 
-                tr.append(numeroTd, clienteTd, areaTd, situacaoTd, triagemTd, ultimaTd, abertoTd, acaoTd);
-                tbody.appendChild(tr);
+                const closeBtn = document.createElement('button');
+                closeBtn.type = 'button';
+                closeBtn.className = 'ticket-close-btn';
+                closeBtn.innerHTML = '<i class="bi bi-archive me-1"></i> Encerrar';
+                closeBtn.title = 'Encerrar e arquivar este ticket';
+                closeBtn.onclick = () => encerrarTicketPainel(ticket.ticketNumber, closeBtn);
+                actionsWrap.appendChild(closeBtn);
+
+                acaoTd.appendChild(actionsWrap);
+                tr.append(numeroTd, clienteTd, areaTd, situacaoTd, responsavelTd, triagemTd, ultimaTd, abertoTd, acaoTd);
+                fragment.appendChild(tr);
             });
+
+            tbody.replaceChildren(fragment);
+        }
+
+        async function encerrarTicketPainel(ticketNumber, button = null) {
+            const numero = String(ticketNumber || '').trim();
+            if (!numero) return;
+            if (!confirm(`Encerrar e arquivar o ticket ${numero}?\n\nEle será removido da tela de tickets ativos.`)) return;
+
+            const htmlOriginal = button?.innerHTML || '';
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Encerrando...';
+            }
+
+            try {
+                const res = await fetch(`/api/tickets/${encodeURIComponent(numero)}/archive`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível encerrar o ticket.');
+
+                window.activeTicketsData = (window.activeTicketsData || []).filter(item => String(item.ticketNumber || '') !== numero);
+                if (String(window.activeChatTicketNumber || '') === numero) fecharChatTicket();
+                if (String(window.activeTicketDialogNumber || '') === numero) fecharDetalheTicket();
+                preencherFiltroAreasTickets(window.activeTicketsData);
+                recalcularResumoTicketsLocal();
+                filtrarTicketsAtivos();
+            } catch (err) {
+                alert(err.message || 'Não foi possível encerrar o ticket.');
+                if (button?.isConnected) {
+                    button.disabled = false;
+                    button.innerHTML = htmlOriginal;
+                }
+            }
         }
 
         function filtrarTicketsAtivos() {
@@ -5136,6 +5224,13 @@ function renderizarLista(itens) {
 
                 actions.appendChild(chatBtn);
             }
+            const closeTicketBtn = document.createElement('button');
+            closeTicketBtn.type = 'button';
+            closeTicketBtn.className = 'ticket-close-btn';
+            closeTicketBtn.innerHTML = '<i class="bi bi-archive"></i> Encerrar e arquivar';
+            closeTicketBtn.onclick = () => encerrarTicketPainel(ticket.ticketNumber, closeTicketBtn);
+            actions.appendChild(closeTicketBtn);
+
             if (ticket.whatsapp) {
                 const link = document.createElement('a');
                 link.className = 'ticket-wa-link';
@@ -5180,6 +5275,7 @@ function renderizarLista(itens) {
         function inicializarAtualizacaoTickets() {
             if (window.activeTicketsTimer) return;
             window.activeTicketsTimer = setInterval(() => {
+                if (document.hidden) return;
                 const tab = document.getElementById('tab-tickets');
                 const activeView = document.getElementById('tickets-view-active');
                 if (!tab || tab.classList.contains('hidden') || activeView?.classList.contains('hidden')) return;
@@ -5287,13 +5383,20 @@ function renderizarLista(itens) {
         function renderizarCRM(leads) {
             const tbody = document.getElementById('crm-table-body');
             if (!tbody) return;
-            tbody.innerHTML = '';
+            tbody.replaceChildren();
             if (!leads?.length) {
-                tbody.innerHTML = '<tr><td colspan="9" class="crm-empty">Nenhum lead encontrado para os filtros atuais.</td></tr>';
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = 9;
+                td.className = 'crm-empty';
+                td.textContent = 'Nenhum lead encontrado para os filtros atuais.';
+                tr.appendChild(td);
+                tbody.appendChild(tr);
                 return;
             }
 
             const hoje = hojeCRMJS();
+            const fragment = document.createDocumentFragment();
             leads.forEach(lead => {
                 const tr = document.createElement('tr');
 
@@ -5346,7 +5449,13 @@ function renderizarLista(itens) {
                 receitaTd.textContent = lead.receitaTotalPrevista == null ? '—' : moedaCRM(lead.receitaTotalPrevista);
 
                 const updateTd = document.createElement('td');
-                updateTd.innerHTML = `<div class="ticket-time-main">${lead.updatedAt ? formatarDataTicket(lead.updatedAt) : '—'}</div><div class="ticket-time-sub">${lead.origem || 'Origem não informada'}</div>`;
+                const updateMain = document.createElement('div');
+                updateMain.className = 'ticket-time-main';
+                updateMain.textContent = lead.updatedAt ? formatarDataTicket(lead.updatedAt) : '—';
+                const updateSub = document.createElement('div');
+                updateSub.className = 'ticket-time-sub';
+                updateSub.textContent = lead.origem || 'Origem não informada';
+                updateTd.append(updateMain, updateSub);
 
                 const acaoTd = document.createElement('td');
                 acaoTd.className = 'text-end';
@@ -5371,8 +5480,9 @@ function renderizarLista(itens) {
                 acaoTd.appendChild(actions);
 
                 tr.append(crmTd, clienteTd, areaTd, statusTd, nextTd, respTd, receitaTd, updateTd, acaoTd);
-                tbody.appendChild(tr);
+                fragment.appendChild(tr);
             });
+            tbody.appendChild(fragment);
         }
 
         function filtrarCRM() {
@@ -5728,7 +5838,7 @@ function renderizarLista(itens) {
             const contador = document.getElementById('clients-count');
             if (!tbody || !contador) return;
 
-            tbody.innerHTML = '';
+            tbody.replaceChildren();
             contador.textContent = `${clientes.length} contato${clientes.length === 1 ? '' : 's'} exibido${clientes.length === 1 ? '' : 's'}`;
             atualizarMetricasClientes();
 
@@ -5743,6 +5853,7 @@ function renderizarLista(itens) {
                 return;
             }
 
+            const fragment = document.createDocumentFragment();
             clientes.forEach(cliente => {
                 const cadastrado = cliente.cadastrado !== false;
                 const tr = document.createElement('tr');
@@ -5797,8 +5908,9 @@ function renderizarLista(itens) {
 
                 acaoTd.appendChild(wrap);
                 tr.append(statusTd, nomeTd, cpfTd, whatsappTd, responsavelTd, contatoTd, acaoTd);
-                tbody.appendChild(tr);
+                fragment.appendChild(tr);
             });
+            tbody.appendChild(fragment);
         }
 
         async function carregarClientes(forcar = false) {
@@ -6172,7 +6284,12 @@ function renderizarLista(itens) {
                 if(!res.ok)throw new Error(data.erro||'Não foi possível carregar o chat.');
 
                 aplicarAtribuicaoTicketLocal({
-                    ticketNumber,status:claimData.ticket?.status||'em_atendimento_humano',statusLabel:'Em atendimento humano',pendenciaTipo:'atendimento',pendenciaLabel:'Em atendimento',
+                    ticketNumber,
+                    status:claimData.ticket?.status||local?.status||null,
+                    paused:claimData.ticket?.paused===true,
+                    statusLabel:claimData.ticket?.statusLabel||local?.statusLabel||null,
+                    pendenciaTipo:claimData.ticket?.pendenciaTipo||local?.pendenciaTipo||null,
+                    pendenciaLabel:claimData.ticket?.pendenciaLabel||local?.pendenciaLabel||null,
                     advogadoResponsavelId:claimData.responsavel?.id||responsavelLocal||meuId,
                     advogadoResponsavelNome:claimData.responsavel?.nome||local?.advogadoResponsavelNome||window.panelSessionUser?.nome||null,
                     atendimentoAssumidoEm:claimData.ticket?.atendimentoAssumidoEm||local?.atendimentoAssumidoEm||Date.now()
