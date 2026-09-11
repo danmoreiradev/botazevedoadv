@@ -1422,6 +1422,99 @@ function identidadeAdvogadoSessao(req) {
 }
 
 
+function nomeAdvogadoParaWhatsApp(advogado = {}) {
+    const nome = String(advogado?.nome || '').trim();
+    let assinatura = String(advogado?.assinatura || '').trim();
+
+    // Preserva assinatura explicitamente configurada (Dr./Dra.) e transforma o
+    // padrão genérico "Dr(a)." em "Dr." para uma apresentação mais natural.
+    if (assinatura) {
+        assinatura = assinatura
+            .replace(/^dr\(a\)\.?\s*/i, 'Dr ')
+            .replace(/^dra\.?\s*/i, 'Dra ')
+            .replace(/^dr\.?\s*/i, 'Dr ')
+            .replace(/^doutor\(a\)\s+/i, 'Dr ')
+            .replace(/^doutora\s+/i, 'Dra ')
+            .replace(/^doutor\s+/i, 'Dr ')
+            .trim();
+        if (assinatura) return assinatura;
+    }
+
+    return nome ? `Dr ${nome}` : 'Advogado responsável';
+}
+
+function assinaturaNegritoWhatsApp(advogado = {}) {
+    return `*${nomeAdvogadoParaWhatsApp(advogado)}*`;
+}
+
+async function enviarAvisoAssuncaoAoCliente(ticket, advogado) {
+    if (!ticket?.ticketNumber || !sock?.user) return false;
+
+    // A mensagem é apenas informativa. Ela é enviada como mensagem automática do
+    // sistema e, portanto, NÃO aciona atualizarEstadoPosEnvioChat nem pausa o fluxo.
+    try {
+        const jid = await destinoWhatsAppTicket(ticket);
+        if (!jid) {
+            console.warn(`[Ticket ${ticket.ticketNumber}] Não foi possível identificar o WhatsApp para avisar a assunção.`);
+            return false;
+        }
+
+        const nomeExibicao = nomeAdvogadoParaWhatsApp(advogado);
+        const artigo = /^Dra\b/i.test(nomeExibicao) ? 'A' : 'O';
+        const texto = `${artigo} *${nomeExibicao}* assumiu seu atendimento.`;
+        const sent = await sendBotMsg(jid, { text: texto });
+        if (!sent?.key?.id) return false;
+
+        const agora = Date.now();
+        await Promise.allSettled([
+            ticketsColl?.updateOne(
+                { _id: ticket._id },
+                {
+                    $set: {
+                        mensagemAssuncaoEnviadaEm: agora,
+                        mensagemAssuncaoAdvogadoId: String(advogado?.id || '') || null
+                    }
+                }
+            ),
+            atualizarHistorico(ticket.ticketNumber, {
+                mensagemAssuncaoEnviadaEm: agora,
+                mensagemAssuncaoAdvogadoId: String(advogado?.id || '') || null,
+                mensagemAssuncaoAdvogadoNome: nomeAdvogadoParaWhatsApp(advogado)
+            })
+        ]);
+
+        return true;
+    } catch (err) {
+        console.warn(`[Ticket ${ticket?.ticketNumber || '-'}] Falha ao enviar aviso de assunção:`, err?.message || err);
+        return false;
+    }
+}
+
+async function enviarAvisoEncerramentoAoCliente(ticket, advogado) {
+    if (!ticket?.ticketNumber || !sock?.user) return false;
+
+    // O aviso é enviado ANTES do arquivamento enquanto o ticket ainda existe em
+    // active_tickets. Assim ele também fica registrado no histórico leve do chat.
+    // Como usa sendBotMsg, continua sendo uma mensagem automática do sistema e não
+    // é tratada como uma nova intervenção manual do advogado.
+    try {
+        const jid = await destinoWhatsAppTicket(ticket);
+        if (!jid) {
+            console.warn(`[Ticket ${ticket.ticketNumber}] Não foi possível identificar o WhatsApp para avisar o encerramento.`);
+            return false;
+        }
+
+        const nomeExibicao = nomeAdvogadoParaWhatsApp(advogado);
+        const artigo = /^Dra\b/i.test(nomeExibicao) ? 'A' : 'O';
+        const texto = `${artigo} *${nomeExibicao}* encerrou seu atendimento. Agradecemos pelo contato e permanecemos à disposição.`;
+        const sent = await sendBotMsg(jid, { text: texto });
+        return !!sent?.key?.id;
+    } catch (err) {
+        console.warn(`[Ticket ${ticket?.ticketNumber || '-'}] Falha ao enviar aviso de encerramento:`, err?.message || err);
+        return false;
+    }
+}
+
 // -----------------------------------------------------------------------------
 // ATRIBUIÇÃO OPERACIONAL DE ATENDIMENTO
 // -----------------------------------------------------------------------------
@@ -1452,7 +1545,13 @@ async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento 
         advogadoResponsavelId: 1,
         advogadoResponsavelNome: 1,
         atendimentoAssumidoEm: 1,
-        lastActivity: 1
+        lastActivity: 1,
+        numeroReal: 1,
+        whatsappNumbers: 1,
+        identificadores: 1,
+        lastRawJid: 1,
+        mensagemAssuncaoEnviadaEm: 1,
+        mensagemAssuncaoAdvogadoId: 1
     };
 
     const atual = await ticketsColl.findOne({ ticketNumber: numero }, { projection });
@@ -1541,6 +1640,10 @@ async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento 
             { $set: { advogadoResponsavel: advogadoNome, updatedAt: agora } }
         ).catch(() => {});
     }
+
+    // Avisa o cliente somente na PRIMEIRA atribuição do ticket. Como o envio usa
+    // sendBotMsg(), ele permanece classificado como automático e não interrompe a triagem.
+    await enviarAvisoAssuncaoAoCliente(atualizado, advogado);
 
     if (emitirEvento) {
         const classificacao = classificarPendenciaTicket(atualizado);
@@ -2305,6 +2408,21 @@ function normalizarTexto(texto = '') {
 const HUMANIZACAO_IA_TIMEOUT_MS = 6500;
 const HUMANIZACAO_IA_MAX_CHARS = 1200;
 
+function saudacaoAtualEscritorio(data = new Date()) {
+    const relogio = obterRelogioNoFuso(data, BUSINESS_HOURS_TIMEZONE);
+    const hora = Number(relogio?.hora);
+
+    if (Number.isFinite(hora)) {
+        if (hora < 12) return 'Bom dia';
+        if (hora < 18) return 'Boa tarde';
+        return 'Boa noite';
+    }
+
+    // Fallback conservador: evita inventar uma saudação temporal caso o relógio
+    // não possa ser resolvido corretamente.
+    return 'Olá';
+}
+
 function detectarCortesiaMensagem(texto = '') {
     const valor = normalizarTexto(texto)
         .replace(/[!?.,;:]+/g, ' ')
@@ -2346,8 +2464,13 @@ function aplicarCortesiaAoFallback(mensagemBase = '', mensagemCliente = '') {
     const cortesia = detectarCortesiaMensagem(mensagemCliente);
     const prefixos = [];
 
-    if (cortesia.saudacao && !normalizarTexto(resposta).startsWith(normalizarTexto(cortesia.saudacao))) {
-        prefixos.push(`${cortesia.saudacao}!`);
+    if (cortesia.saudacao) {
+        const saudacaoCorreta = /^(bom dia|boa tarde|boa noite)$/i.test(cortesia.saudacao)
+            ? saudacaoAtualEscritorio()
+            : cortesia.saudacao;
+        if (!normalizarTexto(resposta).startsWith(normalizarTexto(saudacaoCorreta))) {
+            prefixos.push(`${saudacaoCorreta}!`);
+        }
     }
 
     if (cortesia.agradecimento && !/agradec|obrigad|por nada|disposicao/i.test(normalizarTexto(resposta))) {
@@ -2402,6 +2525,7 @@ async function gerarRespostaHumanizadaIA({
 
     const literaisProtegidos = literaisProtegidosDaMensagem(base, ticket);
     const cortesia = detectarCortesiaMensagem(mensagemCliente);
+    const saudacaoCorretaAgora = saudacaoAtualEscritorio();
     const nome = String(nomeCliente || ticket?.clienteNome || '').trim().slice(0, 120);
 
     const prompt = `Você revisa mensagens automáticas de WhatsApp de um escritório de advocacia brasileiro.
@@ -2416,20 +2540,22 @@ NÚMERO DO TICKET: ${JSON.stringify(ticket?.ticketNumber || null)}
 MENSAGEM-BASE: ${JSON.stringify(base)}
 
 SINAIS DE CORTESIA IDENTIFICADOS:
-- saudação: ${JSON.stringify(cortesia.saudacao)}
+- saudação recebida: ${JSON.stringify(cortesia.saudacao)}
+- saudação temporal correta AGORA em ${BUSINESS_HOURS_TIMEZONE}: ${JSON.stringify(saudacaoCorretaAgora)}
 - agradecimento: ${cortesia.agradecimento ? 'sim' : 'não'}
 
 REGRAS OBRIGATÓRIAS:
 1. Preserve integralmente o sentido operacional da MENSAGEM-BASE. Não remova informação importante.
 2. Preserve EXATAMENTE números de ticket, horários, nomes e demais dados concretos presentes na MENSAGEM-BASE.
-3. Se o cliente disser "Bom dia", "Boa tarde" ou "Boa noite", responda com a mesma saudação. Se agradecer, retribua o agradecimento de forma natural.
-4. Não invente prazo, data, valor, análise jurídica, resultado, prioridade, urgência, disponibilidade de advogado ou promessa de retorno.
-5. Não diga "em breve", "logo", "aguarde um momento" ou equivalentes, salvo se essas expressões já estiverem na MENSAGEM-BASE.
-6. Não dê orientação jurídica e não acrescente fatos sobre o caso.
-7. Evite linguagem robótica como "um especialista dará continuidade ao atendimento". Prefira construções humanas como "nossa equipe seguirá com o atendimento por aqui", desde que mantenha o sentido da base.
-8. Use de 1 a 3 frases curtas. Pode usar no máximo 1 emoji, apenas se ficar natural. Não exagere em exclamações.
-9. O WhatsApp aceita *negrito*; mantenha o número do ticket destacado se ele já estiver destacado na base.
-10. Retorne SOMENTE a mensagem final, sem aspas, JSON, explicações ou markdown em bloco.`;
+3. Se usar saudação temporal, use EXCLUSIVAMENTE a "saudação temporal correta AGORA" informada acima. Nunca escreva "Bom dia", "Boa tarde" ou "Boa noite" em desacordo com esse valor. Não invente saudação temporal quando ela não for necessária.
+4. Se o cliente agradecer, retribua o agradecimento de forma natural.
+5. Não invente prazo, data, valor, análise jurídica, resultado, prioridade, urgência, disponibilidade de advogado ou promessa de retorno.
+6. Não diga "em breve", "logo", "aguarde um momento" ou equivalentes, salvo se essas expressões já estiverem na MENSAGEM-BASE.
+7. Não dê orientação jurídica e não acrescente fatos sobre o caso.
+8. Evite linguagem robótica como "um especialista dará continuidade ao atendimento". Prefira construções humanas como "nossa equipe seguirá com o atendimento por aqui", desde que mantenha o sentido da base.
+9. Use de 1 a 3 frases curtas. Pode usar no máximo 1 emoji, apenas se ficar natural. Não exagere em exclamações.
+10. O WhatsApp aceita *negrito*; mantenha o número do ticket destacado se ele já estiver destacado na base.
+11. Retorne SOMENTE a mensagem final, sem aspas, JSON, explicações ou markdown em bloco.`;
 
     try {
         const timeout = new Promise((_, reject) => {
@@ -2459,6 +2585,17 @@ REGRAS OBRIGATÓRIAS:
             return fallback;
         }
 
+        // Proteção determinística contra saudações incompatíveis com o horário real
+        // do escritório. Ex.: 09:53 em São Paulo nunca pode sair como "Boa tarde".
+        const saudacoesTemporais = ['Bom dia', 'Boa tarde', 'Boa noite'];
+        const saudacaoTemporalEncontrada = saudacoesTemporais.find(item =>
+            new RegExp(`\\b${item.replace(' ', '\\s+')}\\b`, 'i').test(humanizada)
+        );
+        if (saudacaoTemporalEncontrada && normalizarTexto(saudacaoTemporalEncontrada) !== normalizarTexto(saudacaoCorretaAgora)) {
+            console.warn(`[Humanização IA] Resposta descartada por saudação fora do horário: ${saudacaoTemporalEncontrada}; esperado: ${saudacaoCorretaAgora}.`);
+            return fallback;
+        }
+
         return humanizada;
     } catch (err) {
         console.warn('[Humanização IA] Usando fallback seguro:', err?.message || err);
@@ -2467,7 +2604,10 @@ REGRAS OBRIGATÓRIAS:
 }
 
 function saudacaoContextualDaMensagem(texto = '') {
-    return detectarCortesiaMensagem(texto).saudacao || 'Olá';
+    const detectada = detectarCortesiaMensagem(texto).saudacao;
+    if (!detectada) return saudacaoAtualEscritorio();
+    if (/^(bom dia|boa tarde|boa noite)$/i.test(detectada)) return saudacaoAtualEscritorio();
+    return detectada;
 }
 
 function respostaPositiva(texto = '') {
@@ -6286,12 +6426,40 @@ app.post('/api/tickets/:ticketNumber/archive', async (req, res) => {
 
         const ticket = await ticketsColl.findOne(
             { ticketNumber },
-            { projection: { _id: 1, ticketNumber: 1, status: 1, advogadoResponsavelId: 1, advogadoResponsavelNome: 1 } }
+            {
+                projection: {
+                    _id: 1,
+                    ticketNumber: 1,
+                    status: 1,
+                    numeroReal: 1,
+                    whatsappNumbers: 1,
+                    identificadores: 1,
+                    lastRawJid: 1,
+                    advogadoResponsavelId: 1,
+                    advogadoResponsavelNome: 1
+                }
+            }
         );
         if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
 
         const usuario = identidadeAdvogadoSessao(req);
         const agora = Date.now();
+
+        // O encerramento só é confirmado depois que o cliente recebe o aviso.
+        // Isso evita arquivar silenciosamente um atendimento caso o WhatsApp esteja
+        // desconectado ou o destinatário não possa ser resolvido.
+        if (!sock?.user) {
+            return res.status(503).json({
+                erro: 'O WhatsApp do escritório está desconectado. Reconecte-o antes de encerrar o ticket para que o cliente seja avisado.'
+            });
+        }
+
+        const avisoEncerramentoEnviado = await enviarAvisoEncerramentoAoCliente(ticket, usuario);
+        if (!avisoEncerramentoEnviado) {
+            return res.status(502).json({
+                erro: 'Não foi possível avisar o cliente sobre o encerramento. O ticket não foi arquivado; tente novamente.'
+            });
+        }
 
         await atualizarHistorico(ticketNumber, {
             status: 'encerrado_painel',
@@ -6302,7 +6470,9 @@ app.post('/api/tickets/:ticketNumber/archive', async (req, res) => {
             encerradoPorUsuarioNome: usuario.nome || usuario.assinatura || null,
             statusAnteriorAoEncerramento: ticket.status || null,
             advogadoResponsavelId: ticket.advogadoResponsavelId || null,
-            advogadoResponsavelNome: ticket.advogadoResponsavelNome || null
+            advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
+            avisoEncerramentoClienteEnviado: true,
+            avisoEncerramentoClienteEnviadoEm: agora
         });
 
         const removido = await ticketsColl.deleteOne({ _id: ticket._id, ticketNumber });
@@ -6317,7 +6487,12 @@ app.post('/api/tickets/:ticketNumber/archive', async (req, res) => {
             archivedByName: usuario.nome || usuario.assinatura || null
         });
 
-        return res.json({ ok: true, ticketNumber, archivedAt: agora });
+        return res.json({
+            ok: true,
+            ticketNumber,
+            archivedAt: agora,
+            avisoClienteEnviado: true
+        });
     } catch (err) {
         console.error('[Tickets] Erro ao encerrar ticket pelo painel:', err);
         return res.status(500).json({ erro: 'Não foi possível encerrar o ticket.' });
@@ -6344,7 +6519,7 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
         const jid = await destinoWhatsAppTicket(ticket);
         if (!jid) return res.status(409).json({ erro: 'Não foi possível identificar o WhatsApp deste ticket.' });
 
-        const textoWhatsApp = `${advogado.assinatura}: ${texto}`;
+        const textoWhatsApp = `${assinaturaNegritoWhatsApp(advogado)}: ${texto}`;
         const jidNormalizadoPainel = normalizarJid(jid) || jid;
         panelPendingJids.add(jidNormalizadoPainel);
         setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 5000);
@@ -6410,7 +6585,7 @@ app.post(
             const mimeInformado = limitarTextoChat(req.query.mimeType || 'application/octet-stream', 120).toLowerCase().split(';')[0].trim();
             const mimeType = (!mimeInformado || mimeInformado === 'application/octet-stream' ? mimePorExtensao(nomeArquivo) : mimeInformado) || 'application/octet-stream';
             const legenda = limitarTextoChat(req.query.caption || '', CHAT_MAX_CAPTION_CHARS);
-            const captionAssinada = legenda ? `${advogado.assinatura}: ${legenda}` : `${advogado.assinatura}:`;
+            const captionAssinada = legenda ? `${assinaturaNegritoWhatsApp(advogado)}: ${legenda}` : `${assinaturaNegritoWhatsApp(advogado)}:`;
             const jidNormalizadoPainel = normalizarJid(jid) || jid;
             panelPendingJids.add(jidNormalizadoPainel);
             setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 5000);
@@ -6429,7 +6604,7 @@ app.post(
             // Áudio não aceita legenda no WhatsApp. Envia a identificação em uma
             // mensagem curta imediatamente antes, sem salvar binário no MongoDB.
             if (tipo === 'audio') {
-                const intro = await enviarMensagemBaileys(jid, { text: legenda ? `${advogado.assinatura}: ${legenda}` : `${advogado.assinatura}:` });
+                const intro = await enviarMensagemBaileys(jid, { text: legenda ? `${assinaturaNegritoWhatsApp(advogado)}: ${legenda}` : `${assinaturaNegritoWhatsApp(advogado)}:` });
                 if (intro?.key?.id) {
                     panelMessageIds.add(intro.key.id);
                     setTimeout(() => panelMessageIds.delete(intro.key.id), 2 * 60 * 1000);
