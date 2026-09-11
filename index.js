@@ -3207,8 +3207,14 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
         const retomada = await mensagemRetomadaFluxo(ticket);
         const cortesia = detectarCortesiaMensagem(mensagemCliente);
         const prefixos = [];
+
+        // Se houver uma pergunta real junto com uma expressão de agradecimento
+        // (ex.: "Obrigado, vocês atendem bloqueio de Instagram?"), respondemos
+        // diretamente à dúvida. Retribuir o agradecimento neste ponto deixa a
+        // conversa artificial e repete uma cortesia que não é o objetivo principal
+        // da mensagem. Agradecimentos ISOLADOS continuam sendo tratados acima como
+        // CORTESIA e recebem somente "Por nada!".
         if (cortesia.saudacao) prefixos.push(`${cortesia.saudacao}!`);
-        if (cortesia.agradecimento) prefixos.push('Nós que agradecemos pelo contato.');
         const prefixo = prefixos.length ? `${prefixos.join(' ')}\n\n` : '';
 
         // A resposta jurídica/aprovada da knowledge_base não é reescrita pela IA.
@@ -3236,27 +3242,13 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
 async function confirmarMensagemAguardandoEspecialista(ticket, jid, mensagemCliente = '') {
     if (!ticket || ticket.status !== 'aguardando_especialista') return;
 
-    const agora = Date.now();
-    const intervaloMinimo = 15 * 60 * 1000;
-    if (agora - (ticket.lastAutoAckAt || 0) < intervaloMinimo) return;
-
-    const mensagemConfirmacao = await gerarRespostaHumanizadaIA({
-        tipo: 'confirmacao_mensagem_ticket_em_espera',
-        mensagemCliente,
-        ticket,
-        mensagemBase: `Recebemos sua mensagem e ela já foi adicionada ao ticket *${ticket.ticketNumber}*. Nossa equipe terá acesso a essa informação na continuidade do atendimento.`
-    });
-
-    await sendBotMsg(jid, { text: mensagemConfirmacao });
-
+    // O cliente pode continuar enviando mensagens e documentos enquanto aguarda
+    // o especialista. O conteúdo já é salvo no histórico do chat em outro ponto
+    // do fluxo. Aqui apenas atualizamos a atividade do ticket, sem enviar qualquer
+    // confirmação automática para não deixar a conversa artificial/robotizada.
     await ticketsColl.updateOne(
         { _id: ticket._id },
-        {
-            $set: {
-                lastAutoAckAt: agora,
-                lastActivity: agora
-            }
-        }
+        { $set: { lastActivity: Date.now() } }
     );
 }
 
@@ -4341,8 +4333,8 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                     return;
                 }
 
-                // Se apenas está aguardando a equipe e a pergunta não existe na base,
-                // ao menos confirma o recebimento. Durante conversa humana ativa, fica silencioso.
+                // Enquanto aguarda a equipe, recebemos e registramos a mensagem normalmente,
+                // mas não enviamos confirmação automática para o cliente.
                 await confirmarMensagemAguardandoEspecialista(ticket, rawJid, texto);
 
                 console.log(`[Ticket ${ticket.ticketNumber}] Bot pausado (${ticket.status}).`);
