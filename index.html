@@ -2467,6 +2467,97 @@
         @media (max-width:479.98px){ .tickets-summary-compact{grid-template-columns:1fr;} }
     </style>
 
+
+    <style id="ticket-chat-documents-v4">
+        /* V4 — documentos dentro do chat + responsável na fila */
+        .tickets-table { min-width:1080px; }
+        .ticket-responsavel-cell { min-width:150px; }
+        .ticket-responsavel-name { color:#2f3b35; font-size:.80rem; font-weight:760; white-space:nowrap; }
+        .ticket-responsavel-meta { margin-top:3px; color:#87908b; font-size:.67rem; white-space:nowrap; }
+        .ticket-responsavel-empty { color:#8a948f; font-size:.76rem; font-weight:650; }
+
+        .ticket-chat-documents-btn {
+            min-height:34px; padding:7px 10px; display:inline-flex; align-items:center; gap:7px;
+            color:#44534c; background:#fff; border:1px solid #cfd8d3; border-radius:8px;
+            font-size:.73rem; font-weight:760; white-space:nowrap;
+        }
+        .ticket-chat-documents-btn:hover { background:#f4f7f5; border-color:#aebdb5; }
+        .ticket-chat-documents-count {
+            min-width:19px; height:19px; padding:0 5px; display:inline-flex; align-items:center; justify-content:center;
+            color:#fff; background:#64746d; border-radius:999px; font-size:.62rem; line-height:1; font-weight:800;
+        }
+        .ticket-chat-documents-btn.has-processing .ticket-chat-documents-count { background:#b58627; }
+        .ticket-chat-documents-btn.has-error .ticket-chat-documents-count { background:#b5524a; }
+
+        .ticket-chat-shell { position:relative; }
+        .chat-documents-backdrop {
+            position:absolute; inset:0; z-index:34; background:rgba(17,27,33,.20);
+            opacity:1; transition:opacity .16s ease;
+        }
+        .chat-documents-panel {
+            position:absolute; top:0; right:0; bottom:0; z-index:35; width:min(460px,88%);
+            display:flex; flex-direction:column; background:#f8faf9; border-left:1px solid #dce3df;
+            box-shadow:-18px 0 42px rgba(17,27,33,.15); animation:chatDocsIn .18s ease both;
+        }
+        @keyframes chatDocsIn { from { opacity:.6; transform:translateX(22px); } to { opacity:1; transform:none; } }
+        .chat-documents-header {
+            min-height:64px; padding:13px 15px; display:flex; align-items:center; justify-content:space-between;
+            gap:12px; background:#fff; border-bottom:1px solid #e1e7e4;
+        }
+        .chat-documents-title { color:#25332d; font-size:.90rem; font-weight:800; }
+        .chat-documents-subtitle { margin-top:2px; color:#819087; font-size:.68rem; }
+        .chat-documents-close {
+            width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center;
+            color:#617069; background:#f3f5f4; border:1px solid #e0e5e2; border-radius:9px;
+        }
+        .chat-documents-body { flex:1; min-height:0; padding:12px; overflow-y:auto; }
+        .chat-documents-empty { padding:54px 20px; color:#839088; text-align:center; font-size:.79rem; }
+        .chat-documents-empty i { display:block; margin-bottom:10px; color:#a7b0ab; font-size:1.6rem; }
+        .chat-doc-card {
+            margin-bottom:10px; overflow:hidden; background:#fff; border:1px solid #dfe5e2;
+            border-radius:12px; box-shadow:0 1px 2px rgba(17,27,33,.035); scroll-margin-top:12px;
+        }
+        .chat-doc-card.is-highlighted { box-shadow:0 0 0 2px rgba(197,160,89,.45); }
+        .chat-doc-card-header { padding:11px 12px; display:flex; align-items:flex-start; justify-content:space-between; gap:10px; background:#fbfcfb; border-bottom:1px solid #edf0ee; }
+        .chat-doc-card-name { display:flex; align-items:flex-start; gap:8px; min-width:0; color:#303c36; font-size:.78rem; font-weight:780; }
+        .chat-doc-card-name i { flex:0 0 auto; margin-top:1px; color:#9c7a37; }
+        .chat-doc-card-name span { overflow-wrap:anywhere; }
+        .chat-doc-card-meta { margin-top:4px; color:#8b958f; font-size:.64rem; }
+        .chat-doc-card-body { padding:12px; }
+        .chat-doc-ai-label { margin-bottom:6px; display:flex; align-items:center; gap:6px; color:#6b5930; font-size:.66rem; font-weight:800; letter-spacing:.035em; text-transform:uppercase; }
+        .chat-doc-summary { color:#37433d; font-size:.78rem; line-height:1.48; white-space:pre-wrap; }
+        .chat-doc-type { margin-bottom:8px; color:#53645b; font-size:.69rem; font-weight:730; }
+        .chat-doc-actions { margin-top:10px; display:flex; flex-wrap:wrap; gap:7px; }
+        .chat-doc-action {
+            min-height:32px; padding:6px 9px; display:inline-flex; align-items:center; gap:6px;
+            color:#4f6057; background:#fff; border:1px solid #d7dfda; border-radius:8px;
+            font-size:.68rem; font-weight:750; text-decoration:none;
+        }
+        .chat-doc-action:hover { color:#28362f; background:#f5f7f6; }
+        .chat-doc-details { margin-top:10px; border-top:1px solid #edf0ee; padding-top:9px; }
+        .chat-doc-details summary { color:#68756f; font-size:.69rem; font-weight:760; cursor:pointer; }
+        .chat-doc-details .ticket-doc-subsection-title { margin-top:9px; }
+        .chat-doc-status-note { padding:9px 10px; color:#725819; background:#fff9e8; border:1px solid #f0e0b8; border-radius:8px; font-size:.72rem; }
+        .chat-doc-status-error { padding:9px 10px; color:#93413b; background:#fff5f4; border:1px solid #efd8d5; border-radius:8px; font-size:.72rem; }
+
+        .chat-ai-summary {
+            margin-top:7px; padding:8px 9px; color:#405048; background:rgba(249,247,238,.88);
+            border:1px solid rgba(197,160,89,.26); border-radius:9px; font-size:.72rem;
+        }
+        .chat-ai-summary-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; color:#6f5c31; font-size:.64rem; font-weight:800; text-transform:uppercase; letter-spacing:.035em; }
+        .chat-ai-summary-text { line-height:1.42; white-space:pre-wrap; }
+        .chat-ai-summary-open { margin-top:6px; padding:0; color:#6b5930; background:transparent; border:0; font-size:.66rem; font-weight:800; }
+        .chat-ai-summary.processing { color:#766126; background:#fff9e9; }
+        .chat-ai-summary.error { color:#88433e; background:#fff5f4; border-color:#efd8d5; }
+
+        @media (max-width:767.98px) {
+            .chat-documents-panel { width:100%; }
+            .ticket-chat-documents-btn span.label { display:none; }
+            .ticket-chat-documents-btn { width:38px; height:38px; padding:0; justify-content:center; border-radius:50%; position:relative; }
+            .ticket-chat-documents-count { position:absolute; top:-5px; right:-5px; border:2px solid #fff; }
+        }
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -2752,13 +2843,14 @@
                                     <th>Ticket</th>
                                     <th>Cliente</th>
                                     <th>Área</th>
+                                    <th>Responsável</th>
                                     <th>Última atividade</th>
                                     <th>Aberto há</th>
                                     <th class="text-end">Ações</th>
                                 </tr>
                             </thead>
                             <tbody id="tickets-table-body">
-                                <tr><td colspan="6" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
+                                <tr><td colspan="7" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -3078,6 +3170,9 @@
                     <span class="chat-op-pill" id="ticket-chat-op-time"><i class="bi bi-clock"></i><span>Atividade</span></span>
                 </div>
                 <div class="ticket-chat-operation-actions">
+                    <button type="button" class="ticket-chat-documents-btn" id="ticket-chat-documents-btn" onclick="toggleDocumentosChat()" title="Ver arquivos recebidos e resumos da IA">
+                        <i class="bi bi-files"></i><span class="label">Ver documentos</span><span class="ticket-chat-documents-count" id="ticket-chat-documents-count">0</span>
+                    </button>
                     <button type="button" class="ticket-chat-claim hidden" id="ticket-chat-claim" onclick="iniciarAtendimentoTicket(window.activeChatTicketNumber, this, false)" title="Iniciar atendimento">
                         <i class="bi bi-headset"></i><span>Iniciar atendimento</span>
                     </button>
@@ -3105,6 +3200,21 @@
             <div class="ticket-chat-history" id="ticket-chat-history">
                 <div class="chat-empty">Carregando conversa...</div>
             </div>
+
+            <div class="chat-documents-backdrop hidden" id="chat-documents-backdrop" onclick="fecharDocumentosChat()"></div>
+            <aside class="chat-documents-panel hidden" id="chat-documents-panel" aria-label="Documentos e análises da IA">
+                <div class="chat-documents-header">
+                    <div>
+                        <div class="chat-documents-title"><i class="bi bi-stars me-1"></i> Documentos e análise da IA</div>
+                        <div class="chat-documents-subtitle" id="chat-documents-subtitle">Arquivos enviados pelo cliente</div>
+                    </div>
+                    <button type="button" class="chat-documents-close" onclick="fecharDocumentosChat()" aria-label="Fechar documentos"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="chat-documents-body" id="chat-documents-body">
+                    <div class="chat-documents-empty"><i class="bi bi-files"></i>Nenhum arquivo analisado neste atendimento.</div>
+                </div>
+            </aside>
+
             <form class="ticket-chat-composer" id="ticket-chat-composer" onsubmit="enviarMensagemChat(event)">
                 <input type="file" id="ticket-chat-file" class="hidden" onchange="enviarArquivoChat(this)" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv">
                 <div class="chat-compose-tools">
@@ -3688,12 +3798,18 @@
         });
 
         socket.on('ticket_document_ai_updated', ({ ticketNumber, status } = {}) => {
+            const numero = String(ticketNumber || '');
+            if (numero && String(window.activeChatTicketNumber || '') === numero) {
+                clearTimeout(window.activeChatDocumentRefreshTimer);
+                window.activeChatDocumentRefreshTimer = setTimeout(() => carregarDocumentosChatAtivo(true), 220);
+            }
+
             const tab = document.getElementById('tab-tickets');
             const activeView = document.getElementById('tickets-view-active');
             if (!tab || tab.classList.contains('hidden') || activeView?.classList.contains('hidden')) return;
 
-            // Evita recarregar toda a lista a cada etapa interna (fila, download, chamada IA).
-            // Atualizamos automaticamente apenas quando a análise termina.
+            // A lista de tickets só precisa de refresh quando a análise chega a um estado final.
+            // Dentro do chat, todos os estados são refletidos em tempo real pelo bloco acima.
             if (!['concluida', 'erro', 'nao_suportado'].includes(String(status || ''))) return;
 
             clearTimeout(window.ticketDocumentAIRefreshTimer);
@@ -4805,7 +4921,7 @@ function renderizarLista(itens) {
             if (!tickets.length) {
                 const tr = document.createElement('tr');
                 const td = document.createElement('td');
-                td.colSpan = 6;
+                td.colSpan = 7;
                 td.className = 'tickets-empty';
                 td.textContent = 'Nenhum ticket corresponde aos filtros selecionados.';
                 tr.appendChild(td);
@@ -4856,6 +4972,23 @@ function renderizarLista(itens) {
 
                 const areaTd = criarTextoCelulaTicket(ticket.area || ticket.menuOptionTitle || 'Ainda não definida', 'ticket-area');
 
+                const responsavelTd = document.createElement('td');
+                responsavelTd.className = 'ticket-responsavel-cell';
+                if (ticket.advogadoResponsavelNome) {
+                    const responsavelNome = document.createElement('div');
+                    responsavelNome.className = 'ticket-responsavel-name';
+                    responsavelNome.textContent = ticket.advogadoResponsavelNome;
+                    const responsavelMeta = document.createElement('div');
+                    responsavelMeta.className = 'ticket-responsavel-meta';
+                    responsavelMeta.textContent = ticketEhMeuAtendimento(ticket) ? 'Seu atendimento' : 'Atendimento atribuído';
+                    responsavelTd.append(responsavelNome, responsavelMeta);
+                } else {
+                    const vazio = document.createElement('div');
+                    vazio.className = 'ticket-responsavel-empty';
+                    vazio.textContent = 'Não assumido';
+                    responsavelTd.appendChild(vazio);
+                }
+
                 const ultimaTd = document.createElement('td');
                 const ultimaMain = document.createElement('div');
                 ultimaMain.className = 'ticket-time-main';
@@ -4899,7 +5032,7 @@ function renderizarLista(itens) {
                 actionsWrap.appendChild(closeBtn);
 
                 acaoTd.appendChild(actionsWrap);
-                tr.append(numeroTd, clienteTd, areaTd, ultimaTd, abertoTd, acaoTd);
+                tr.append(numeroTd, clienteTd, areaTd, responsavelTd, ultimaTd, abertoTd, acaoTd);
                 fragment.appendChild(tr);
             });
 
@@ -6312,9 +6445,278 @@ function renderizarLista(itens) {
         // ---------------------------------------------------------------------
         window.activeChatTicketNumber = null;
         window.activeChatMessages = [];
+        window.activeChatDocuments = [];
         window.activeChatHasMore = false;
         window.activeChatOldest = null;
         window.chatSendQueue = Promise.resolve();
+
+        function mapaDocumentosChat() {
+            return new Map((window.activeChatDocuments || [])
+                .filter(doc => doc?.messageId)
+                .map(doc => [String(doc.messageId), doc]));
+        }
+
+        function sincronizarDocumentosMensagensChat() {
+            const mapa = mapaDocumentosChat();
+            window.activeChatMessages = (window.activeChatMessages || []).map(msg => ({
+                ...msg,
+                documentAI: mapa.get(String(msg.messageId || '')) || msg.documentAI || null
+            }));
+        }
+
+        function atualizarContadorDocumentosChat(summary = null) {
+            const docs = window.activeChatDocuments || [];
+            const total = Number(summary?.total ?? docs.length ?? 0);
+            const processando = Number(summary?.processando ?? docs.filter(d => ['analisando','na_fila','baixando','processando_ia'].includes(d.statusAnalise)).length);
+            const comErro = Number(summary?.comErro ?? docs.filter(d => ['erro','nao_suportado'].includes(d.statusAnalise)).length);
+            const count = document.getElementById('ticket-chat-documents-count');
+            const button = document.getElementById('ticket-chat-documents-btn');
+            if (count) count.textContent = String(total);
+            if (button) {
+                button.classList.toggle('has-processing', processando > 0 && comErro === 0);
+                button.classList.toggle('has-error', comErro > 0);
+                button.title = total
+                    ? `${total} arquivo${total === 1 ? '' : 's'} recebido${total === 1 ? '' : 's'} · ${processando} em análise · ${comErro} com erro`
+                    : 'Nenhum documento analisável recebido neste ticket.';
+            }
+            const subtitle = document.getElementById('chat-documents-subtitle');
+            if (subtitle) subtitle.textContent = total
+                ? `${total} arquivo${total === 1 ? '' : 's'} · os resumos ficam gravados no atendimento`
+                : 'Nenhum arquivo analisável recebido pelo cliente';
+        }
+
+        function adicionarResumoIAMensagemChat(bubble, msg) {
+            const doc = msg?.documentAI;
+            if (!bubble || !doc) return;
+            const box = document.createElement('div');
+            box.className = 'chat-ai-summary';
+            const head = document.createElement('div');
+            head.className = 'chat-ai-summary-head';
+            const label = document.createElement('span');
+            label.innerHTML = '<i class="bi bi-stars me-1"></i> Resumo da IA';
+            const status = document.createElement('span');
+            status.textContent = rotuloStatusDocumentoIA(doc.statusAnalise);
+            head.append(label, status);
+            box.appendChild(head);
+
+            if (doc.statusAnalise === 'concluida') {
+                const resumo = document.createElement('div');
+                resumo.className = 'chat-ai-summary-text';
+                const texto = String(doc.resumoExecutivo || 'Análise concluída.').trim();
+                resumo.textContent = texto.length > 520 ? `${texto.slice(0, 520).trim()}…` : texto;
+                box.appendChild(resumo);
+            } else if (['erro','nao_suportado'].includes(doc.statusAnalise)) {
+                box.classList.add('error');
+                const erro = document.createElement('div');
+                erro.className = 'chat-ai-summary-text';
+                erro.textContent = doc.erro || 'Não foi possível concluir a análise automática.';
+                box.appendChild(erro);
+            } else {
+                box.classList.add('processing');
+                const andamento = document.createElement('div');
+                andamento.className = 'chat-ai-summary-text';
+                andamento.textContent = 'Arquivo recebido. A IA está preparando o resumo e ele ficará salvo neste atendimento.';
+                box.appendChild(andamento);
+            }
+
+            const open = document.createElement('button');
+            open.type = 'button';
+            open.className = 'chat-ai-summary-open';
+            open.innerHTML = '<i class="bi bi-files me-1"></i> Ver análise completa';
+            open.onclick = () => abrirDocumentosChat(doc.messageId);
+            box.appendChild(open);
+            bubble.appendChild(box);
+        }
+
+        function criarBlocoDetalhesDocumentoChat(container, titulo, itens = []) {
+            if (!Array.isArray(itens) || !itens.length) return;
+            const sub = document.createElement('div');
+            sub.className = 'ticket-doc-subsection';
+            const t = document.createElement('div');
+            t.className = 'ticket-doc-subsection-title';
+            t.textContent = titulo;
+            const ul = document.createElement('ul');
+            ul.className = 'ticket-doc-list';
+            itens.slice(0, 15).forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = String(item);
+                ul.appendChild(li);
+            });
+            sub.append(t, ul);
+            container.appendChild(sub);
+        }
+
+        async function reprocessarDocumentoIAChat(ticketNumber, messageId, button) {
+            if (!ticketNumber || !messageId) return;
+            const old = button?.innerHTML || '';
+            if (button) { button.disabled = true; button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Reprocessando'; }
+            try {
+                const res = await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/documents/${encodeURIComponent(messageId)}/retry`, { method:'POST', headers:{'Content-Type':'application/json'} });
+                const data = await res.json().catch(()=>({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível gerar uma nova leitura.');
+                await carregarDocumentosChatAtivo(true);
+            } catch (err) {
+                alert(err.message || 'Não foi possível gerar uma nova leitura.');
+            } finally {
+                if (button?.isConnected) { button.disabled = false; button.innerHTML = old; }
+            }
+        }
+
+        function renderizarDocumentosChat(documentos = window.activeChatDocuments || [], focarMessageId = null) {
+            const body = document.getElementById('chat-documents-body');
+            if (!body) return;
+            body.innerHTML = '';
+            if (!documentos.length) {
+                body.innerHTML = '<div class="chat-documents-empty"><i class="bi bi-files"></i>Nenhuma imagem, áudio, vídeo ou documento analisável foi recebido neste atendimento.</div>';
+                return;
+            }
+
+            documentos.forEach(doc => {
+                const card = document.createElement('article');
+                card.className = 'chat-doc-card';
+                card.dataset.docMessageId = String(doc.messageId || '');
+                const header = document.createElement('div');
+                header.className = 'chat-doc-card-header';
+                const left = document.createElement('div');
+                const name = document.createElement('div');
+                name.className = 'chat-doc-card-name';
+                const icon = document.createElement('i');
+                icon.className = `bi ${iconeDocumentoIA(doc)}`;
+                const span = document.createElement('span');
+                span.textContent = doc.nomeArquivo || 'Arquivo recebido';
+                name.append(icon, span);
+                const meta = document.createElement('div');
+                meta.className = 'chat-doc-card-meta';
+                meta.textContent = [doc.mimeType, formatarTamanhoArquivoTicket(doc.tamanhoBytes), doc.recebidoEm ? formatarHoraChat(doc.recebidoEm) : null].filter(Boolean).join(' • ');
+                left.append(name, meta);
+                const st = document.createElement('span');
+                st.className = `ticket-doc-status ${classeStatusDocumentoIA(doc.statusAnalise)}`;
+                st.textContent = rotuloStatusDocumentoIA(doc.statusAnalise);
+                header.append(left, st);
+                card.appendChild(header);
+
+                const content = document.createElement('div');
+                content.className = 'chat-doc-card-body';
+                if (doc.statusAnalise === 'concluida') {
+                    if (doc.tipoDocumento) {
+                        const tipo = document.createElement('div');
+                        tipo.className = 'chat-doc-type';
+                        tipo.textContent = `Tipo identificado: ${doc.tipoDocumento}`;
+                        content.appendChild(tipo);
+                    }
+                    const lbl = document.createElement('div');
+                    lbl.className = 'chat-doc-ai-label';
+                    lbl.innerHTML = '<i class="bi bi-stars"></i> Resumo da IA';
+                    const resumo = document.createElement('div');
+                    resumo.className = 'chat-doc-summary';
+                    resumo.textContent = doc.resumoExecutivo || 'Análise concluída.';
+                    content.append(lbl, resumo);
+
+                    const temDetalhes = [doc.partesPessoas,doc.pontosRelevantes,doc.datasValores,doc.obrigacoesPrazos,doc.alertasAdvogado,doc.informacoesNaoIdentificadas].some(v=>Array.isArray(v)&&v.length);
+                    if (temDetalhes) {
+                        const details = document.createElement('details');
+                        details.className = 'chat-doc-details';
+                        const summary = document.createElement('summary');
+                        summary.textContent = 'Ver dados identificados';
+                        details.appendChild(summary);
+                        criarBlocoDetalhesDocumentoChat(details, 'Partes / pessoas', doc.partesPessoas);
+                        criarBlocoDetalhesDocumentoChat(details, 'Pontos relevantes', doc.pontosRelevantes);
+                        criarBlocoDetalhesDocumentoChat(details, 'Datas e valores', doc.datasValores);
+                        criarBlocoDetalhesDocumentoChat(details, 'Obrigações e prazos', doc.obrigacoesPrazos);
+                        criarBlocoDetalhesDocumentoChat(details, 'Pontos para conferência', doc.alertasAdvogado);
+                        criarBlocoDetalhesDocumentoChat(details, 'Informações não identificadas', doc.informacoesNaoIdentificadas);
+                        content.appendChild(details);
+                    }
+                } else if (['erro','nao_suportado'].includes(doc.statusAnalise)) {
+                    const erro = document.createElement('div');
+                    erro.className = 'chat-doc-status-error';
+                    erro.textContent = doc.erro || 'Não foi possível concluir a análise automática deste arquivo.';
+                    content.appendChild(erro);
+                } else {
+                    const note = document.createElement('div');
+                    note.className = 'chat-doc-status-note';
+                    note.textContent = 'A IA está processando este arquivo. O resumo será salvo automaticamente no chat quando estiver pronto.';
+                    content.appendChild(note);
+                }
+
+                if (doc.caption) {
+                    const details = document.createElement('details');
+                    details.className = 'chat-doc-details';
+                    const summary = document.createElement('summary');
+                    summary.textContent = 'Legenda enviada pelo cliente';
+                    const text = document.createElement('div');
+                    text.className = 'chat-doc-summary mt-2';
+                    text.textContent = doc.caption;
+                    details.append(summary, text);
+                    content.appendChild(details);
+                }
+
+                const actions = document.createElement('div');
+                actions.className = 'chat-doc-actions';
+                if (doc.messageId) {
+                    const open = document.createElement('a');
+                    open.className = 'chat-doc-action';
+                    open.href = `/api/tickets/${encodeURIComponent(window.activeChatTicketNumber || '')}/chat/media/${encodeURIComponent(doc.messageId)}`;
+                    open.target = '_blank'; open.rel = 'noopener';
+                    open.innerHTML = '<i class="bi bi-box-arrow-up-right"></i> Abrir arquivo';
+                    actions.appendChild(open);
+                }
+                if (doc.statusAnalise === 'erro' && doc.podeReprocessar && doc.messageId) {
+                    const retry = document.createElement('button');
+                    retry.type = 'button'; retry.className = 'chat-doc-action';
+                    retry.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Gerar resumo novamente';
+                    retry.onclick = () => reprocessarDocumentoIAChat(window.activeChatTicketNumber, doc.messageId, retry);
+                    actions.appendChild(retry);
+                }
+                if (actions.childNodes.length) content.appendChild(actions);
+                card.appendChild(content);
+                body.appendChild(card);
+            });
+
+            if (focarMessageId) {
+                requestAnimationFrame(() => {
+                    const card = body.querySelector(`[data-doc-message-id="${CSS.escape(String(focarMessageId))}"]`);
+                    if (card) {
+                        card.classList.add('is-highlighted');
+                        card.scrollIntoView({ behavior:'smooth', block:'start' });
+                        setTimeout(()=>card.classList.remove('is-highlighted'), 1800);
+                    }
+                });
+            }
+        }
+
+        function abrirDocumentosChat(focarMessageId = null) {
+            renderizarDocumentosChat(window.activeChatDocuments || [], focarMessageId);
+            document.getElementById('chat-documents-backdrop')?.classList.remove('hidden');
+            document.getElementById('chat-documents-panel')?.classList.remove('hidden');
+        }
+        function fecharDocumentosChat() {
+            document.getElementById('chat-documents-backdrop')?.classList.add('hidden');
+            document.getElementById('chat-documents-panel')?.classList.add('hidden');
+        }
+        function toggleDocumentosChat() {
+            const panel = document.getElementById('chat-documents-panel');
+            if (!panel) return;
+            if (panel.classList.contains('hidden')) abrirDocumentosChat();
+            else fecharDocumentosChat();
+        }
+
+        async function carregarDocumentosChatAtivo(preservarScroll = true) {
+            const ticket = String(window.activeChatTicketNumber || '').trim();
+            if (!ticket) return;
+            try {
+                const res = await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/documents`, { cache:'no-store' });
+                const data = await res.json().catch(()=>({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar os documentos.');
+                window.activeChatDocuments = Array.isArray(data.documents) ? data.documents : [];
+                atualizarContadorDocumentosChat(data.summary || null);
+                sincronizarDocumentosMensagensChat();
+                renderizarChat(window.activeChatMessages || [], window.activeChatHasMore === true, preservarScroll);
+                if (!document.getElementById('chat-documents-panel')?.classList.contains('hidden')) renderizarDocumentosChat(window.activeChatDocuments);
+            } catch (err) {
+                console.warn('[Chat] Não foi possível atualizar os documentos:', err?.message || err);
+            }
+        }
 
         function formatarHoraChat(valor) {
             const d = new Date(Number(valor) || valor || Date.now());
@@ -6373,6 +6775,7 @@ function renderizarLista(itens) {
                 media.innerHTML = `<i class="bi ${iconeTipoChat(msg.tipo)}"></i><span></span>${downloadUrl ? '<i class="bi bi-download ms-auto"></i>' : ''}`;
                 media.querySelector('span').textContent = msg.fileName || nomeTipoChat(msg.tipo);
                 bubble.appendChild(media);
+                adicionarResumoIAMensagemChat(bubble, msg);
             }
             if (msg.texto) { const t=document.createElement('div'); t.className='chat-text'; t.textContent=msg.texto; bubble.appendChild(t); }
             const time=document.createElement('div'); time.className='chat-time'; time.textContent=formatarHoraChat(msg.createdAt); bubble.appendChild(time);
@@ -6658,6 +7061,10 @@ function renderizarLista(itens) {
                 document.getElementById('ticket-chat-subtitle').textContent=[data.ticket?.area,data.ticket?.whatsapp?formatarWhatsAppCliente(data.ticket.whatsapp):null].filter(Boolean).join(' • ');
                 document.getElementById('ticket-chat-storage').textContent=`Histórico: até ${data.maxMessagesPerTicket||500} mensagens / ${data.retentionDays||60} dias. Anexos sob demanda.`;
                 window.activeChatMessages=Array.isArray(data.messages)?data.messages:[]; window.activeChatHasMore=data.hasMore===true; window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
+                window.activeChatDocuments=Array.isArray(data.documents)?data.documents:[];
+                atualizarContadorDocumentosChat(data.documentsSummary||null);
+                sincronizarDocumentosMensagensChat();
+                renderizarDocumentosChat(window.activeChatDocuments);
                 window.activeChatTicketData=data.ticket||{};
                 const localTicket=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber)===String(ticketNumber));
                 if(localTicket){localTicket.temMensagemNaoLida=false;localTicket.chatLidoEm=data.readAt||Date.now();}
@@ -6672,7 +7079,7 @@ function renderizarLista(itens) {
             }
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
-        function fecharChatTicket() { const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; fecharEmojiPickerChat(); fecharTransferenciaChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
+        function fecharChatTicket() { const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharEmojiPickerChat(); fecharTransferenciaChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
         async function carregarMensagensAnterioresChat() {
             if(!window.activeChatTicketNumber||!window.activeChatOldest) return;
             const history=document.getElementById('ticket-chat-history'); const beforeHeight=history?.scrollHeight||0;
@@ -6680,7 +7087,9 @@ function renderizarLista(itens) {
                 const res=await fetch(`/api/tickets/${encodeURIComponent(window.activeChatTicketNumber)}/chat?limit=60&before=${encodeURIComponent(window.activeChatOldest)}`);
                 const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.erro||'Erro ao carregar histórico.');
                 const older=Array.isArray(data.messages)?data.messages:[];
+                if(Array.isArray(data.documents)){window.activeChatDocuments=data.documents;atualizarContadorDocumentosChat(data.documentsSummary||null);}
                 window.activeChatMessages=[...older,...window.activeChatMessages]; window.activeChatHasMore=data.hasMore===true;
+                sincronizarDocumentosMensagensChat();
                 window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
                 renderizarChat(window.activeChatMessages,window.activeChatHasMore,true);
                 if(history) history.scrollTop=Math.max(0,history.scrollHeight-beforeHeight);

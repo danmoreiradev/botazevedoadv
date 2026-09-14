@@ -7002,6 +7002,23 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
         const ticketNumber = String(req.params.ticketNumber || '').trim();
         const ticket = await ticketsColl.findOne({ ticketNumber });
         if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+
+        // A análise dos anexos fica persistida no ticket/histórico e é carregada junto
+        // do chat. Assim o resumo da IA acompanha a própria mensagem mesmo após
+        // reinicializações do servidor ou troca de advogado responsável.
+        const historicoChat = ticketHistoryColl
+            ? await ticketHistoryColl.findOne(
+                { _id: ticketNumber },
+                { projection: { documentosIA: 1 } }
+            )
+            : null;
+        const documentosIAChat = mesclarDocumentosIATicket(ticket, historicoChat || {}, { detalhado: true });
+        const documentoIAPorMensagem = new Map(
+            documentosIAChat
+                .filter(doc => doc?.messageId)
+                .map(doc => [String(doc.messageId), doc])
+        );
+
         const limite = Math.min(CHAT_LIST_LIMIT_MAX, Math.max(10, Number(req.query.limit || CHAT_LIST_LIMIT_DEFAULT)));
         const filtro = { ticketNumber };
         if (req.query.before) {
@@ -7041,7 +7058,15 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
                     atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null
                 };
             })(),
-            messages: docs.map(serializarMensagemChat),
+            messages: docs.map(item => {
+                const mensagem = serializarMensagemChat(item);
+                return {
+                    ...mensagem,
+                    documentAI: documentoIAPorMensagem.get(String(item.messageId || '')) || null
+                };
+            }),
+            documents: documentosIAChat,
+            documentsSummary: resumoDocumentosIATicket(documentosIAChat),
             hasMore,
             retentionDays: CHAT_RETENTION_DAYS,
             maxMessagesPerTicket: CHAT_MAX_MESSAGES_PER_TICKET
@@ -7049,6 +7074,42 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
     } catch (err) {
         console.error('[Chat] Erro ao carregar mensagens:', err);
         res.status(500).json({ erro: 'Não foi possível carregar o chat.' });
+    }
+});
+
+// Lista consolidada das análises de anexos do ticket para o painel lateral do chat.
+// O binário continua fora do MongoDB; aqui retornamos somente metadados e os resumos
+// estruturados já persistidos pela rotina do Gemini.
+app.get('/api/tickets/:ticketNumber/chat/documents', async (req, res) => {
+    if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
+    if (!ticketsColl) return res.status(503).json({ erro: 'Chat ainda não está disponível.' });
+
+    try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        const [ticket, historico] = await Promise.all([
+            ticketsColl.findOne(
+                { ticketNumber },
+                { projection: { ticketNumber: 1, documentosIA: 1 } }
+            ),
+            ticketHistoryColl
+                ? ticketHistoryColl.findOne(
+                    { _id: ticketNumber },
+                    { projection: { documentosIA: 1 } }
+                )
+                : Promise.resolve(null)
+        ]);
+
+        if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+
+        const documents = mesclarDocumentosIATicket(ticket, historico || {}, { detalhado: true });
+        return res.json({
+            ticketNumber,
+            documents,
+            summary: resumoDocumentosIATicket(documents)
+        });
+    } catch (err) {
+        console.error('[Chat] Erro ao carregar documentos analisados:', err);
+        return res.status(500).json({ erro: 'Não foi possível carregar os documentos deste chat.' });
     }
 });
 
