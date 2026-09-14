@@ -1028,6 +1028,9 @@ const CHAT_MEDIA_REF_MAX_CHARS = 150_000;
 const CHAT_MEDIA_CACHE_TTL_MS = 10 * 60 * 1000;
 const CHAT_MEDIA_CACHE_MAX_BYTES = 40 * 1024 * 1024;
 const BAILEYS_DEVICE_REFRESH_TTL_MS = 10 * 60 * 1000;
+// Epoch persistido no MongoDB: mensagens anteriores à implantação do controle de
+// leitura não aparecem como não lidas para todos os usuários de uma só vez.
+let chatUnreadTrackingStartedAt = Date.now();
 const chatLastTrimAt = new Map();
 const chatMediaCache = new Map();
 let chatMediaCacheBytes = 0;
@@ -1603,7 +1606,7 @@ async function registrarMensagemClienteChat(ticket, msg) {
     const dados = dadosMensagemChatWhatsApp(msg);
     if (!dados.texto && dados.tipo === 'text') return;
     const agora = Date.now();
-    await registrarMensagemChat({
+    const registrada = await registrarMensagemChat({
         ticketNumber: ticket.ticketNumber,
         messageId: msg.key.id,
         direction: 'in',
@@ -1611,10 +1614,26 @@ async function registrarMensagemClienteChat(ticket, msg) {
         ...dados,
         createdAt: agora
     });
+
+    // Cursor leve de leitura: evita contar mensagens do próprio escritório como não lidas.
+    // A leitura é individual por usuário e fica em active_tickets.chatLeituras.<userKey>.
+    if (registrada && ticketsColl) {
+        await ticketsColl.updateOne(
+            { _id: ticket._id },
+            { $set: { lastInboundChatAt: agora, lastInboundChatMessageId: String(msg.key.id) } }
+        ).catch(() => {});
+        atualizarHistorico(ticket.ticketNumber, {
+            lastInboundChatAt: agora,
+            lastInboundChatMessageId: String(msg.key.id)
+        }).catch(() => {});
+    }
+
     io.emit('ticket_activity_updated', {
         ticketNumber: ticket.ticketNumber,
         direction: 'in',
-        lastActivity: agora
+        lastActivity: agora,
+        lastInboundChatAt: agora,
+        hasNewInbound: !!registrada
     });
 }
 
@@ -1747,6 +1766,36 @@ function identidadeAdvogadoSessao(req) {
         nome: String(user.nome || user.user || 'Advogado(a)').trim(),
         assinatura: String(user.assinatura || assinaturaPadraoUsuario(user.nome || user.user)).trim()
     };
+}
+
+
+function chaveLeituraChatUsuario(req) {
+    const user = usuarioDaSessao(req) || {};
+    const base = String(user.id || user.user || '').trim();
+    if (!base) return null;
+    // Chave segura para subdocumento MongoDB (sem pontos/$).
+    return `u_${base.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80)}`;
+}
+
+function timestampLeituraChatTicket(ticket = {}, chave = '') {
+    if (!chave) return Number(chatUnreadTrackingStartedAt || 0);
+    const valor = ticket?.chatLeituras?.[chave];
+    if (valor instanceof Date) return valor.getTime();
+    const numero = Number(valor || 0);
+    if (Number.isFinite(numero) && numero > 0) return numero;
+    return Number(chatUnreadTrackingStartedAt || 0);
+}
+
+async function marcarTicketChatComoLido(ticketNumber, req, momento = Date.now()) {
+    if (!ticketsColl) return false;
+    const chave = chaveLeituraChatUsuario(req);
+    const numero = String(ticketNumber || '').trim();
+    if (!chave || !numero) return false;
+    const resultado = await ticketsColl.updateOne(
+        { ticketNumber: numero },
+        { $set: { [`chatLeituras.${chave}`]: Number(momento) || Date.now() } }
+    );
+    return !!resultado.matchedCount;
 }
 
 
@@ -4312,6 +4361,17 @@ async function startBotInterno() {
         await garantirMenuPadrao();
         await garantirHorarioFuncionamentoPadrao();
 
+        // Início persistente do recurso de mensagens não lidas. Mantém a mesma data
+        // entre reinicializações e evita marcar todo o histórico antigo como novo.
+        const agoraUnreadTracking = Date.now();
+        await settingsColl.updateOne(
+            { _id: 'chat_unread_tracking' },
+            { $setOnInsert: { startedAt: agoraUnreadTracking, createdAt: agoraUnreadTracking } },
+            { upsert: true }
+        );
+        const unreadTrackingConfig = await settingsColl.findOne({ _id: 'chat_unread_tracking' });
+        chatUnreadTrackingStartedAt = Number(unreadTrackingConfig?.startedAt || agoraUnreadTracking) || agoraUnreadTracking;
+
         // Contas antigas não possuíam papel/permissões. Para preservar o acesso do
         // administrador existente, elas são tratadas como admin na primeira atualização.
         await userLoginColl.updateMany(
@@ -4366,6 +4426,7 @@ async function startBotInterno() {
             userLoginColl.createIndex({ userLower: 1 }),
             userLoginColl.createIndex({ role: 1, ativo: 1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, createdAt: -1 }),
+            ticketMessagesColl.createIndex({ ticketNumber: 1, direction: 1, createdAt: -1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, messageId: 1 }, { unique: true }),
             ticketMessagesColl.createIndex({ createdAt: 1 }, { expireAfterSeconds: CHAT_RETENTION_DAYS * 24 * 60 * 60 }),
             baileysSentMessagesColl.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
@@ -5611,6 +5672,36 @@ app.get('/api/lawyers', exigirLogin, async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ erro: 'Não foi possível carregar a lista de profissionais.' });
+    }
+});
+
+// Usuários ativos elegíveis para receber transferência de um atendimento.
+// Endpoint separado da gestão de usuários: não expõe e-mail, login, OAB ou permissões.
+app.get('/api/chat/users', exigirPermissao('chat'), async (req, res) => {
+    try {
+        const usuarios = await userLoginColl.find(
+            { ativo: { $ne: false } },
+            { projection: { nome: 1, assinatura: 1, role: 1, permissions: 1 } }
+        ).sort({ nome: 1 }).toArray();
+
+        const elegiveis = usuarios.filter(item => {
+            const role = normalizarPapelUsuario(item.role);
+            if (role === 'admin') return true;
+            const permissoes = normalizarPermissoesUsuario(item);
+            return permissoes.includes('chat');
+        });
+
+        res.json({
+            users: elegiveis.map(item => ({
+                id: String(item._id),
+                nome: String(item.nome || '').trim(),
+                assinatura: String(item.assinatura || assinaturaPadraoUsuario(item.nome || '')).trim(),
+                role: normalizarPapelUsuario(item.role)
+            })).filter(item => item.id && item.nome)
+        });
+    } catch (err) {
+        console.error('[Chat] Erro ao listar usuários para transferência:', err);
+        res.status(500).json({ erro: 'Não foi possível carregar os usuários disponíveis.' });
     }
 });
 
@@ -6920,16 +7011,36 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
         const docsDesc = await ticketMessagesColl.find(filtro).sort({ createdAt: -1 }).limit(limite + 1).toArray();
         const hasMore = docsDesc.length > limite;
         const docs = docsDesc.slice(0, limite).reverse();
+        // Marca como lido somente até a mensagem efetivamente carregada. Se uma nova
+        // mensagem chegar entre a consulta e este update, ela continuará aparecendo
+        // como não lida na lista do advogado.
+        const lidoEm = docs.length
+            ? Math.max(...docs.map(item => item.createdAt instanceof Date ? item.createdAt.getTime() : Number(item.createdAt || 0)).filter(Number.isFinite))
+            : Date.now();
+        await marcarTicketChatComoLido(ticketNumber, req, lidoEm).catch(() => {});
         res.json({
-            ticket: {
-                ticketNumber,
-                clienteNome: ticket.clienteNome || null,
-                whatsapp: whatsappDoTicket(ticket),
-                area: ticket.area || ticket.menuOptionTitle || null,
-                advogadoResponsavelId: ticket.advogadoResponsavelId || null,
-                advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
-                atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null
-            },
+            readAt: lidoEm,
+            ticket: (() => {
+                const classificacao = classificarPendenciaTicket(ticket);
+                const triagem = progressoTriagemTicket(ticket, Array.isArray(ticket.respostasFluxo) ? ticket.respostasFluxo : []);
+                return {
+                    ticketNumber,
+                    clienteNome: ticket.clienteNome || null,
+                    whatsapp: whatsappDoTicket(ticket),
+                    area: ticket.area || ticket.menuOptionTitle || null,
+                    status: ticket.status || null,
+                    statusLabel: classificacao.statusLabel,
+                    pendenciaTipo: classificacao.tipo,
+                    pendenciaLabel: classificacao.label,
+                    paused: ticket.paused === true,
+                    createdAt: Number(ticket.createdAt || 0) || null,
+                    lastActivity: Number(ticket.lastActivity || 0) || null,
+                    triagem,
+                    advogadoResponsavelId: ticket.advogadoResponsavelId || null,
+                    advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
+                    atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null
+                };
+            })(),
             messages: docs.map(serializarMensagemChat),
             hasMore,
             retentionDays: CHAT_RETENTION_DAYS,
@@ -7042,6 +7153,87 @@ app.post('/api/tickets/:ticketNumber/claim', async (req, res) => {
     }
 });
 
+
+// Marca o chat como lido apenas para o usuário conectado.
+app.post('/api/tickets/:ticketNumber/chat/read', async (req, res) => {
+    if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
+    try {
+        const lidoEm = Date.now();
+        const ok = await marcarTicketChatComoLido(req.params.ticketNumber, req, lidoEm);
+        if (!ok) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+        return res.json({ ok: true, readAt: lidoEm });
+    } catch (err) {
+        console.error('[Chat] Erro ao marcar leitura:', err);
+        return res.status(500).json({ erro: 'Não foi possível registrar a leitura.' });
+    }
+});
+
+// Transfere explicitamente o atendimento para outro usuário ativo do sistema.
+app.post('/api/tickets/:ticketNumber/transfer', async (req, res) => {
+    if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para transferir atendimentos.' });
+    try {
+        const targetUserId = String(req.body?.userId || '').trim();
+        if (!ObjectId.isValid(targetUserId)) return res.status(400).json({ erro: 'Selecione um usuário válido para a transferência.' });
+
+        const contaDestino = await userLoginColl.findOne(
+            { _id: new ObjectId(targetUserId), ativo: { $ne: false } },
+            { projection: { nome: 1, assinatura: 1, role: 1, permissions: 1 } }
+        );
+        if (!contaDestino) return res.status(404).json({ erro: 'O usuário selecionado não está disponível.' });
+
+        const roleDestino = normalizarPapelUsuario(contaDestino.role);
+        const permissoesDestino = normalizarPermissoesUsuario(contaDestino);
+        if (roleDestino !== 'admin' && !permissoesDestino.includes('chat')) {
+            return res.status(400).json({ erro: 'O usuário selecionado não possui acesso ao chat.' });
+        }
+
+        const destino = {
+            id: String(contaDestino._id),
+            nome: String(contaDestino.nome || 'Advogado(a)').trim(),
+            assinatura: String(contaDestino.assinatura || assinaturaPadraoUsuario(contaDestino.nome || '')).trim()
+        };
+
+        const resultado = await assumirTicketParaAdvogado(req.params.ticketNumber, destino, { emitirEvento: true, permitirTransferencia: true });
+        if (!resultado.ok) {
+            return res.status(resultado.status || 409).json({ erro: resultado.erro || 'Não foi possível transferir o atendimento.' });
+        }
+
+        const transferidoPor = identidadeAdvogadoSessao(req);
+        const agora = Date.now();
+        await Promise.allSettled([
+            ticketsColl.updateOne(
+                { ticketNumber: String(req.params.ticketNumber || '').trim() },
+                { $set: { transferidoPorUsuarioId: transferidoPor.id || null, transferidoPorUsuarioNome: transferidoPor.nome || null, transferenciaSolicitadaEm: agora } }
+            ),
+            atualizarHistorico(req.params.ticketNumber, {
+                transferidoPorUsuarioId: transferidoPor.id || null,
+                transferidoPorUsuarioNome: transferidoPor.nome || null,
+                transferenciaSolicitadaEm: agora
+            })
+        ]);
+
+        const classificacao = classificarPendenciaTicket(resultado.ticket || {});
+        return res.json({
+            ok: true,
+            responsavel: resultado.responsavel,
+            responsavelAnterior: resultado.responsavelAnterior || null,
+            ticket: {
+                ticketNumber: resultado.ticket?.ticketNumber || String(req.params.ticketNumber || ''),
+                status: resultado.ticket?.status || null,
+                paused: resultado.ticket?.paused === true,
+                statusLabel: classificacao.statusLabel,
+                pendenciaTipo: classificacao.tipo,
+                pendenciaLabel: classificacao.label,
+                advogadoResponsavelId: resultado.responsavel?.id || destino.id,
+                advogadoResponsavelNome: resultado.responsavel?.nome || destino.nome,
+                atendimentoAssumidoEm: resultado.ticket?.atendimentoAssumidoEm || agora
+            }
+        });
+    } catch (err) {
+        console.error('[Chat] Erro ao transferir atendimento:', err);
+        return res.status(500).json({ erro: 'Não foi possível transferir o atendimento.' });
+    }
+});
 
 // Encerramento/arquivamento manual pelo painel. O ticket sai de active_tickets,
 // permanece registrado em ticket_history e o histórico leve do chat continua
@@ -7326,7 +7518,9 @@ app.get('/api/tickets/active', async (req, res) => {
                     'documentosIA.recebidoEm': 1,
                     advogadoResponsavelId: 1,
                     advogadoResponsavelNome: 1,
-                    atendimentoAssumidoEm: 1
+                    atendimentoAssumidoEm: 1,
+                    lastInboundChatAt: 1,
+                    chatLeituras: 1
                 }
             }
         ).toArray();
@@ -7341,7 +7535,12 @@ app.get('/api/tickets/active', async (req, res) => {
         const ticketNumbers = tickets.map(ticket => ticket.ticketNumber).filter(Boolean);
         // As duas consultas auxiliares são independentes; executá-las em paralelo
         // reduz a latência perceptível da tela de Tickets Ativos.
-        const [historicos, leadsCRMRelacionadosBrutos] = await Promise.all([
+        const ticketsSemCursorEntrada = tickets
+            .filter(ticket => !Number(ticket.lastInboundChatAt || 0))
+            .map(ticket => ticket.ticketNumber)
+            .filter(Boolean);
+
+        const [historicos, leadsCRMRelacionadosBrutos, ultimasEntradasLegadas] = await Promise.all([
             ticketHistoryColl && ticketNumbers.length
                 ? ticketHistoryColl.find(
                     { _id: { $in: ticketNumbers } },
@@ -7362,8 +7561,19 @@ app.get('/api/tickets/active', async (req, res) => {
                     { ticketNumber: { $in: ticketNumbers } },
                     { projection: { _id: 1, crmNumber: 1, ticketNumber: 1, status: 1, origem: 1, origemTipo: 1, origemTecnica: 1 } }
                 ).toArray()
+                : Promise.resolve([]),
+            ticketMessagesColl && ticketsSemCursorEntrada.length
+                ? ticketMessagesColl.aggregate([
+                    { $match: { ticketNumber: { $in: ticketsSemCursorEntrada }, direction: 'in' } },
+                    { $sort: { createdAt: -1 } },
+                    { $group: { _id: '$ticketNumber', lastInboundChatAt: { $first: '$createdAt' } } }
+                ]).toArray()
                 : Promise.resolve([])
         ]);
+
+        const ultimaEntradaLegadaPorTicket = new Map(
+            (ultimasEntradasLegadas || []).map(item => [String(item._id), item.lastInboundChatAt instanceof Date ? item.lastInboundChatAt.getTime() : Number(item.lastInboundChatAt || 0)])
+        );
 
         const historicoPorTicket = new Map(
             historicos.map(item => [String(item.ticketNumber || item._id), item])
@@ -7397,6 +7607,10 @@ app.get('/api/tickets/active', async (req, res) => {
             // O conteúdo completo (resumo, partes, alertas etc.) é carregado apenas
             // quando o advogado abre os detalhes daquele ticket.
             const documentosIA = mesclarDocumentosIATicket(ticket, historico, { detalhado: false });
+            const chaveLeitura = chaveLeituraChatUsuario(req);
+            const ultimaMensagemClienteEm = Number(ticket.lastInboundChatAt || 0) || ultimaEntradaLegadaPorTicket.get(String(ticket.ticketNumber)) || null;
+            const chatLidoEm = timestampLeituraChatTicket(ticket, chaveLeitura);
+            const temMensagemNaoLida = !!ultimaMensagemClienteEm && ultimaMensagemClienteEm > chatLidoEm;
 
             return {
                 id: ticket.id || null,
@@ -7434,6 +7648,9 @@ app.get('/api/tickets/active', async (req, res) => {
                 advogadoResponsavelId: ticket.advogadoResponsavelId || null,
                 advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
                 atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null,
+                ultimaMensagemClienteEm,
+                chatLidoEm: chatLidoEm || null,
+                temMensagemNaoLida,
                 documentosResumo: resumoDocumentosIATicket(documentosIA)
             };
         });
@@ -7454,7 +7671,8 @@ app.get('/api/tickets/active', async (req, res) => {
             pendentesEquipe: itens.filter(item => item.pendenciaTipo === 'advogado').length,
             emAtendimento: itens.filter(item => item.pendenciaTipo === 'atendimento').length,
             aguardandoCliente: itens.filter(item => item.pendenciaTipo === 'cliente').length,
-            pendentesMaisDe2h: itens.filter(item => item.pendenteHaMaisDe2h).length
+            pendentesMaisDe2h: itens.filter(item => item.pendenteHaMaisDe2h).length,
+            mensagensNaoLidas: itens.filter(item => item.temMensagemNaoLida).length
         };
 
         res.json({

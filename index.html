@@ -2388,6 +2388,85 @@
         }
     </style>
 
+
+    <style id="ticket-chat-professional-v3">
+        .tickets-summary-compact { grid-template-columns:repeat(2,minmax(180px,260px)); justify-content:flex-start; }
+        .ticket-summary-card.is-unread .ticket-summary-icon { color:#b42318; background:#fff1f0; }
+        .tickets-toolbar-clean { grid-template-columns:minmax(280px,1fr) minmax(180px,.45fr) minmax(190px,.48fr) auto; }
+        .tickets-list-meta { margin:0 0 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+        .tickets-legend { display:flex; align-items:center; gap:15px; flex-wrap:wrap; color:#727b86; font-size:.70rem; font-weight:650; }
+        .tickets-legend span { display:inline-flex; align-items:center; gap:6px; }
+        .ticket-legend-dot.unread,.ticket-unread-dot { width:8px; height:8px; display:inline-block; flex:0 0 8px; border-radius:50%; background:#d92d20; box-shadow:0 0 0 3px rgba(217,45,32,.10); }
+        .ticket-legend-line { width:4px; height:14px; display:inline-block; border-radius:999px; }
+        .ticket-legend-line.mine { background:var(--adv-gold); }
+        .ticket-legend-line.assigned { background:#8ca2b8; }
+        .tickets-table { min-width:940px; }
+        .tickets-table tbody tr.ticket-row-unread > td { background:#fffafa; }
+        .tickets-table tbody tr.ticket-row-unread:hover > td { background:#fff5f4; }
+        .ticket-number-wrap { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+        .ticket-unread-badge { display:inline-flex; align-items:center; gap:6px; padding:4px 7px; color:#a9322a; background:#fff1f0; border:1px solid #f4ccc8; border-radius:999px; font-size:.65rem; font-weight:780; white-space:nowrap; }
+        .ticket-actions-inline { justify-content:flex-end; }
+
+        #ticket-chat-dialog { width:min(1080px,calc(100vw - 24px)); height:min(92vh,940px); border-radius:16px; }
+        .ticket-chat-header { min-height:64px; padding:10px 14px; align-items:center; background:#f8faf9; border-bottom:1px solid #dfe5e2; }
+        .ticket-chat-contact { display:flex; align-items:center; gap:11px; min-width:0; }
+        .ticket-chat-avatar { width:40px; height:40px; flex:0 0 40px; display:inline-flex; align-items:center; justify-content:center; color:#60736c; background:#dfe7e3; border-radius:50%; font-size:1.05rem; }
+        .ticket-chat-contact-copy { min-width:0; }
+        .ticket-chat-title { color:#17211d; font-size:.96rem; }
+        .ticket-chat-subtitle { color:#718079; }
+        .ticket-chat-operations { padding:10px 14px; display:flex; justify-content:space-between; align-items:center; gap:12px; background:#fff; border-bottom:1px solid #e7ebe9; }
+        .ticket-chat-statuses { display:flex; align-items:center; gap:7px; flex-wrap:wrap; min-width:0; }
+        .chat-op-pill { min-height:29px; padding:5px 9px; display:inline-flex; align-items:center; gap:6px; color:#56635d; background:#f5f7f6; border:1px solid #e0e5e2; border-radius:999px; font-size:.68rem; font-weight:700; white-space:nowrap; }
+        .chat-op-pill > i { color:#819088; font-size:.72rem; }
+        #ticket-chat-op-situation > i { color:#c5a059; font-size:.50rem; }
+        .ticket-chat-operation-actions { display:flex; align-items:center; gap:7px; flex:0 0 auto; }
+        .ticket-chat-claim,.ticket-chat-transfer { min-height:34px; padding:7px 11px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border-radius:8px; font-size:.73rem; font-weight:760; }
+        .ticket-chat-claim { color:#fff; background:#167c64; border:1px solid #167c64; }
+        .ticket-chat-claim:hover:not(:disabled) { background:#126b56; }
+        .ticket-chat-transfer { color:#34453e; background:#fff; border:1px solid #cfd8d3; }
+        .ticket-chat-transfer:hover:not(:disabled) { background:#f4f7f5; border-color:#aebdb5; }
+        .ticket-transfer-wrap { position:relative; }
+        .ticket-transfer-panel { position:absolute; z-index:40; top:calc(100% + 8px); right:0; width:330px; padding:14px; color:#34423c; background:#fff; border:1px solid #dce3df; border-radius:12px; box-shadow:0 18px 45px rgba(20,33,27,.18); }
+        .ticket-transfer-title { font-size:.82rem; font-weight:800; color:#25342e; }
+        .ticket-transfer-help { margin:3px 0 10px; color:#7a8781; font-size:.69rem; line-height:1.4; }
+        .ticket-transfer-footer { margin-top:10px; display:flex; justify-content:flex-end; gap:7px; }
+        .ticket-chat-user { margin:0; width:100%; padding:6px 14px; display:flex; align-items:center; gap:6px; color:#68766f; background:#f9faf9; border:0; border-bottom:1px solid #e7ebe9; border-radius:0; font-size:.68rem; }
+        .ticket-chat-storage { padding:5px 14px; text-align:left; color:#8a958f; background:#f9faf9; font-size:.62rem; }
+        .ticket-chat-history { background-color:#efeae2; background-image:radial-gradient(rgba(80,80,80,.035) 1px,transparent 1px); background-size:18px 18px; }
+        .chat-bubble { border:0; box-shadow:0 1px 1px rgba(11,20,26,.12); }
+        .chat-message-row.in .chat-bubble { background:#fff; }
+        .chat-message-row.out .chat-bubble { background:#d9fdd3; }
+        .chat-message-row.bot .chat-bubble { background:#fff1c7; }
+        .ticket-chat-composer { position:relative; padding:9px 12px; background:#f0f2f5; border-top:1px solid #dde3e0; }
+        .ticket-chat-composer.is-dragging::after { content:'Solte para enviar o arquivo'; position:absolute; inset:5px; z-index:20; display:flex; align-items:center; justify-content:center; color:#176b56; background:rgba(239,249,245,.94); border:2px dashed #65a995; border-radius:10px; font-size:.82rem; font-weight:800; }
+        .chat-input-wrap { position:relative; }
+        .chat-compose-input { min-height:44px; padding:11px 13px 24px; color:#26332d; background:#fff; border:0; border-radius:10px; box-shadow:0 1px 2px rgba(11,20,26,.06); }
+        .chat-compose-input:focus { box-shadow:0 0 0 2px rgba(35,117,94,.10); }
+        .chat-paste-hint { position:absolute; left:13px; bottom:5px; display:flex; align-items:center; gap:5px; color:#a0aaa5; font-size:.57rem; pointer-events:none; }
+        .chat-emoji-btn,.chat-attach-btn { border:0; background:transparent; color:#65746d; }
+        .chat-emoji-btn:hover,.chat-attach-btn:hover { background:#e2e7e4; }
+        .chat-send-btn { min-width:45px; width:45px; height:45px; padding:0; border-radius:50%; background:#167c64; font-size:0; }
+        .chat-send-btn i { font-size:1rem; }
+        .chat-send-btn:hover:not(:disabled) { background:#126b56; }
+
+        @media (max-width:1199.98px){ .tickets-toolbar-clean{grid-template-columns:1fr 1fr;} }
+        @media (max-width:767.98px){
+            .tickets-summary-compact{grid-template-columns:1fr 1fr;}
+            .tickets-toolbar-clean{grid-template-columns:1fr;}
+            .tickets-legend{gap:10px;}
+            .ticket-chat-operations{align-items:flex-start;flex-direction:column;padding:8px 10px;}
+            .ticket-chat-operation-actions{width:100%;justify-content:flex-end;}
+            .ticket-chat-statuses{width:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;}
+            .chat-op-pill{flex:0 0 auto;}
+            .ticket-transfer-panel{position:fixed;top:auto;left:10px;right:10px;bottom:78px;width:auto;}
+            .ticket-chat-user{padding:6px 10px;}
+            .ticket-chat-storage{display:none;}
+            .chat-paste-hint{display:none;}
+            .chat-compose-input{padding-bottom:11px;}
+        }
+        @media (max-width:479.98px){ .tickets-summary-compact{grid-template-columns:1fr;} }
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -2629,55 +2708,42 @@
                         <button type="button" class="btn btn-outline-secondary" onclick="carregarTicketsAtivos(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
                     </div>
                 </div>
-
-                <div class="tickets-summary-grid" aria-label="Resumo dos tickets ativos">
+                <div class="tickets-summary-grid tickets-summary-compact" aria-label="Resumo dos tickets ativos">
                     <div class="ticket-summary-card">
                         <div class="ticket-summary-copy"><div class="ticket-summary-label">Tickets ativos</div><div class="ticket-summary-value" id="tickets-metric-total">0</div></div>
                         <span class="ticket-summary-icon"><i class="bi bi-inboxes"></i></span>
                     </div>
-                    <div class="ticket-summary-card is-pending">
-                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Pendentes da equipe</div><div class="ticket-summary-value" id="tickets-metric-pending">0</div></div>
-                        <span class="ticket-summary-icon"><i class="bi bi-person-exclamation"></i></span>
-                    </div>
-                    <div class="ticket-summary-card is-human">
-                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Em atendimento</div><div class="ticket-summary-value" id="tickets-metric-human">0</div></div>
-                        <span class="ticket-summary-icon"><i class="bi bi-headset"></i></span>
-                    </div>
-                    <div class="ticket-summary-card is-client">
-                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Aguardando cliente</div><div class="ticket-summary-value" id="tickets-metric-client">0</div></div>
-                        <span class="ticket-summary-icon"><i class="bi bi-hourglass-split"></i></span>
-                    </div>
-                    <div class="ticket-summary-card is-alert">
-                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Pendentes +2h</div><div class="ticket-summary-value" id="tickets-metric-alert">0</div></div>
-                        <span class="ticket-summary-icon"><i class="bi bi-alarm"></i></span>
+                    <div class="ticket-summary-card is-unread">
+                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Mensagens não lidas</div><div class="ticket-summary-value" id="tickets-metric-unread">0</div></div>
+                        <span class="ticket-summary-icon"><i class="bi bi-chat-left-text-fill"></i></span>
                     </div>
                 </div>
 
                 <div class="card-custom text-start tickets-panel-card" style="width: 100%;">
-                    <div class="tickets-toolbar">
+                    <div class="tickets-toolbar tickets-toolbar-clean">
                         <div class="tickets-search">
                             <span class="search-icon"><i class="bi bi-search"></i></span>
                             <input type="text" id="tickets-search-input" class="form-control" placeholder="Buscar ticket, cliente, CPF, WhatsApp ou área..." oninput="filtrarTicketsAtivos()">
                         </div>
-                        <select id="tickets-filter-status" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar situação">
-                            <option value="">Todas as situações</option>
-                            <option value="advogado">Pendente da equipe</option>
-                            <option value="atendimento">Em atendimento</option>
-                            <option value="cliente">Aguardando cliente</option>
-                            <option value="outro">Revisar estado</option>
-                        </select>
                         <select id="tickets-filter-area" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar área">
                             <option value="">Todas as áreas</option>
                         </select>
-                        <select id="tickets-filter-owner" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar responsável">
-                            <option value="">Todos os responsáveis</option>
-                            <option value="mine">Meus atendimentos</option>
-                            <option value="unassigned">Não atribuídos</option>
+                        <select id="tickets-filter-unread" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar mensagens não lidas">
+                            <option value="">Todas as mensagens</option>
+                            <option value="unread">Somente não lidas</option>
+                            <option value="read">Sem mensagens não lidas</option>
                         </select>
                         <button type="button" class="btn btn-outline-secondary" onclick="limparFiltrosTickets()"><i class="bi bi-x-circle me-1"></i> Limpar</button>
                     </div>
 
-                    <div id="tickets-status" class="menu-save-status text-muted mb-2"></div>
+                    <div class="tickets-list-meta">
+                        <div class="tickets-legend" aria-label="Legenda dos tickets">
+                            <span><i class="ticket-legend-dot unread"></i> Mensagem não lida</span>
+                            <span><i class="ticket-legend-line mine"></i> Seu atendimento</span>
+                            <span><i class="ticket-legend-line assigned"></i> Atribuído a outro usuário</span>
+                        </div>
+                        <div id="tickets-status" class="menu-save-status text-muted"></div>
+                    </div>
 
                     <div class="tickets-table-wrap">
                         <table class="table tickets-table align-middle">
@@ -2686,16 +2752,13 @@
                                     <th>Ticket</th>
                                     <th>Cliente</th>
                                     <th>Área</th>
-                                    <th>Situação</th>
-                                    <th>Responsável</th>
-                                    <th>Triagem</th>
                                     <th>Última atividade</th>
                                     <th>Aberto há</th>
-                                    <th class="text-end">Detalhes</th>
+                                    <th class="text-end">Ações</th>
                                 </tr>
                             </thead>
                             <tbody id="tickets-table-body">
-                                <tr><td colspan="9" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
+                                <tr><td colspan="6" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -2996,22 +3059,53 @@
         <div class="ticket-chat-shell">
             <div class="ticket-chat-header">
                 <div class="ticket-chat-contact">
-                    <h5 class="ticket-chat-title" id="ticket-chat-title">Chat do ticket</h5>
-                    <div class="ticket-chat-subtitle" id="ticket-chat-subtitle"></div>
-                    <div class="ticket-chat-user" id="ticket-chat-current-user">Modo leitura</div>
+                    <div class="ticket-chat-avatar"><i class="bi bi-person-fill"></i></div>
+                    <div class="ticket-chat-contact-copy">
+                        <h5 class="ticket-chat-title" id="ticket-chat-title">Chat do ticket</h5>
+                        <div class="ticket-chat-subtitle" id="ticket-chat-subtitle"></div>
+                    </div>
                 </div>
                 <div class="ticket-chat-header-actions">
-                    <button type="button" class="ticket-chat-claim hidden" id="ticket-chat-claim" onclick="iniciarAtendimentoTicket(window.activeChatTicketNumber, this, false)" title="Iniciar ou assumir atendimento">
-                        <i class="bi bi-person-check"></i><span>Iniciar atendimento</span>
-                    </button>
                     <button type="button" class="ticket-chat-close" onclick="fecharChatTicket()" aria-label="Fechar chat"><i class="bi bi-x-lg"></i></button>
                 </div>
             </div>
+
+            <div class="ticket-chat-operations">
+                <div class="ticket-chat-statuses">
+                    <span class="chat-op-pill" id="ticket-chat-op-situation"><i class="bi bi-circle-fill"></i><span>Situação</span></span>
+                    <span class="chat-op-pill" id="ticket-chat-op-owner"><i class="bi bi-person-badge"></i><span>Sem responsável</span></span>
+                    <span class="chat-op-pill" id="ticket-chat-op-triage"><i class="bi bi-list-check"></i><span>Triagem</span></span>
+                    <span class="chat-op-pill" id="ticket-chat-op-time"><i class="bi bi-clock"></i><span>Atividade</span></span>
+                </div>
+                <div class="ticket-chat-operation-actions">
+                    <button type="button" class="ticket-chat-claim hidden" id="ticket-chat-claim" onclick="iniciarAtendimentoTicket(window.activeChatTicketNumber, this, false)" title="Iniciar atendimento">
+                        <i class="bi bi-headset"></i><span>Iniciar atendimento</span>
+                    </button>
+                    <div class="ticket-transfer-wrap">
+                        <button type="button" class="ticket-chat-transfer hidden" id="ticket-chat-transfer" onclick="toggleTransferenciaChat(event)" title="Transferir atendimento para outro usuário">
+                            <i class="bi bi-arrow-left-right"></i><span>Transferir atendimento</span>
+                        </button>
+                        <div class="ticket-transfer-panel hidden" id="ticket-transfer-panel">
+                            <div class="ticket-transfer-title">Transferir atendimento</div>
+                            <div class="ticket-transfer-help">Selecione o usuário que passará a conduzir esta conversa.</div>
+                            <select id="ticket-transfer-user" class="form-select form-select-sm">
+                                <option value="">Selecione um usuário...</option>
+                            </select>
+                            <div class="ticket-transfer-footer">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fecharTransferenciaChat()">Cancelar</button>
+                                <button type="button" class="btn btn-sm text-white" id="ticket-transfer-confirm" style="background:var(--adv-blue)" onclick="confirmarTransferenciaChat()">Transferir</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="ticket-chat-user" id="ticket-chat-current-user">Modo leitura</div>
             <div class="ticket-chat-storage" id="ticket-chat-storage">Histórico operacional leve</div>
             <div class="ticket-chat-history" id="ticket-chat-history">
                 <div class="chat-empty">Carregando conversa...</div>
             </div>
-            <form class="ticket-chat-composer" onsubmit="enviarMensagemChat(event)">
+            <form class="ticket-chat-composer" id="ticket-chat-composer" onsubmit="enviarMensagemChat(event)">
                 <input type="file" id="ticket-chat-file" class="hidden" onchange="enviarArquivoChat(this)" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv">
                 <div class="chat-compose-tools">
                     <button type="button" class="chat-emoji-btn" id="ticket-chat-emoji" onclick="toggleEmojiPickerChat(event)" title="Emojis" aria-label="Inserir emoji"><i class="bi bi-emoji-smile"></i></button>
@@ -3019,7 +3113,8 @@
                 </div>
                 <div class="chat-input-wrap">
                     <div id="ticket-chat-emoji-picker" class="chat-emoji-picker hidden" aria-label="Seletor de emojis"></div>
-                    <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem" onkeydown="atalhoEnviarChat(event)"></textarea>
+                    <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem ou cole uma imagem com Ctrl+V" onkeydown="atalhoEnviarChat(event)"></textarea>
+                    <div class="chat-paste-hint"><i class="bi bi-clipboard"></i> Cole texto ou imagens diretamente aqui</div>
                 </div>
                 <button type="submit" class="chat-send-btn" id="ticket-chat-send" title="Enviar"><i class="bi bi-send-fill"></i> Enviar</button>
                 <div class="chat-compose-status" id="ticket-chat-status"></div>
@@ -3463,8 +3558,23 @@
 
         socket.on('ticket_chat_message', ({ ticketNumber, message } = {}) => {
             if (!ticketNumber || !message) return;
-            if (String(window.activeChatTicketNumber || '') === String(ticketNumber || '')) {
+            const numero=String(ticketNumber||'');
+            const ticket=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber||'')===numero);
+            const chatAberto=String(window.activeChatTicketNumber||'')===numero;
+            if (chatAberto) {
                 adicionarMensagemChatNaTela(message, true);
+                if(message.direction==='in') marcarChatComoLido(numero);
+            } else if(message.direction==='in') {
+                if(ticket){
+                    ticket.temMensagemNaoLida=true;
+                    ticket.ultimaMensagemClienteEm=Number(message.createdAt||Date.now());
+                    ticket.lastActivity=Number(message.createdAt||Date.now());
+                    ticket.idadeUltimaAtividadeMs=0;
+                    recalcularResumoTicketsLocal();
+                    filtrarTicketsAtivos();
+                } else {
+                    window.activeTicketsLoaded=false;
+                }
             }
         });
 
@@ -3479,6 +3589,7 @@
 
             if (String(window.activeChatTicketNumber || '') === String(payload.ticketNumber || '')) {
                 atualizarEstadoAtendimentoChat({
+                    ...payload,
                     advogadoResponsavelId: payload.advogadoResponsavelId,
                     advogadoResponsavelNome: payload.advogadoResponsavelNome,
                     atendimentoAssumidoEm: payload.atendimentoAssumidoEm
@@ -3506,6 +3617,13 @@
             if (payload.lastActivity) {
                 ticket.lastActivity = Number(payload.lastActivity);
                 ticket.idadeUltimaAtividadeMs = 0;
+            }
+            if (payload.direction === 'in' && payload.hasNewInbound) {
+                ticket.ultimaMensagemClienteEm = Number(payload.lastInboundChatAt || payload.lastActivity || Date.now());
+                if (String(window.activeChatTicketNumber || '') !== ticketNumber) ticket.temMensagemNaoLida = true;
+            }
+            if (String(window.activeChatTicketNumber || '') === ticketNumber) {
+                atualizarStatusOperacionalChat({ ...ticket, ...payload });
             }
             if (payload.status === 'em_atendimento_humano') {
                 ticket.status = 'em_atendimento_humano';
@@ -3535,6 +3653,7 @@
 
         socket.on('panel_users_updated', () => {
             window.panelUsersLoaded = false;
+            window.chatTransferUsers = null;
             const tab = document.getElementById('tab-usuarios');
             if (tab && !tab.classList.contains('hidden') && temPermissaoPainel('users')) carregarUsuarios(true);
         });
@@ -4602,11 +4721,10 @@ function renderizarLista(itens) {
         }
 
         function atualizarResumoTickets(resumo = {}) {
-            document.getElementById('tickets-metric-total').textContent = Number(resumo.total || 0);
-            document.getElementById('tickets-metric-pending').textContent = Number(resumo.pendentesEquipe || 0);
-            document.getElementById('tickets-metric-human').textContent = Number(resumo.emAtendimento || 0);
-            document.getElementById('tickets-metric-client').textContent = Number(resumo.aguardandoCliente || 0);
-            document.getElementById('tickets-metric-alert').textContent = Number(resumo.pendentesMaisDe2h || 0);
+            const total = document.getElementById('tickets-metric-total');
+            const unread = document.getElementById('tickets-metric-unread');
+            if (total) total.textContent = Number(resumo.total || 0);
+            if (unread) unread.textContent = Number(resumo.mensagensNaoLidas || 0);
         }
 
 
@@ -4627,10 +4745,7 @@ function renderizarLista(itens) {
             const itens = Array.isArray(window.activeTicketsData) ? window.activeTicketsData : [];
             atualizarResumoTickets({
                 total: itens.length,
-                pendentesEquipe: itens.filter(item => item.pendenciaTipo === 'advogado').length,
-                emAtendimento: itens.filter(item => item.pendenciaTipo === 'atendimento').length,
-                aguardandoCliente: itens.filter(item => item.pendenciaTipo === 'cliente').length,
-                pendentesMaisDe2h: itens.filter(item => item.pendenteHaMaisDe2h).length
+                mensagensNaoLidas: itens.filter(item => item.temMensagemNaoLida === true).length
             });
         }
 
@@ -4690,7 +4805,7 @@ function renderizarLista(itens) {
             if (!tickets.length) {
                 const tr = document.createElement('tr');
                 const td = document.createElement('td');
-                td.colSpan = 9;
+                td.colSpan = 6;
                 td.className = 'tickets-empty';
                 td.textContent = 'Nenhum ticket corresponde aos filtros selecionados.';
                 tr.appendChild(td);
@@ -4705,31 +4820,30 @@ function renderizarLista(itens) {
                 const tr = document.createElement('tr');
                 const possuiResponsavel = ticketTemResponsavel(ticket);
                 const ehMeuAtendimento = ticketEhMeuAtendimento(ticket);
-                if (possuiResponsavel || ticket.pendenciaTipo === 'atendimento') tr.classList.add('ticket-row-assigned');
+                if (possuiResponsavel) tr.classList.add('ticket-row-assigned');
                 if (ehMeuAtendimento) tr.classList.add('ticket-row-mine');
+                if (ticket.temMensagemNaoLida === true) tr.classList.add('ticket-row-unread');
                 tr.dataset.ticketNumber = ticket.ticketNumber || '';
                 tr.dataset.ownerId = ticket.advogadoResponsavelId || '';
 
                 const numeroTd = document.createElement('td');
+                const numeroWrap = document.createElement('div');
+                numeroWrap.className = 'ticket-number-wrap';
                 const numero = document.createElement('div');
                 numero.className = 'ticket-number';
                 numero.textContent = ticket.ticketNumber || '—';
+                numeroWrap.appendChild(numero);
+                if (ticket.temMensagemNaoLida === true) {
+                    const unread = document.createElement('span');
+                    unread.className = 'ticket-unread-badge';
+                    unread.innerHTML = '<i class="ticket-unread-dot"></i> Nova mensagem';
+                    unread.title = 'Há mensagem do cliente ainda não lida por você.';
+                    numeroWrap.appendChild(unread);
+                }
                 const origem = document.createElement('div');
                 origem.className = 'ticket-time-sub';
                 origem.textContent = formatarOrigemTicket(ticket.origem);
-                numeroTd.append(numero, origem);
-                const docsResumo = ticket.documentosResumo || {};
-                if (Number(docsResumo.total || 0) > 0) {
-                    const docsMini = document.createElement('div');
-                    docsMini.className = 'ticket-doc-mini';
-                    const icon = document.createElement('i');
-                    icon.className = 'bi bi-stars';
-                    const textoDocs = document.createElement('span');
-                    const processando = Number(docsResumo.processando || 0);
-                    textoDocs.textContent = `${docsResumo.total} arquivo${Number(docsResumo.total) === 1 ? '' : 's'} IA${processando ? ` • ${processando} analisando` : ''}`;
-                    docsMini.append(icon, textoDocs);
-                    numeroTd.appendChild(docsMini);
-                }
+                numeroTd.append(numeroWrap, origem);
 
                 const clienteTd = document.createElement('td');
                 const nome = document.createElement('div');
@@ -4742,57 +4856,12 @@ function renderizarLista(itens) {
 
                 const areaTd = criarTextoCelulaTicket(ticket.area || ticket.menuOptionTitle || 'Ainda não definida', 'ticket-area');
 
-                const situacaoTd = document.createElement('td');
-                const pill = document.createElement('span');
-                pill.className = `ticket-status-pill ${classeStatusTicket(ticket.pendenciaTipo)}`;
-                pill.textContent = ticket.pendenciaLabel || 'Revisar';
-                const etapa = document.createElement('div');
-                etapa.className = 'ticket-stage';
-                etapa.textContent = ticket.statusLabel || ticket.status || '—';
-                situacaoTd.append(pill, etapa);
-
-                const responsavelTd = document.createElement('td');
-                const responsavelNome = document.createElement('div');
-                responsavelNome.className = 'ticket-responsavel-name';
-                responsavelNome.textContent = possuiResponsavel ? (ticket.advogadoResponsavelNome || 'Usuário atribuído') : 'Não atribuído';
-                const responsavelMeta = document.createElement('div');
-                responsavelMeta.className = 'ticket-responsavel-meta';
-                responsavelMeta.textContent = possuiResponsavel
-                    ? (ehMeuAtendimento ? 'Você abriu/assumiu' : 'Chat já assumido')
-                    : 'Fluxo automático';
-                responsavelTd.append(responsavelNome, responsavelMeta);
-
-                const triagemTd = document.createElement('td');
-                const progress = document.createElement('div');
-                progress.className = 'ticket-progress-line';
-                const meta = document.createElement('div');
-                meta.className = 'ticket-progress-meta';
-                const triagem = ticket.triagem || {};
-                const metaLeft = document.createElement('span');
-                const metaRight = document.createElement('span');
-                if (triagem.possuiFluxo) {
-                    metaLeft.textContent = `${triagem.respondidas || 0}/${triagem.total || 0}`;
-                    metaRight.textContent = `${triagem.percentual || 0}%`;
-                } else {
-                    metaLeft.textContent = ticket.pendenciaTipo === 'advogado' || ticket.pendenciaTipo === 'atendimento' ? 'Concluída' : 'Sem fluxo';
-                    metaRight.textContent = '';
-                }
-                meta.append(metaLeft, metaRight);
-                const track = document.createElement('div');
-                track.className = 'ticket-progress-track';
-                const bar = document.createElement('div');
-                bar.className = 'ticket-progress-bar';
-                bar.style.width = `${Math.max(0, Math.min(100, Number(triagem.percentual || 0)))}%`;
-                track.appendChild(bar);
-                progress.append(meta, track);
-                triagemTd.appendChild(progress);
-
                 const ultimaTd = document.createElement('td');
                 const ultimaMain = document.createElement('div');
                 ultimaMain.className = 'ticket-time-main';
                 ultimaMain.textContent = formatarDataTicket(ticket.lastActivity);
                 const ultimaSub = document.createElement('div');
-                ultimaSub.className = `ticket-time-sub${ticket.pendenteHaMaisDe2h ? ' is-alert' : ''}`;
+                ultimaSub.className = 'ticket-time-sub';
                 ultimaSub.textContent = `há ${formatarDuracaoTicket(ticket.idadeUltimaAtividadeMs)}`;
                 ultimaTd.append(ultimaMain, ultimaSub);
 
@@ -4812,36 +4881,14 @@ function renderizarLista(itens) {
                 actionsWrap.className = 'ticket-actions-inline';
 
                 if (temPermissaoPainel('chat')) {
-                    // Abrir chat é SEMPRE leitura: não altera responsável e não avisa o cliente.
                     const chatBtn = document.createElement('button');
                     chatBtn.type = 'button';
                     chatBtn.className = 'ticket-chat-btn';
                     chatBtn.innerHTML = '<i class="bi bi-chat-dots me-1"></i> Abrir chat';
-                    chatBtn.title = 'Visualizar a conversa sem assumir o atendimento.';
+                    chatBtn.title = 'Abrir conversa e visualizar o status operacional do ticket.';
                     chatBtn.onclick = () => abrirChatTicket(ticket.ticketNumber, chatBtn);
                     actionsWrap.appendChild(chatBtn);
-
-                    if (!ehMeuAtendimento) {
-                        const claimBtn = document.createElement('button');
-                        claimBtn.type = 'button';
-                        claimBtn.className = `ticket-claim-btn${possuiResponsavel ? ' takeover' : ''}`;
-                        claimBtn.innerHTML = possuiResponsavel
-                            ? '<i class="bi bi-arrow-left-right"></i> Assumir'
-                            : '<i class="bi bi-person-check"></i> Iniciar atendimento';
-                        claimBtn.title = possuiResponsavel
-                            ? `Transferir para você o atendimento atualmente atribuído a ${ticket.advogadoResponsavelNome || 'outro advogado'}.`
-                            : 'Assumir este atendimento e avisar o cliente.';
-                        claimBtn.onclick = () => iniciarAtendimentoTicket(ticket.ticketNumber, claimBtn, true);
-                        actionsWrap.appendChild(claimBtn);
-                    }
                 }
-
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'ticket-view-btn';
-                btn.innerHTML = '<i class="bi bi-eye me-1"></i> Ver';
-                btn.onclick = () => abrirDetalheTicket(ticket.ticketNumber);
-                actionsWrap.appendChild(btn);
 
                 const closeBtn = document.createElement('button');
                 closeBtn.type = 'button';
@@ -4852,7 +4899,7 @@ function renderizarLista(itens) {
                 actionsWrap.appendChild(closeBtn);
 
                 acaoTd.appendChild(actionsWrap);
-                tr.append(numeroTd, clienteTd, areaTd, situacaoTd, responsavelTd, triagemTd, ultimaTd, abertoTd, acaoTd);
+                tr.append(numeroTd, clienteTd, areaTd, ultimaTd, abertoTd, acaoTd);
                 fragment.appendChild(tr);
             });
 
@@ -4895,21 +4942,15 @@ function renderizarLista(itens) {
 
         function filtrarTicketsAtivos() {
             const termo = normalizarBuscaTicket(document.getElementById('tickets-search-input')?.value || '');
-            const status = document.getElementById('tickets-filter-status')?.value || '';
             const area = document.getElementById('tickets-filter-area')?.value || '';
-            const ownerFilter = document.getElementById('tickets-filter-owner')?.value || '';
-            const meuId = idUsuarioPainelAtual();
+            const unreadFilter = document.getElementById('tickets-filter-unread')?.value || '';
             const apenasNumeros = termo.replace(/\D/g, '');
             const tickets = Array.isArray(window.activeTicketsData) ? window.activeTicketsData : [];
 
             const filtrados = tickets.filter(ticket => {
-                if (status && ticket.pendenciaTipo !== status) return false;
                 if (area && String(ticket.area || '') !== area) return false;
-
-                const responsavelId = String(ticket.advogadoResponsavelId || '').trim();
-                if (ownerFilter === 'mine' && (!meuId || responsavelId !== meuId)) return false;
-                if (ownerFilter === 'unassigned' && responsavelId) return false;
-
+                if (unreadFilter === 'unread' && ticket.temMensagemNaoLida !== true) return false;
+                if (unreadFilter === 'read' && ticket.temMensagemNaoLida === true) return false;
                 if (!termo) return true;
 
                 const camposTexto = [
@@ -4917,8 +4958,6 @@ function renderizarLista(itens) {
                     ticket.clienteNome,
                     ticket.area,
                     ticket.menuOptionTitle,
-                    ticket.statusLabel,
-                    ticket.pendenciaLabel,
                     ticket.origem,
                     ticket.advogadoResponsavelNome
                 ].map(normalizarBuscaTicket);
@@ -4936,13 +4975,11 @@ function renderizarLista(itens) {
 
         function limparFiltrosTickets() {
             const busca = document.getElementById('tickets-search-input');
-            const status = document.getElementById('tickets-filter-status');
             const area = document.getElementById('tickets-filter-area');
-            const owner = document.getElementById('tickets-filter-owner');
+            const unread = document.getElementById('tickets-filter-unread');
             if (busca) busca.value = '';
-            if (status) status.value = '';
             if (area) area.value = '';
-            if (owner) owner.value = '';
+            if (unread) unread.value = '';
             filtrarTicketsAtivos();
         }
 
@@ -5357,17 +5394,6 @@ function renderizarLista(itens) {
                 chatBtn.title = 'Visualizar a conversa sem assumir o atendimento.';
                 chatBtn.onclick = () => { fecharDetalheTicket(); abrirChatTicket(ticket.ticketNumber, chatBtn); };
                 actions.appendChild(chatBtn);
-
-                if (!ehMeuAtendimento) {
-                    const claimBtn = document.createElement('button');
-                    claimBtn.type = 'button';
-                    claimBtn.className = `ticket-claim-btn${possuiResponsavel ? ' takeover' : ''}`;
-                    claimBtn.innerHTML = possuiResponsavel
-                        ? '<i class="bi bi-arrow-left-right"></i> Assumir atendimento'
-                        : '<i class="bi bi-person-check"></i> Iniciar atendimento';
-                    claimBtn.onclick = () => { fecharDetalheTicket(); iniciarAtendimentoTicket(ticket.ticketNumber, claimBtn, true); };
-                    actions.appendChild(claimBtn);
-                }
             }
             const closeTicketBtn = document.createElement('button');
             closeTicketBtn.type = 'button';
@@ -6447,37 +6473,65 @@ function renderizarLista(itens) {
 
         document.addEventListener('click', event=>{
             if(!event.target.closest('#ticket-chat-emoji-picker') && !event.target.closest('#ticket-chat-emoji')) fecharEmojiPickerChat();
+            if(!event.target.closest('#ticket-transfer-panel') && !event.target.closest('#ticket-chat-transfer')) fecharTransferenciaChat();
         });
+
+        function textoTriagemChat(triagem = {}) {
+            if (!triagem || triagem.possuiFluxo !== true) return 'Triagem sem etapas';
+            const total = Number(triagem.total || 0);
+            const respondidas = Number(triagem.respondidas || 0);
+            const percentual = Number(triagem.percentual || 0);
+            return `Triagem ${respondidas}/${total} · ${percentual}%`;
+        }
+
+        function atualizarStatusOperacionalChat(ticketData = {}) {
+            const data = { ...(window.activeChatTicketData || {}), ...(ticketData || {}) };
+            window.activeChatTicketData = data;
+            const situation = document.getElementById('ticket-chat-op-situation');
+            const owner = document.getElementById('ticket-chat-op-owner');
+            const triage = document.getElementById('ticket-chat-op-triage');
+            const time = document.getElementById('ticket-chat-op-time');
+            if (situation) situation.querySelector('span:last-child').textContent = data.pendenciaLabel || data.statusLabel || data.status || 'Em acompanhamento';
+            if (owner) owner.querySelector('span:last-child').textContent = data.advogadoResponsavelNome ? `Responsável: ${data.advogadoResponsavelNome}` : 'Sem responsável';
+            if (triage) triage.querySelector('span:last-child').textContent = textoTriagemChat(data.triagem || {});
+            if (time) time.querySelector('span:last-child').textContent = data.lastActivity ? `Atividade ${formatarDataTicket(data.lastActivity)}` : 'Atividade não informada';
+        }
 
         function atualizarEstadoAtendimentoChat(ticketData = {}) {
             if(!window.activeChatTicketNumber) return;
             const local=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber)===String(window.activeChatTicketNumber));
-            const ownerId=String(ticketData.advogadoResponsavelId ?? local?.advogadoResponsavelId ?? '').trim();
-            const ownerName=String(ticketData.advogadoResponsavelNome ?? local?.advogadoResponsavelNome ?? '').trim();
+            const combinado={...(window.activeChatTicketData||{}),...(local||{}),...(ticketData||{})};
+            const ownerId=String(combinado.advogadoResponsavelId || '').trim();
+            const ownerName=String(combinado.advogadoResponsavelNome || '').trim();
             const meuId=idUsuarioPainelAtual();
             const ehMeu=!!meuId && !!ownerId && ownerId===meuId;
             window.activeChatOwnerId=ownerId||null;
             window.activeChatOwnerName=ownerName||null;
             window.activeChatCanSend=ehMeu;
+            window.activeChatTicketData=combinado;
+            atualizarStatusOperacionalChat(combinado);
 
             const usuarioAtual=window.panelSessionUser?.assinatura||window.panelSessionUser?.nome||'usuário conectado';
             const userLine=document.getElementById('ticket-chat-current-user');
-            if(userLine) userLine.textContent=ownerId
-                ? `Responsável: ${ownerName||'Advogado'} • Você: ${usuarioAtual}`
-                : `Sem responsável • Você: ${usuarioAtual}`;
+            if(userLine) {
+                userLine.innerHTML = ownerId
+                    ? `<i class="bi bi-person-check"></i> Atendimento atribuído a <strong>${escapeHtmlChat(ownerName||'Usuário')}</strong>${ehMeu ? ' · você pode responder' : ` · você está em modo leitura (${escapeHtmlChat(usuarioAtual)})`}`
+                    : '<i class="bi bi-eye"></i> Modo leitura · atendimento ainda não iniciado';
+            }
 
             const claim=document.getElementById('ticket-chat-claim');
+            const transfer=document.getElementById('ticket-chat-transfer');
             if(claim){
-                claim.classList.toggle('hidden',ehMeu);
-                claim.classList.toggle('takeover',!!ownerId&&!ehMeu);
+                claim.classList.toggle('hidden',!!ownerId);
                 claim.disabled=false;
-                claim.innerHTML=ownerId&&!ehMeu
-                    ? '<i class="bi bi-arrow-left-right"></i><span>Assumir atendimento</span>'
-                    : '<i class="bi bi-person-check"></i><span>Iniciar atendimento</span>';
-                claim.title=ownerId&&!ehMeu
-                    ? `Transferir para você o atendimento de ${ownerName||'outro advogado'}.`
-                    : 'Assumir este atendimento e avisar o cliente.';
+                claim.innerHTML='<i class="bi bi-headset"></i><span>Iniciar atendimento</span>';
+                claim.title='Iniciar atendimento com seu usuário e avisar o cliente.';
             }
+            if(transfer){
+                transfer.classList.toggle('hidden',!ownerId);
+                transfer.disabled=false;
+            }
+            if(!ownerId) fecharTransferenciaChat();
 
             ['ticket-chat-input','ticket-chat-attach','ticket-chat-send','ticket-chat-emoji'].forEach(id=>{
                 const el=document.getElementById(id); if(el) el.disabled=!ehMeu;
@@ -6490,8 +6544,8 @@ function renderizarLista(itens) {
                     status.classList.add('access-lock');
                     status.dataset.accessLock='1';
                     status.textContent=ownerId
-                        ? `Modo leitura. ${ownerName||'Outro advogado'} está responsável; clique em “Assumir atendimento” para responder.`
-                        : 'Modo leitura. Clique em “Iniciar atendimento” para responder ao cliente.';
+                        ? `Modo leitura. O atendimento está com ${ownerName||'outro usuário'}. Use “Transferir atendimento” para alterar o responsável.`
+                        : 'Modo leitura. Clique em “Iniciar atendimento” para poder responder ao cliente.';
                 } else if(status.dataset.accessLock==='1') {
                     status.classList.remove('access-lock'); delete status.dataset.accessLock; status.textContent='';
                 }
@@ -6503,21 +6557,17 @@ function renderizarLista(itens) {
             if(!temPermissaoPainel('chat') || !ticketNumber) return;
             const local=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber)===String(ticketNumber));
             const ownerId=String(local?.advogadoResponsavelId || window.activeChatOwnerId || '').trim();
-            const ownerName=String(local?.advogadoResponsavelNome || window.activeChatOwnerName || '').trim();
-            const meuId=idUsuarioPainelAtual();
-
-            if(ownerId && ownerId!==meuId){
-                const ok=confirm(`Este atendimento está atribuído a ${ownerName||'outro advogado'}. Deseja assumir o atendimento e avisar o cliente sobre a troca de responsável?`);
-                if(!ok) return;
+            if(ownerId){
+                alert('Este atendimento já possui responsável. Use “Transferir atendimento” dentro do chat.');
+                return;
             }
 
             const original=triggerButton?.innerHTML||'';
-            if(triggerButton){triggerButton.disabled=true;triggerButton.innerHTML='<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Assumindo...';}
+            if(triggerButton){triggerButton.disabled=true;triggerButton.innerHTML='<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Iniciando...';}
             try{
                 const res=await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/claim`,{method:'POST',headers:{'Content-Type':'application/json'}});
                 const data=await res.json().catch(()=>({}));
-                if(!res.ok){const erro=new Error(data.erro||'Não foi possível assumir o atendimento.');erro.status=res.status;throw erro;}
-
+                if(!res.ok){const erro=new Error(data.erro||'Não foi possível iniciar o atendimento.');erro.status=res.status;throw erro;}
                 const payload={
                     ticketNumber,
                     status:data.ticket?.status||local?.status||null,
@@ -6525,7 +6575,7 @@ function renderizarLista(itens) {
                     statusLabel:data.ticket?.statusLabel||local?.statusLabel||null,
                     pendenciaTipo:data.ticket?.pendenciaTipo||local?.pendenciaTipo||null,
                     pendenciaLabel:data.ticket?.pendenciaLabel||local?.pendenciaLabel||null,
-                    advogadoResponsavelId:data.responsavel?.id||meuId,
+                    advogadoResponsavelId:data.responsavel?.id||idUsuarioPainelAtual(),
                     advogadoResponsavelNome:data.responsavel?.nome||window.panelSessionUser?.nome||null,
                     atendimentoAssumidoEm:data.ticket?.atendimentoAssumidoEm||Date.now()
                 };
@@ -6533,11 +6583,60 @@ function renderizarLista(itens) {
                 if(String(window.activeChatTicketNumber||'')===String(ticketNumber)) atualizarEstadoAtendimentoChat(payload);
                 if(abrirChatDepois && String(window.activeChatTicketNumber||'')!==String(ticketNumber)) await abrirChatTicket(ticketNumber);
             }catch(err){
-                alert(err.message||'Não foi possível assumir o atendimento.');
+                alert(err.message||'Não foi possível iniciar o atendimento.');
                 if(Number(err.status)===409){window.activeTicketsLoaded=false;carregarTicketsAtivos(true);}
             }finally{
                 if(triggerButton&&triggerButton.isConnected){triggerButton.disabled=false;triggerButton.innerHTML=original;}
             }
+        }
+
+        async function carregarUsuariosTransferenciaChat(forcar = false) {
+            if (window.chatTransferUsers && !forcar) return window.chatTransferUsers;
+            const res = await fetch('/api/chat/users', { cache: 'no-store' });
+            const data = await res.json().catch(()=>({}));
+            if(!res.ok) throw new Error(data.erro||'Não foi possível carregar os usuários.');
+            window.chatTransferUsers = Array.isArray(data.users) ? data.users : [];
+            return window.chatTransferUsers;
+        }
+
+        async function toggleTransferenciaChat(event) {
+            event?.stopPropagation?.();
+            const panel=document.getElementById('ticket-transfer-panel');
+            if(!panel) return;
+            if(!panel.classList.contains('hidden')) { fecharTransferenciaChat(); return; }
+            try {
+                const users=await carregarUsuariosTransferenciaChat();
+                const select=document.getElementById('ticket-transfer-user');
+                if(select){
+                    const atual=String(window.activeChatOwnerId||'');
+                    select.innerHTML='<option value="">Selecione um usuário...</option>' + users.map(u=>`<option value="${escapeHtmlChat(u.id)}"${String(u.id)===atual?' disabled':''}>${escapeHtmlChat(u.assinatura||u.nome)}${String(u.id)===atual?' (responsável atual)':''}</option>`).join('');
+                }
+                panel.classList.remove('hidden');
+            } catch(err) { alert(err.message||'Não foi possível carregar os usuários.'); }
+        }
+
+        function fecharTransferenciaChat() {
+            document.getElementById('ticket-transfer-panel')?.classList.add('hidden');
+            const select=document.getElementById('ticket-transfer-user'); if(select) select.value='';
+        }
+
+        async function confirmarTransferenciaChat() {
+            const ticket=window.activeChatTicketNumber;
+            const select=document.getElementById('ticket-transfer-user');
+            const userId=String(select?.value||'').trim();
+            if(!ticket||!userId){ alert('Selecione o usuário que receberá o atendimento.'); return; }
+            const users=window.chatTransferUsers||[];
+            const alvo=users.find(u=>String(u.id)===userId);
+            if(!confirm(`Transferir o atendimento para ${alvo?.assinatura||alvo?.nome||'o usuário selecionado'}? O cliente será informado sobre o novo responsável.`)) return;
+            const btn=document.getElementById('ticket-transfer-confirm');
+            const old=btn?.innerHTML||'Transferir'; if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm"></span> Transferindo...';}
+            try{
+                const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/transfer`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId})});
+                const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.erro||'Não foi possível transferir o atendimento.');
+                const payload={ticketNumber:ticket,...(data.ticket||{}),advogadoResponsavelId:data.responsavel?.id||data.ticket?.advogadoResponsavelId,advogadoResponsavelNome:data.responsavel?.nome||data.ticket?.advogadoResponsavelNome};
+                aplicarAtribuicaoTicketLocal(payload); recalcularResumoTicketsLocal(); filtrarTicketsAtivos(); atualizarEstadoAtendimentoChat(payload); fecharTransferenciaChat();
+            }catch(err){alert(err.message||'Não foi possível transferir o atendimento.');}
+            finally{if(btn){btn.disabled=false;btn.innerHTML=old;}}
         }
 
         async function abrirChatTicket(ticketNumber, triggerButton = null) {
@@ -6559,6 +6658,10 @@ function renderizarLista(itens) {
                 document.getElementById('ticket-chat-subtitle').textContent=[data.ticket?.area,data.ticket?.whatsapp?formatarWhatsAppCliente(data.ticket.whatsapp):null].filter(Boolean).join(' • ');
                 document.getElementById('ticket-chat-storage').textContent=`Histórico: até ${data.maxMessagesPerTicket||500} mensagens / ${data.retentionDays||60} dias. Anexos sob demanda.`;
                 window.activeChatMessages=Array.isArray(data.messages)?data.messages:[]; window.activeChatHasMore=data.hasMore===true; window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
+                window.activeChatTicketData=data.ticket||{};
+                const localTicket=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber)===String(ticketNumber));
+                if(localTicket){localTicket.temMensagemNaoLida=false;localTicket.chatLidoEm=data.readAt||Date.now();}
+                recalcularResumoTicketsLocal(); filtrarTicketsAtivos();
                 renderizarChat(window.activeChatMessages,window.activeChatHasMore);
                 atualizarEstadoAtendimentoChat(data.ticket||{});
                 if(window.activeChatCanSend) document.getElementById('ticket-chat-input')?.focus();
@@ -6569,7 +6672,7 @@ function renderizarLista(itens) {
             }
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
-        function fecharChatTicket() { const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; fecharEmojiPickerChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
+        function fecharChatTicket() { const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; fecharEmojiPickerChat(); fecharTransferenciaChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
         async function carregarMensagensAnterioresChat() {
             if(!window.activeChatTicketNumber||!window.activeChatOldest) return;
             const history=document.getElementById('ticket-chat-history'); const beforeHeight=history?.scrollHeight||0;
@@ -6608,19 +6711,25 @@ function renderizarLista(itens) {
             }).catch(()=>{});
         }
         async function enviarArquivoChat(inputFile) {
-            const file=inputFile?.files?.[0];const ticket=window.activeChatTicketNumber;if(!file||!ticket)return;
+            const file=inputFile?.files?.[0];
+            if(file) enviarArquivoChatFile(file);
+            if(inputFile) inputFile.value='';
+        }
+
+        async function enviarArquivoChatFile(file, { usarLegenda = true } = {}) {
+            const ticket=window.activeChatTicketNumber;if(!file||!ticket)return;
             const status=document.getElementById('ticket-chat-status');
-            if(window.activeChatCanSend!==true){if(status){status.classList.add('access-lock');status.dataset.accessLock='1';status.textContent='Inicie ou assuma o atendimento antes de enviar arquivos.';}inputFile.value='';return;}
-            if(file.size>15*1024*1024){if(status)status.textContent='O arquivo ultrapassa o limite de 15 MB do chat.';inputFile.value='';return;}
-            const input=document.getElementById('ticket-chat-input');const caption=String(input?.value||'').trim().slice(0,2000);
+            if(window.activeChatCanSend!==true){if(status){status.classList.add('access-lock');status.dataset.accessLock='1';status.textContent='Inicie o atendimento ou transfira-o para você antes de enviar arquivos.';}return;}
+            if(file.size>15*1024*1024){if(status)status.textContent='O arquivo ultrapassa o limite de 15 MB do chat.';return;}
+            const input=document.getElementById('ticket-chat-input');const caption=usarLegenda?String(input?.value||'').trim().slice(0,2000):'';
             const mime=inferirMimeArquivoChat(file);const tipo=mime.startsWith('image/')?'image':mime.startsWith('video/')?'video':mime.startsWith('audio/')?'audio':'document';
             const localPreviewUrl=['image','video','audio'].includes(tipo)?URL.createObjectURL(file):null;
             const otimista=mensagemOtimistaChat({texto:tipo==='audio'?'':caption,tipo,file,localPreviewUrl});
-            adicionarMensagemChatNaTela(otimista,true);if(caption)input.value='';inputFile.value='';if(status)status.textContent='';input?.focus();
+            adicionarMensagemChatNaTela(otimista,true);if(caption&&input)input.value='';if(status)status.textContent='';input?.focus();
 
             window.chatSendQueue=window.chatSendQueue.then(async()=>{
                 try{
-                    const q=new URLSearchParams({name:file.name,mimeType:mime});if(caption)q.set('caption',caption);
+                    const q=new URLSearchParams({name:file.name||`arquivo-${Date.now()}`,mimeType:mime});if(caption)q.set('caption',caption);
                     const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/files?${q.toString()}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});
                     const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível enviar o arquivo.');
                     removerMensagemChatDaTela(otimista.messageId);if(data.message)adicionarMensagemChatNaTela(data.message,true);
@@ -6628,6 +6737,54 @@ function renderizarLista(itens) {
                 finally{if(localPreviewUrl)setTimeout(()=>URL.revokeObjectURL(localPreviewUrl),30000);}
             }).catch(()=>{});
         }
+
+        function processarColagemChat(event) {
+            if(window.activeChatCanSend!==true) return;
+            const clipboard=event.clipboardData;
+            if(!clipboard?.items?.length) return;
+            const arquivos=[];
+            for(const item of clipboard.items){
+                if(item.kind!=='file') continue;
+                const file=item.getAsFile?.();
+                if(file) arquivos.push(file);
+            }
+            // Texto continua usando a colagem nativa do navegador. Só interceptamos
+            // quando o clipboard contém arquivo/imagem (ex.: Print Screen / captura).
+            if(!arquivos.length) return;
+            event.preventDefault();
+            arquivos.slice(0,5).forEach((file,index)=>{
+                const nome=file.name && file.name!=='image.png' ? file.name : `imagem-colada-${Date.now()}-${index+1}.png`;
+                let envio=file;
+                try { envio=new File([file],nome,{type:file.type||'image/png',lastModified:Date.now()}); } catch(_) {}
+                enviarArquivoChatFile(envio,{usarLegenda:index===0});
+            });
+        }
+
+        function processarDropChat(event) {
+            event.preventDefault();
+            document.getElementById('ticket-chat-composer')?.classList.remove('is-dragging');
+            if(window.activeChatCanSend!==true) return;
+            const arquivos=[...(event.dataTransfer?.files||[])];
+            arquivos.slice(0,5).forEach((file,index)=>enviarArquivoChatFile(file,{usarLegenda:index===0}));
+        }
+
+        async function marcarChatComoLido(ticketNumber) {
+            const numero=String(ticketNumber||'').trim(); if(!numero)return;
+            const local=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber)===numero);
+            if(local){local.temMensagemNaoLida=false;local.chatLidoEm=Date.now();recalcularResumoTicketsLocal();filtrarTicketsAtivos();}
+            clearTimeout(window.chatReadPersistTimer);
+            window.chatReadPersistTimer=setTimeout(()=>{
+                fetch(`/api/tickets/${encodeURIComponent(numero)}/chat/read`,{method:'POST',headers:{'Content-Type':'application/json'}}).catch(()=>{});
+            },180);
+        }
+
+        // Ctrl+V / Cmd+V mantém texto normal e envia imagens/arquivos presentes no clipboard.
+        document.getElementById('ticket-chat-input')?.addEventListener('paste',processarColagemChat);
+        const chatComposerDrop=document.getElementById('ticket-chat-composer');
+        chatComposerDrop?.addEventListener('dragover',event=>{event.preventDefault();if(window.activeChatCanSend===true)chatComposerDrop.classList.add('is-dragging');});
+        chatComposerDrop?.addEventListener('dragleave',()=>chatComposerDrop.classList.remove('is-dragging'));
+        chatComposerDrop?.addEventListener('drop',processarDropChat);
+
 
         // ---------------------------------------------------------------------
         // GESTÃO DE USUÁRIOS
