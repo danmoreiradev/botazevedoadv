@@ -845,6 +845,30 @@ const client = new MongoClient(mongoUri);
 let lastQr = null;
 let currentUser = null;
 let sock;
+
+// -----------------------------------------------------------------------------
+// SUPERVISÃO DA SESSÃO BAILEYS / PROTEÇÃO CONTRA CORRIDA CRIPTOGRÁFICA
+// -----------------------------------------------------------------------------
+// Uma sessão Signal não pode ser usada por dois sockets/processos simultaneamente.
+// Reconexões sobrepostas, deploy blue/green ou dois workers apontando para a mesma
+// coleção auth_session podem avançar o Double Ratchet em paralelo e produzir o
+// placeholder "Aguardando mensagem" no celular do destinatário.
+const BAILEYS_INSTANCE_ID = `${process.pid}-${crypto.randomUUID()}`;
+const BAILEYS_LEASE_ID = 'primary-whatsapp-session';
+const BAILEYS_LEASE_TTL_MS = 30 * 1000;
+const BAILEYS_LEASE_RENEW_MS = 10 * 1000;
+const BAILEYS_RECONNECT_DELAY_MS = 1800;
+let waRuntimeLocksColl = null;
+let baileysStartPromise = null;
+let baileysReconnectTimer = null;
+let baileysLeaseRenewTimer = null;
+let baileysAuthWriteQueue = Promise.resolve();
+let whatsappConnectionOpenedAt = 0;
+
+// Serializa TODO envio por JID. Isso impede que uma resposta automática e uma
+// mensagem do painel alterem a mesma sessão Signal ao mesmo tempo.
+const outboundJidChains = new Map();
+
 const botMessageIds = new Set();
 // Proteção contra corrida: o Baileys pode emitir o upsert da própria mensagem antes
 // de sendMessage() resolver e antes de termos o messageId em botMessageIds. Enquanto
@@ -1163,8 +1187,33 @@ async function obterMensagemEnviadaBaileys(key = {}) {
     return undefined;
 }
 
+async function executarEnvioSerializadoPorJid(jid, tarefa) {
+    const chave = normalizarJid(jid) || String(jid || 'desconhecido');
+    const anterior = outboundJidChains.get(chave) || Promise.resolve();
+
+    let atual;
+    atual = anterior
+        .catch(() => {})
+        .then(async () => {
+            // Após abrir a conexão, damos uma margem curta para as init queries e
+            // sincronização de dispositivos/chaves terminarem antes do primeiro envio.
+            const desdeAbertura = Date.now() - Number(whatsappConnectionOpenedAt || 0);
+            if (whatsappConnectionOpenedAt && desdeAbertura < 900) {
+                await new Promise(resolve => setTimeout(resolve, 900 - desdeAbertura));
+            }
+            return tarefa();
+        })
+        .finally(() => {
+            if (outboundJidChains.get(chave) === atual) outboundJidChains.delete(chave);
+        });
+
+    outboundJidChains.set(chave, atual);
+    return atual;
+}
+
 async function enviarMensagemBaileys(jid, content, options = {}) {
-    if (!sock?.user) throw new Error('WhatsApp não conectado.');
+    return executarEnvioSerializadoPorJid(jid, async () => {
+        if (!sock?.user) throw new Error('WhatsApp não conectado.');
 
     const jidNormalizado = normalizarJid(jid) || String(jid || '');
     const opcaoExplicita = Object.prototype.hasOwnProperty.call(options, 'useUserDevicesCache');
@@ -1192,6 +1241,7 @@ async function enviarMensagemBaileys(jid, content, options = {}) {
         }
         throw err;
     }
+    });
 }
 
 function normalizarUsuarioLogin(valor = '') {
@@ -4114,7 +4164,91 @@ async function salvarCadastroCliente(ticket, contato, rawJid, nomeInfo, cpfLimpo
     return { salvo: true, numeroPrincipal };
 }
 
+async function adquirirLeaseBaileys() {
+    if (!waRuntimeLocksColl) return false;
+    const agora = new Date();
+    const expiraEm = new Date(agora.getTime() + BAILEYS_LEASE_TTL_MS);
+
+    try {
+        const resultado = await waRuntimeLocksColl.findOneAndUpdate(
+            {
+                _id: BAILEYS_LEASE_ID,
+                $or: [
+                    { ownerId: BAILEYS_INSTANCE_ID },
+                    { expiresAt: { $lte: agora } },
+                    { expiresAt: { $exists: false } }
+                ]
+            },
+            {
+                $set: {
+                    ownerId: BAILEYS_INSTANCE_ID,
+                    expiresAt: expiraEm,
+                    updatedAt: agora
+                },
+                $setOnInsert: { createdAt: agora }
+            },
+            { upsert: true, returnDocument: 'after' }
+        );
+        const doc = resultado?.value || resultado;
+        return String(doc?.ownerId || '') === BAILEYS_INSTANCE_ID;
+    } catch (err) {
+        // Quando outro processo possui o lock, o upsert pode colidir com o _id.
+        if (err?.code === 11000) return false;
+        console.warn('[WhatsApp] Falha ao adquirir lease da sessão:', err?.message || err);
+        return false;
+    }
+}
+
+function iniciarRenovacaoLeaseBaileys() {
+    if (baileysLeaseRenewTimer) clearInterval(baileysLeaseRenewTimer);
+    baileysLeaseRenewTimer = setInterval(async () => {
+        if (!waRuntimeLocksColl) return;
+        try {
+            const agora = new Date();
+            const resultado = await waRuntimeLocksColl.updateOne(
+                { _id: BAILEYS_LEASE_ID, ownerId: BAILEYS_INSTANCE_ID },
+                { $set: { expiresAt: new Date(agora.getTime() + BAILEYS_LEASE_TTL_MS), updatedAt: agora } }
+            );
+            if (!resultado.matchedCount) {
+                console.error('[WhatsApp] Lease da sessão foi perdido. Encerrando socket para evitar duas instâncias criptografando simultaneamente.');
+                try { sock?.ws?.close?.(); } catch (_) {}
+            }
+        } catch (err) {
+            console.warn('[WhatsApp] Não foi possível renovar lease da sessão:', err?.message || err);
+        }
+    }, BAILEYS_LEASE_RENEW_MS);
+    baileysLeaseRenewTimer.unref?.();
+}
+
+async function liberarLeaseBaileys() {
+    if (baileysLeaseRenewTimer) {
+        clearInterval(baileysLeaseRenewTimer);
+        baileysLeaseRenewTimer = null;
+    }
+    if (!waRuntimeLocksColl) return;
+    try {
+        await waRuntimeLocksColl.deleteOne({ _id: BAILEYS_LEASE_ID, ownerId: BAILEYS_INSTANCE_ID });
+    } catch (_) {}
+}
+
+function agendarReconexaoWhatsapp(atraso = BAILEYS_RECONNECT_DELAY_MS) {
+    if (baileysReconnectTimer) return;
+    baileysReconnectTimer = setTimeout(() => {
+        baileysReconnectTimer = null;
+        startBot().catch(err => console.error('[WhatsApp] Falha na reconexão supervisionada:', err));
+    }, Math.max(500, Number(atraso) || BAILEYS_RECONNECT_DELAY_MS));
+    baileysReconnectTimer.unref?.();
+}
+
 async function startBot() {
+    if (baileysStartPromise) return baileysStartPromise;
+    baileysStartPromise = startBotInterno().finally(() => {
+        baileysStartPromise = null;
+    });
+    return baileysStartPromise;
+}
+
+async function startBotInterno() {
     try {
         await client.connect();
         const db = client.db('bot_whatsapp');
@@ -4130,6 +4264,15 @@ async function startBot() {
         crmLeadsColl = db.collection('crm_leads');
         ticketMessagesColl = db.collection('ticket_messages');
         baileysSentMessagesColl = db.collection('baileys_sent_messages');
+        waRuntimeLocksColl = db.collection('wa_runtime_locks');
+
+        const possuiLease = await adquirirLeaseBaileys();
+        if (!possuiLease) {
+            console.warn('[WhatsApp] Outra instância está usando a sessão. Este processo aguardará o lease expirar para conectar com segurança.');
+            agendarReconexaoWhatsapp(5000);
+            return;
+        }
+        iniciarRenovacaoLeaseBaileys();
 
         // Cria as opções atuais e o horário padrão somente se ainda não existirem.
         await garantirMenuPadrao();
@@ -4210,7 +4353,7 @@ async function startBot() {
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
         const { version } = await fetchLatestBaileysVersion();
 
-        const baileysLogger = P({ level: 'silent' });
+        const baileysLogger = P({ level: process.env.BAILEYS_LOG_LEVEL || 'warn' });
         const authStateSeguro = {
             creds: state.creds,
             keys: typeof makeCacheableSignalKeyStore === 'function'
@@ -4218,7 +4361,7 @@ async function startBot() {
                 : state.keys
         };
 
-        sock = makeWASocket({
+        const socketAtual = makeWASocket({
             version,
             auth: authStateSeguro,
             logger: baileysLogger,
@@ -4236,8 +4379,9 @@ async function startBot() {
             enableRecentMessageCache: true,
             getMessage: async (key) => obterMensagemEnviadaBaileys(key)
         });
+        sock = socketAtual;
 
-        sock.ev.on('creds.update', saveCreds);
+        socketAtual.ev.on('creds.update', saveCreds);
 
 async function processarMensagemUpsert(msg, upsertType = 'notify') {
     if (!msg?.message || msg.key?.remoteJid === 'status@broadcast') return;
@@ -5160,7 +5304,7 @@ ${menuTextoSeguranca}`
 // IMPORTANTE: messages.upsert pode trazer MAIS DE UMA mensagem no mesmo evento.
 // A versão anterior lia apenas messages[0], então uma mensagem válida podia ser
 // simplesmente descartada e o usuário só obtinha resposta quando digitava novamente.
-sock.ev.on('messages.upsert', (m = {}) => {
+socketAtual.ev.on('messages.upsert', (m = {}) => {
     const lote = Array.isArray(m.messages) ? m.messages : [];
     if (!lote.length) return;
 
@@ -5181,7 +5325,7 @@ sock.ev.on('messages.upsert', (m = {}) => {
 
         // Atualiza o cadastro quando o Baileys informar um novo mapeamento LID <-> número.
         // O fluxo principal não depende deste evento; ele é apenas uma camada extra de persistência.
-        sock.ev.on('lid-mapping.update', async ({ lid, pn }) => {
+        socketAtual.ev.on('lid-mapping.update', async ({ lid, pn }) => {
             try {
                 const lidNormalizado = normalizarJid(lid);
                 const pnNormalizado = normalizarJid(pn);
@@ -5263,30 +5407,43 @@ sock.ev.on('messages.upsert', (m = {}) => {
                 console.warn('[LID] Falha ao persistir mapeamento:', err?.message || err);
             }
         });
-        sock.ev.on('connection.update', async (update) => {
+        socketAtual.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             if (qr) { lastQr = qr; io.emit('qr', qr); }
             
+            // Eventos de um socket antigo são ignorados. Isso é essencial: um
+            // 'close' atrasado do socket anterior não pode criar outra conexão em paralelo.
+            if (sock !== socketAtual) return;
+
             if (connection === 'open') {
                 lastQr = null;
-                const userNumber = sock.user.id.split(':')[0];
+                whatsappConnectionOpenedAt = Date.now();
+                const userNumber = socketAtual.user.id.split(':')[0];
                 let ppUrl = null;
-                try { ppUrl = await sock.profilePictureUrl(sock.user.id, 'image'); } catch (e) { ppUrl = null; }
+                try { ppUrl = await socketAtual.profilePictureUrl(socketAtual.user.id, 'image'); } catch (e) { ppUrl = null; }
 
                 currentUser = { number: userNumber, name: 'Azevedo e Juvencio', pic: ppUrl };
                 io.emit('connected', currentUser);
+                console.log(`[WhatsApp] Socket único conectado pela instância ${BAILEYS_INSTANCE_ID}.`);
             }
                         
             if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-                if (shouldReconnect) startBot();
-                else { currentUser = null; io.emit('disconnected'); }
+                whatsappConnectionOpenedAt = 0;
+                const statusCode = (lastDisconnect?.error instanceof Boom)?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                if (shouldReconnect) {
+                    agendarReconexaoWhatsapp();
+                } else {
+                    currentUser = null;
+                    io.emit('disconnected');
+                    await liberarLeaseBaileys();
+                }
             }
         });
 
     } catch (err) { 
         console.error("Erro crítico:", err);
-        setTimeout(startBot, 5000);
+        agendarReconexaoWhatsapp(5000);
     }
 }
 
@@ -5294,11 +5451,9 @@ async function useMongoDBAuthState(collection) {
     // Chaves Signal precisam estar realmente persistidas antes de keys.set() resolver.
     // A versão anterior disparava replaceOne/deleteOne sem await, abrindo condição
     // de corrida nas próprias chaves usadas para criptografar as mensagens.
-    let filaEscrita = Promise.resolve();
-
     const enfileirarEscrita = (trabalho) => {
-        const operacao = filaEscrita.then(trabalho, trabalho);
-        filaEscrita = operacao.catch(() => {});
+        const operacao = baileysAuthWriteQueue.then(trabalho, trabalho);
+        baileysAuthWriteQueue = operacao.catch(() => {});
         return operacao;
     };
 
@@ -5313,7 +5468,7 @@ async function useMongoDBAuthState(collection) {
     };
 
     const readData = async (id) => {
-        await filaEscrita.catch(() => {});
+        await baileysAuthWriteQueue.catch(() => {});
         const data = await collection.findOne({ _id: id });
         return data ? JSON.parse(JSON.stringify(data), BufferJSON.reviver) : null;
     };
@@ -5447,6 +5602,14 @@ app.get('/logout-whatsapp', exigirPermissao('whatsapp'), async (req, res) => {
             }
         }
         await authColl.deleteMany({});
+        if (baileysSentMessagesColl) await baileysSentMessagesColl.deleteMany({});
+        await liberarLeaseBaileys();
+        outboundJidChains.clear();
+        baileysMsgRetryCounterCache.flushAll();
+        baileysSentMessageCache.clear();
+        baileysDeviceRefreshAt.clear();
+        lidPnRuntimeCache.clear();
+        whatsappConnectionOpenedAt = 0;
         currentUser = null; lastQr = null;
         io.emit('disconnected');
         res.sendStatus(200);
