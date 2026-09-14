@@ -1490,6 +1490,95 @@ function enviarBufferMidiaChat(req, res, buffer, mimeType, fileName, download = 
     return res.end(buffer);
 }
 
+function normalizarReplyToChat(replyTo = null) {
+    if (!replyTo || typeof replyTo !== 'object') return null;
+    const messageId = limitarTextoChat(replyTo.messageId || '', 180);
+    if (!messageId) return null;
+    return {
+        messageId,
+        direction: replyTo.direction === 'out' ? 'out' : 'in',
+        tipo: limitarTextoChat(replyTo.tipo || 'text', 30) || 'text',
+        texto: limitarTextoChat(replyTo.texto || '', 700),
+        fileName: replyTo.fileName ? limitarTextoChat(replyTo.fileName, 180) : null,
+        senderName: replyTo.senderName ? limitarTextoChat(replyTo.senderName, 160) : null
+    };
+}
+
+function contextoInfoMensagemChat(conteudo = {}) {
+    return conteudo.extendedTextMessage?.contextInfo ||
+        conteudo.imageMessage?.contextInfo ||
+        conteudo.videoMessage?.contextInfo ||
+        conteudo.audioMessage?.contextInfo ||
+        conteudo.documentMessage?.contextInfo ||
+        conteudo.stickerMessage?.contextInfo || null;
+}
+
+function resumoQuotedMessageChat(quotedMessage = {}) {
+    if (!quotedMessage || typeof quotedMessage !== 'object') return { tipo: 'text', texto: '' };
+    const texto = limitarTextoChat(
+        quotedMessage.conversation || quotedMessage.extendedTextMessage?.text ||
+        quotedMessage.imageMessage?.caption || quotedMessage.videoMessage?.caption ||
+        quotedMessage.documentMessage?.caption || '', 700
+    );
+    if (quotedMessage.imageMessage) return { tipo: 'image', texto, fileName: quotedMessage.imageMessage.fileName || 'Imagem' };
+    if (quotedMessage.videoMessage) return { tipo: 'video', texto, fileName: quotedMessage.videoMessage.fileName || 'Vídeo' };
+    if (quotedMessage.audioMessage) return { tipo: 'audio', texto, fileName: 'Áudio' };
+    if (quotedMessage.documentMessage) return { tipo: 'document', texto, fileName: quotedMessage.documentMessage.fileName || quotedMessage.documentMessage.title || 'Documento' };
+    if (quotedMessage.stickerMessage) return { tipo: 'sticker', texto, fileName: 'Figurinha' };
+    return { tipo: 'text', texto };
+}
+
+function extrairReplyToWhatsAppChat(msg) {
+    const conteudo = conteudoMensagemDesembrulhado(msg);
+    const contextInfo = contextoInfoMensagemChat(conteudo);
+    const messageId = limitarTextoChat(contextInfo?.stanzaId || '', 180);
+    if (!messageId) return null;
+    const resumo = resumoQuotedMessageChat(contextInfo?.quotedMessage || {});
+    return normalizarReplyToChat({
+        messageId,
+        direction: msg?.key?.fromMe ? 'in' : 'out',
+        ...resumo,
+        senderName: msg?.key?.fromMe ? 'Cliente' : 'Escritório'
+    });
+}
+
+function snapshotReplyToDocChat(doc = {}) {
+    if (!doc?.messageId) return null;
+    return normalizarReplyToChat({
+        messageId: doc.messageId,
+        direction: doc.direction,
+        tipo: doc.tipo,
+        texto: doc.texto || '',
+        fileName: doc.fileName || null,
+        senderName: doc.direction === 'in' ? 'Cliente' : (doc.senderName || (doc.source === 'bot' ? 'Assistente automático' : 'Escritório'))
+    });
+}
+
+async function prepararQuotedMessageChat(ticketNumber, jid, replyToMessageId) {
+    const id = limitarTextoChat(replyToMessageId || '', 180);
+    if (!id || !ticketMessagesColl) return { quoted: null, snapshot: null };
+    const original = await ticketMessagesColl.findOne({ ticketNumber: String(ticketNumber), messageId: id });
+    if (!original) {
+        const erro = new Error('A mensagem escolhida para resposta não está mais disponível no histórico.');
+        erro.statusCode = 409;
+        throw erro;
+    }
+
+    let quoted = null;
+    if (original.mediaRef) {
+        quoted = reconstruirMensagemMidiaChat(original.mediaRef, original.messageId, original.direction || 'in');
+        if (quoted?.key) quoted.key.remoteJid = jid;
+    }
+    if (!quoted) {
+        const texto = limitarTextoChat(original.texto || original.fileName || 'Mensagem', CHAT_MAX_TEXT_CHARS) || 'Mensagem';
+        quoted = {
+            key: { id: String(original.messageId), remoteJid: jid, fromMe: original.direction === 'out' },
+            message: { conversation: texto }
+        };
+    }
+    return { quoted, snapshot: snapshotReplyToDocChat(original) };
+}
+
 function serializarMensagemChat(doc = {}) {
     return {
         id: String(doc._id || `${doc.ticketNumber || ''}:${doc.messageId || ''}`),
@@ -1505,6 +1594,7 @@ function serializarMensagemChat(doc = {}) {
         hasMedia: !!doc.mediaRef || ['image', 'audio', 'video', 'document', 'sticker'].includes(doc.tipo),
         senderId: doc.senderId || null,
         senderName: doc.senderName || null,
+        replyTo: normalizarReplyToChat(doc.replyTo || null),
         createdAt: doc.createdAt instanceof Date ? doc.createdAt.getTime() : Number(doc.createdAt || Date.now())
     };
 }
@@ -1549,6 +1639,7 @@ async function registrarMensagemChat(documento = {}) {
         mediaRef: documento.mediaRef ? String(documento.mediaRef).slice(0, CHAT_MEDIA_REF_MAX_CHARS) : null,
         senderId: documento.senderId ? String(documento.senderId).slice(0, 120) : null,
         senderName: documento.senderName ? limitarTextoChat(documento.senderName, 180) : null,
+        replyTo: normalizarReplyToChat(documento.replyTo || null),
         createdAt: documento.createdAt instanceof Date ? documento.createdAt : new Date(Number(documento.createdAt || Date.now()))
     };
 
@@ -1559,6 +1650,7 @@ async function registrarMensagemChat(documento = {}) {
     if (!registro.mediaRef) delete registro.mediaRef;
     if (!registro.senderId) delete registro.senderId;
     if (!registro.senderName) delete registro.senderName;
+    if (!registro.replyTo) delete registro.replyTo;
 
     try {
         await ticketMessagesColl.insertOne(registro);
@@ -1597,7 +1689,8 @@ function dadosMensagemChatWhatsApp(msg) {
         fileName: media?.nomeArquivo || (tipo !== 'text' ? tipo : null),
         mimeType: media?.mimeType || null,
         fileSize: media?.tamanhoDeclarado || null,
-        mediaRef: tipo !== 'text' ? criarReferenciaMidiaChat(msg) : null
+        mediaRef: tipo !== 'text' ? criarReferenciaMidiaChat(msg) : null,
+        replyTo: extrairReplyToWhatsAppChat(msg)
     };
 }
 
@@ -7516,6 +7609,7 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
     try {
         const ticketNumber = String(req.params.ticketNumber || '').trim();
         const texto = limitarTextoChat(req.body?.text || '', CHAT_MAX_TEXT_CHARS);
+        const replyToMessageId = limitarTextoChat(req.body?.replyToMessageId || '', 180);
         if (!texto) return res.status(400).json({ erro: 'Digite uma mensagem para enviar.' });
 
         const advogado = identidadeAdvogadoSessao(req);
@@ -7532,12 +7626,13 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
         if (!jid) return res.status(409).json({ erro: 'Não foi possível identificar o WhatsApp deste ticket.' });
 
         const textoWhatsApp = `${assinaturaNegritoWhatsApp(advogado)}: ${texto}`;
+        const { quoted, snapshot: replyTo } = await prepararQuotedMessageChat(ticketNumber, jid, replyToMessageId);
         const jidNormalizadoPainel = normalizarJid(jid) || jid;
         panelPendingJids.add(jidNormalizadoPainel);
         setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 5000);
         let sent;
         try {
-            sent = await enviarMensagemBaileys(jid, { text: textoWhatsApp });
+            sent = await enviarMensagemBaileys(jid, { text: textoWhatsApp }, quoted ? { quoted } : {});
         } finally {
             setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 2500);
         }
@@ -7560,13 +7655,14 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
             texto,
             senderId: advogado.id,
             senderName: advogado.assinatura,
+            replyTo,
             createdAt: agora
         });
 
         res.status(201).json({ ok: true, message: registrada });
     } catch (err) {
         console.error('[Chat] Erro ao enviar mensagem:', err);
-        res.status(500).json({ erro: err?.message || 'Não foi possível enviar a mensagem.' });
+        res.status(Number(err?.statusCode || 500)).json({ erro: err?.message || 'Não foi possível enviar a mensagem.' });
     }
 });
 
@@ -7598,7 +7694,10 @@ app.post(
             const mimeInformado = limitarTextoChat(req.query.mimeType || 'application/octet-stream', 120).toLowerCase().split(';')[0].trim();
             const mimeType = (!mimeInformado || mimeInformado === 'application/octet-stream' ? mimePorExtensao(nomeArquivo) : mimeInformado) || 'application/octet-stream';
             const legenda = limitarTextoChat(req.query.caption || '', CHAT_MAX_CAPTION_CHARS);
+            const replyToMessageId = limitarTextoChat(req.query.replyToMessageId || '', 180);
+            const gravacaoVoz = String(req.query.voice || '') === '1';
             const captionAssinada = legenda ? `${assinaturaNegritoWhatsApp(advogado)}: ${legenda}` : `${assinaturaNegritoWhatsApp(advogado)}:`;
+            const { quoted, snapshot: replyTo } = await prepararQuotedMessageChat(ticketNumber, jid, replyToMessageId);
             const jidNormalizadoPainel = normalizarJid(jid) || jid;
             panelPendingJids.add(jidNormalizadoPainel);
             setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 5000);
@@ -7609,15 +7708,15 @@ app.post(
             } else if (mimeType.startsWith('video/')) {
                 tipo = 'video'; payload = { video: req.body, mimetype: mimeType, caption: captionAssinada };
             } else if (mimeType.startsWith('audio/')) {
-                tipo = 'audio'; payload = { audio: req.body, mimetype: mimeType, ptt: false };
+                tipo = 'audio'; payload = { audio: req.body, mimetype: mimeType, ptt: gravacaoVoz && /(?:audio\/(?:ogg|opus)|opus)/i.test(mimeType) };
             } else {
                 payload = { document: req.body, mimetype: mimeType, fileName: nomeArquivo, caption: captionAssinada };
             }
 
             // Áudio não aceita legenda no WhatsApp. Envia a identificação em uma
             // mensagem curta imediatamente antes, sem salvar binário no MongoDB.
-            if (tipo === 'audio') {
-                const intro = await enviarMensagemBaileys(jid, { text: legenda ? `${assinaturaNegritoWhatsApp(advogado)}: ${legenda}` : `${assinaturaNegritoWhatsApp(advogado)}:` });
+            if (tipo === 'audio' && !gravacaoVoz) {
+                const intro = await enviarMensagemBaileys(jid, { text: legenda ? `${assinaturaNegritoWhatsApp(advogado)}: ${legenda}` : `${assinaturaNegritoWhatsApp(advogado)}:` }, quoted ? { quoted } : {});
                 if (intro?.key?.id) {
                     panelMessageIds.add(intro.key.id);
                     setTimeout(() => panelMessageIds.delete(intro.key.id), 2 * 60 * 1000);
@@ -7630,7 +7729,7 @@ app.post(
 
             let sent;
             try {
-                sent = await enviarMensagemBaileys(jid, payload);
+                sent = await enviarMensagemBaileys(jid, payload, quoted ? { quoted } : {});
             } finally {
                 setTimeout(() => panelPendingJids.delete(jidNormalizadoPainel), 2500);
             }
@@ -7657,6 +7756,7 @@ app.post(
                 mediaRef: mediaRefEnviada,
                 senderId: advogado.id,
                 senderName: advogado.assinatura,
+                replyTo,
                 createdAt: agora
             });
 
@@ -8826,4 +8926,4 @@ setInterval(async () => {
     }
 }, 60 * 60 * 1000);
 
-server.listen(port, () => startBot());
+server.listen(port, () => startBot());  

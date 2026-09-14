@@ -2666,6 +2666,65 @@
         }
     </style>
 
+
+    <style id="chat-audio-reply-v6">
+        .chat-message-row { position:relative; }
+        .chat-bubble { position:relative; }
+        .chat-reply-action {
+            position:absolute; top:4px; width:30px; height:30px; z-index:4;
+            display:inline-flex; align-items:center; justify-content:center;
+            color:#687780; background:rgba(255,255,255,.92); border:1px solid rgba(120,135,145,.20);
+            border-radius:50%; box-shadow:0 2px 8px rgba(20,27,38,.08); opacity:0; transform:scale(.92);
+            transition:opacity .12s ease, transform .12s ease, background .12s ease;
+        }
+        .chat-message-row.in .chat-reply-action { right:-38px; }
+        .chat-message-row.out .chat-reply-action { left:-38px; }
+        .chat-message-row:hover .chat-reply-action, .chat-reply-action:focus-visible { opacity:1; transform:scale(1); }
+        .chat-reply-action:hover { color:#00a884; background:#fff; }
+        .chat-quoted {
+            margin:0 0 6px; padding:7px 9px; min-width:150px; max-width:100%; overflow:hidden;
+            color:#59656d; background:rgba(255,255,255,.60); border-left:3px solid #00a884; border-radius:7px;
+            cursor:pointer;
+        }
+        .chat-message-row.in .chat-quoted { background:#f1f4f5; }
+        .chat-quoted-name { margin-bottom:2px; color:#008069; font-size:.68rem; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .chat-quoted-text { font-size:.72rem; line-height:1.28; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .chat-reply-highlight .chat-bubble { animation:chatReplyHighlight 1.25s ease; }
+        @keyframes chatReplyHighlight { 0%,100%{box-shadow:0 1px 2px rgba(20,27,38,.05)} 35%{box-shadow:0 0 0 3px rgba(0,168,132,.23)} }
+        .chat-reply-compose {
+            grid-column:1 / -1; margin:0 0 -3px; min-height:46px; padding:7px 9px 7px 11px;
+            display:flex; align-items:center; gap:9px; color:#4d5961; background:#f7f9f9;
+            border-left:4px solid #00a884; border-radius:8px;
+        }
+        .chat-reply-compose-copy { min-width:0; flex:1; }
+        .chat-reply-compose-name { color:#008069; font-size:.68rem; font-weight:800; }
+        .chat-reply-compose-text { margin-top:1px; font-size:.72rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .chat-reply-compose-close { width:28px; height:28px; flex:0 0 28px; display:inline-flex; align-items:center; justify-content:center; color:#667781; background:transparent; border:0; border-radius:50%; }
+        .chat-reply-compose-close:hover { background:#e8eded; }
+        .chat-record-btn { width:45px; height:45px; flex:0 0 45px; display:inline-flex; align-items:center; justify-content:center; color:#667781; background:transparent; border:0; border-radius:50%; font-size:1.05rem; }
+        .chat-record-btn:hover:not(:disabled) { color:#00a884; background:#e7efed; }
+        .chat-record-btn.recording { color:#fff; background:#e34d59; animation:chatMicPulse 1.35s ease-in-out infinite; }
+        @keyframes chatMicPulse { 50% { box-shadow:0 0 0 7px rgba(227,77,89,.12); } }
+        .chat-recording-bar { position:absolute; inset:5px 6px; z-index:12; display:flex; align-items:center; gap:10px; padding:0 10px; background:#fff; border-radius:9px; }
+        .chat-recording-dot { width:8px; height:8px; border-radius:50%; background:#e34d59; animation:chatRecordingDot 1s ease-in-out infinite; }
+        @keyframes chatRecordingDot { 50% { opacity:.28; } }
+        .chat-recording-time { min-width:46px; color:#4b565e; font-size:.79rem; font-variant-numeric:tabular-nums; font-weight:700; }
+        .chat-recording-label { flex:1; color:#78858d; font-size:.72rem; }
+        .chat-recording-cancel { color:#bd3f49; background:transparent; border:0; font-size:.74rem; font-weight:750; }
+        .chat-recording-send { width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center; color:#fff; background:#00a884; border:0; border-radius:50%; }
+        @media (hover:none) {
+            .chat-reply-action { opacity:.72; transform:scale(.94); }
+            .chat-message-row.in .chat-reply-action { right:-32px; }
+            .chat-message-row.out .chat-reply-action { left:-32px; }
+        }
+        @media (max-width:767.98px) {
+            .chat-reply-action { width:27px; height:27px; font-size:.82rem; }
+            .chat-message-row.in .chat-reply-action { right:-28px; }
+            .chat-message-row.out .chat-reply-action { left:-28px; }
+            .chat-recording-label { display:none; }
+        }
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -3334,6 +3393,11 @@
 
             <form class="ticket-chat-composer" id="ticket-chat-composer" onsubmit="enviarMensagemChat(event)">
                 <input type="file" id="ticket-chat-file" class="hidden" onchange="enviarArquivoChat(this)" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv">
+                <div id="ticket-chat-reply-preview" class="chat-reply-compose hidden">
+                    <i class="bi bi-reply-fill"></i>
+                    <div class="chat-reply-compose-copy"><div class="chat-reply-compose-name" id="ticket-chat-reply-name">Respondendo</div><div class="chat-reply-compose-text" id="ticket-chat-reply-text"></div></div>
+                    <button type="button" class="chat-reply-compose-close" onclick="cancelarRespostaChat()" title="Cancelar resposta"><i class="bi bi-x-lg"></i></button>
+                </div>
                 <div class="chat-compose-tools">
                     <button type="button" class="chat-emoji-btn" id="ticket-chat-emoji" onclick="toggleEmojiPickerChat(event)" title="Emojis" aria-label="Inserir emoji"><i class="bi bi-emoji-smile"></i></button>
                     <button type="button" class="chat-attach-btn" id="ticket-chat-attach" onclick="document.getElementById('ticket-chat-file').click()" title="Enviar arquivo (máx. 15 MB)"><i class="bi bi-paperclip"></i></button>
@@ -3341,9 +3405,11 @@
                 <div class="chat-input-wrap">
                     <div id="ticket-chat-emoji-picker" class="chat-emoji-picker hidden" aria-label="Seletor de emojis"></div>
                     <div id="chat-quick-suggestions" class="chat-quick-suggestions hidden" role="listbox" aria-label="Textos rápidos"></div>
+                    <div id="chat-recording-bar" class="chat-recording-bar hidden"><span class="chat-recording-dot"></span><span class="chat-recording-time" id="chat-recording-time">00:00</span><span class="chat-recording-label">Gravando áudio…</span><button type="button" class="chat-recording-cancel" onclick="cancelarGravacaoChat()">Cancelar</button><button type="button" class="chat-recording-send" onclick="finalizarGravacaoChat(true)" title="Enviar áudio"><i class="bi bi-send-fill"></i></button></div>
                     <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem, use /atalho ou cole uma imagem" onkeydown="atalhoEnviarChat(event)"></textarea>
                     <div class="chat-paste-hint"><i class="bi bi-lightning-charge"></i> /atalho para texto rápido · Ctrl+V para colar</div>
                 </div>
+                <button type="button" class="chat-record-btn" id="ticket-chat-record" onclick="toggleGravacaoChat()" title="Gravar áudio"><i class="bi bi-mic-fill"></i></button>
                 <button type="submit" class="chat-send-btn" id="ticket-chat-send" title="Enviar"><i class="bi bi-send-fill"></i> Enviar</button>
                 <div class="chat-compose-status" id="ticket-chat-status"></div>
             </form>
@@ -7115,6 +7181,14 @@ function renderizarLista(itens) {
             sender.textContent = msg.direction === 'in' ? 'Cliente' : (msg.senderName || (msg.source === 'bot' ? 'Assistente automático' : 'Escritório'));
             bubble.appendChild(sender);
 
+            if (msg.replyTo?.messageId) {
+                const quoted=document.createElement('div'); quoted.className='chat-quoted'; quoted.title='Ir para a mensagem respondida';
+                quoted.onclick=()=>irParaMensagemRespondidaChat(msg.replyTo.messageId);
+                const qn=document.createElement('div'); qn.className='chat-quoted-name'; qn.textContent=msg.replyTo.senderName || (msg.replyTo.direction==='in'?'Cliente':'Escritório');
+                const qt=document.createElement('div'); qt.className='chat-quoted-text'; qt.textContent=resumoMensagemParaRespostaChat(msg.replyTo);
+                quoted.append(qn,qt); bubble.appendChild(quoted);
+            }
+
             if (msg.tipo && msg.tipo !== 'text') {
                 const mediaUrl = msg.localPreviewUrl || (msg.hasMedia ? urlMidiaChat(msg, false) : '');
                 const downloadUrl = msg.hasMedia ? urlMidiaChat(msg, true) : '';
@@ -7144,6 +7218,11 @@ function renderizarLista(itens) {
             if (msg.texto) { const t=document.createElement('div'); t.className='chat-text'; t.textContent=msg.texto; bubble.appendChild(t); }
             const time=document.createElement('div'); time.className='chat-time'; time.textContent=formatarHoraChat(msg.createdAt); bubble.appendChild(time);
             if (msg.pending || msg.failed) { const p=document.createElement('div'); p.className='chat-pending-label'; p.textContent=msg.failed ? 'Falha no envio' : 'Enviando…'; bubble.appendChild(p); }
+            if (!msg.pending && !msg.failed && (msg.messageId || msg.id)) {
+                const replyBtn=document.createElement('button'); replyBtn.type='button'; replyBtn.className='chat-reply-action'; replyBtn.title='Responder'; replyBtn.setAttribute('aria-label','Responder mensagem'); replyBtn.innerHTML='<i class="bi bi-reply-fill"></i>';
+                replyBtn.onclick=(event)=>{event.stopPropagation();selecionarRespostaChat(msg);}; bubble.appendChild(replyBtn);
+                row.addEventListener('contextmenu',event=>{ if(event.target.closest('a,button,audio,video')) return; event.preventDefault(); selecionarRespostaChat(msg); });
+            }
             row.appendChild(bubble); return row;
         }
         function adicionarMensagemChatNaTela(msg, rolar=false, prepend=false) {
@@ -7169,7 +7248,7 @@ function renderizarLista(itens) {
             row.classList.remove('pending'); row.classList.add('failed');
             const label=row.querySelector('.chat-pending-label'); if(label) label.textContent='Falha no envio';
         }
-        function mensagemOtimistaChat({texto='',tipo='text',file=null,localPreviewUrl=null}) {
+        function mensagemOtimistaChat({texto='',tipo='text',file=null,localPreviewUrl=null,replyTo=null}) {
             const pendingId=`pending_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
             return {
                 id:pendingId, messageId:pendingId,
@@ -7177,6 +7256,7 @@ function renderizarLista(itens) {
                 direction:'out', source:'painel', tipo, texto,
                 fileName:file?.name||null, mimeType:file?.type||null, fileSize:file?.size||null,
                 senderName:window.panelSessionUser?.assinatura||window.panelSessionUser?.nome||'Escritório',
+                replyTo: replyTo ? {...replyTo} : null,
                 createdAt:Date.now(), pending:true, localPreviewUrl
             };
         }
@@ -7302,7 +7382,7 @@ function renderizarLista(itens) {
             }
             if(!ownerId) fecharTransferenciaChat();
 
-            ['ticket-chat-input','ticket-chat-attach','ticket-chat-send','ticket-chat-emoji'].forEach(id=>{
+            ['ticket-chat-input','ticket-chat-attach','ticket-chat-send','ticket-chat-emoji','ticket-chat-record'].forEach(id=>{
                 const el=document.getElementById(id); if(el) el.disabled=!ehMeu;
             });
             const file=document.getElementById('ticket-chat-file'); if(file) file.disabled=!ehMeu;
@@ -7409,6 +7489,7 @@ function renderizarLista(itens) {
         }
 
         async function abrirChatTicket(ticketNumber, triggerButton = null) {
+            cancelarRespostaChat(); cancelarGravacaoChat();
             if(!temPermissaoPainel('chat') || !ticketNumber) return;
             const originalButtonHtml = triggerButton?.innerHTML || '';
             const dialog=document.getElementById('ticket-chat-dialog');
@@ -7469,6 +7550,98 @@ function renderizarLista(itens) {
                 }
             } catch(err) { document.getElementById('ticket-chat-status').textContent=err.message; }
         }
+        function resumoMensagemParaRespostaChat(msg = {}) {
+            const texto=String(msg.texto||'').trim().replace(/\s+/g,' ');
+            if(texto) return texto.slice(0,150);
+            const nomes={image:'📷 Imagem',audio:'🎤 Áudio',video:'🎥 Vídeo',document:'📄 Documento',sticker:'Figurinha'};
+            return msg.fileName || nomes[msg.tipo] || 'Mensagem';
+        }
+        function selecionarRespostaChat(msg) {
+            if(!msg || msg.pending || msg.failed || !(msg.messageId||msg.id)) return;
+            window.activeChatReply={
+                messageId:String(msg.messageId||msg.id), direction:msg.direction||'in', tipo:msg.tipo||'text',
+                texto:String(msg.texto||'').slice(0,700), fileName:msg.fileName||null,
+                senderName:msg.direction==='in'?'Cliente':(msg.senderName||(msg.source==='bot'?'Assistente automático':'Escritório'))
+            };
+            const preview=document.getElementById('ticket-chat-reply-preview');
+            const name=document.getElementById('ticket-chat-reply-name');
+            const text=document.getElementById('ticket-chat-reply-text');
+            if(name) name.textContent=`Respondendo a ${window.activeChatReply.senderName}`;
+            if(text) text.textContent=resumoMensagemParaRespostaChat(window.activeChatReply);
+            preview?.classList.remove('hidden');
+            document.getElementById('ticket-chat-input')?.focus();
+        }
+        function cancelarRespostaChat() {
+            window.activeChatReply=null;
+            document.getElementById('ticket-chat-reply-preview')?.classList.add('hidden');
+        }
+        function irParaMensagemRespondidaChat(messageId) {
+            const history=document.getElementById('ticket-chat-history');
+            const row=history?.querySelector(`[data-message-id="${CSS.escape(String(messageId||''))}"]`);
+            if(!row) return;
+            row.scrollIntoView({behavior:'smooth',block:'center'});
+            row.classList.remove('chat-reply-highlight'); void row.offsetWidth; row.classList.add('chat-reply-highlight');
+            setTimeout(()=>row.classList.remove('chat-reply-highlight'),1400);
+        }
+
+        function melhorMimeGravacaoChat() {
+            const candidatos=['audio/ogg;codecs=opus','audio/webm;codecs=opus','audio/webm','audio/mp4'];
+            return candidatos.find(tipo=>window.MediaRecorder?.isTypeSupported?.(tipo)) || '';
+        }
+        function atualizarTempoGravacaoChat() {
+            const alvo=document.getElementById('chat-recording-time'); if(!alvo)return;
+            const segundos=Math.max(0,Math.floor((Date.now()-Number(window.chatRecordingStartedAt||Date.now()))/1000));
+            alvo.textContent=`${String(Math.floor(segundos/60)).padStart(2,'0')}:${String(segundos%60).padStart(2,'0')}`;
+            if(segundos>=300) finalizarGravacaoChat(true);
+        }
+        async function toggleGravacaoChat() {
+            if(window.chatMediaRecorder && window.chatMediaRecorder.state==='recording'){ finalizarGravacaoChat(true); return; }
+            const status=document.getElementById('ticket-chat-status');
+            if(window.activeChatCanSend!==true){if(status)status.textContent='Inicie ou assuma o atendimento antes de gravar áudio.';return;}
+            if(!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder){if(status)status.textContent='Este navegador não oferece gravação de áudio pelo chat.';return;}
+            try{
+                const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+                const mime=melhorMimeGravacaoChat();
+                const recorder=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream);
+                window.chatMediaStream=stream; window.chatMediaRecorder=recorder; window.chatAudioChunks=[]; window.chatRecordingStartedAt=Date.now();
+                recorder.ondataavailable=e=>{if(e.data?.size)window.chatAudioChunks.push(e.data);};
+                recorder.onstop=()=>{stream.getTracks().forEach(t=>t.stop());window.chatMediaStream=null;};
+                recorder.start(250);
+                document.getElementById('chat-recording-bar')?.classList.remove('hidden');
+                document.getElementById('ticket-chat-record')?.classList.add('recording');
+                const input=document.getElementById('ticket-chat-input'); if(input)input.disabled=true;
+                window.chatRecordingTimer=setInterval(atualizarTempoGravacaoChat,500); atualizarTempoGravacaoChat();
+                if(status)status.textContent='';
+            }catch(err){if(status)status.textContent=err?.name==='NotAllowedError'?'Permita o acesso ao microfone para gravar áudio.':'Não foi possível iniciar o microfone.';}
+        }
+        function limparEstadoGravacaoChat() {
+            clearInterval(window.chatRecordingTimer); window.chatRecordingTimer=null;
+            document.getElementById('chat-recording-bar')?.classList.add('hidden');
+            document.getElementById('ticket-chat-record')?.classList.remove('recording');
+            const input=document.getElementById('ticket-chat-input'); if(input)input.disabled=window.activeChatCanSend!==true;
+        }
+        function cancelarGravacaoChat() {
+            if(window.chatMediaRecorder?.state==='recording'){
+                window.chatAudioDiscard=true; window.chatMediaRecorder.stop();
+            }
+            window.chatMediaStream?.getTracks?.().forEach(t=>t.stop());
+            window.chatAudioChunks=[]; limparEstadoGravacaoChat();
+        }
+        function finalizarGravacaoChat(enviar=true) {
+            const recorder=window.chatMediaRecorder; if(!recorder || recorder.state!=='recording')return;
+            window.chatAudioDiscard=!enviar;
+            const mime=recorder.mimeType||melhorMimeGravacaoChat()||'audio/webm';
+            recorder.addEventListener('stop',()=>{
+                const chunks=window.chatAudioChunks||[]; window.chatAudioChunks=[]; limparEstadoGravacaoChat();
+                if(window.chatAudioDiscard||!chunks.length){window.chatAudioDiscard=false;return;}
+                const blob=new Blob(chunks,{type:mime});
+                const ext=mime.includes('mp4')?'m4a':mime.includes('ogg')?'ogg':'webm';
+                let file; try{file=new File([blob],`audio-${Date.now()}.${ext}`,{type:mime,lastModified:Date.now()});}catch(_){file=blob;file.name=`audio-${Date.now()}.${ext}`;}
+                enviarArquivoChatFile(file,{usarLegenda:false,voice:true});
+            },{once:true});
+            recorder.stop();
+        }
+
         function atalhoEnviarChat(event) {
             const box=document.getElementById('chat-quick-suggestions');
             const aberto=box && !box.classList.contains('hidden');
@@ -7493,12 +7666,13 @@ function renderizarLista(itens) {
                 return;
             }
 
-            const otimista=mensagemOtimistaChat({texto,tipo:'text'});
-            input.value=''; esconderSugestoesTextosRapidos(); ajustarAlturaComposerChat(); adicionarMensagemChatNaTela(otimista,true);if(status)status.textContent='';input?.focus();
+            const replyTo=window.activeChatReply?{...window.activeChatReply}:null;
+            const otimista=mensagemOtimistaChat({texto,tipo:'text',replyTo});
+            input.value=''; cancelarRespostaChat(); esconderSugestoesTextosRapidos(); ajustarAlturaComposerChat(); adicionarMensagemChatNaTela(otimista,true);if(status)status.textContent='';input?.focus();
 
             window.chatSendQueue=window.chatSendQueue.then(async()=>{
                 try{
-                    const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:texto})});
+                    const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:texto,replyToMessageId:replyTo?.messageId||null})});
                     const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível enviar.');
                     removerMensagemChatDaTela(otimista.messageId);if(data.message)adicionarMensagemChatNaTela(data.message,true);
                 }catch(err){marcarMensagemChatFalhou(otimista.messageId);if(status)status.textContent=err.message||'Falha no envio.';}
@@ -7510,7 +7684,7 @@ function renderizarLista(itens) {
             if(inputFile) inputFile.value='';
         }
 
-        async function enviarArquivoChatFile(file, { usarLegenda = true } = {}) {
+        async function enviarArquivoChatFile(file, { usarLegenda = true, voice = false } = {}) {
             const ticket=window.activeChatTicketNumber;if(!file||!ticket)return;
             const status=document.getElementById('ticket-chat-status');
             if(window.activeChatCanSend!==true){if(status){status.classList.add('access-lock');status.dataset.accessLock='1';status.textContent='Inicie o atendimento ou transfira-o para você antes de enviar arquivos.';}return;}
@@ -7518,12 +7692,13 @@ function renderizarLista(itens) {
             const input=document.getElementById('ticket-chat-input');const caption=usarLegenda?String(input?.value||'').trim().slice(0,2000):'';
             const mime=inferirMimeArquivoChat(file);const tipo=mime.startsWith('image/')?'image':mime.startsWith('video/')?'video':mime.startsWith('audio/')?'audio':'document';
             const localPreviewUrl=['image','video','audio'].includes(tipo)?URL.createObjectURL(file):null;
-            const otimista=mensagemOtimistaChat({texto:tipo==='audio'?'':caption,tipo,file,localPreviewUrl});
-            adicionarMensagemChatNaTela(otimista,true);if(caption&&input)input.value='';if(status)status.textContent='';input?.focus();
+            const replyTo=window.activeChatReply?{...window.activeChatReply}:null;
+            const otimista=mensagemOtimistaChat({texto:tipo==='audio'?'':caption,tipo,file,localPreviewUrl,replyTo});
+            cancelarRespostaChat(); adicionarMensagemChatNaTela(otimista,true);if(caption&&input)input.value='';if(status)status.textContent='';input?.focus();
 
             window.chatSendQueue=window.chatSendQueue.then(async()=>{
                 try{
-                    const q=new URLSearchParams({name:file.name||`arquivo-${Date.now()}`,mimeType:mime});if(caption)q.set('caption',caption);
+                    const q=new URLSearchParams({name:file.name||`arquivo-${Date.now()}`,mimeType:mime});if(caption)q.set('caption',caption);if(replyTo?.messageId)q.set('replyToMessageId',replyTo.messageId);if(voice)q.set('voice','1');
                     const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/files?${q.toString()}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});
                     const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível enviar o arquivo.');
                     removerMensagemChatDaTela(otimista.messageId);if(data.message)adicionarMensagemChatNaTela(data.message,true);
