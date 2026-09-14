@@ -2558,6 +2558,114 @@
         }
     </style>
 
+
+    <style id="chat-performance-quick-texts-v5">
+        /* Performance do histórico: reduz repaint durante rolagem e evita recriar mídia fora da viewport. */
+        #ticket-chat-history {
+            background-image: none !important;
+            background-color: #efeae2 !important;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
+            -webkit-overflow-scrolling: touch;
+            contain: layout paint style;
+        }
+        .chat-message-row {
+            content-visibility: auto;
+            contain: layout paint style;
+            contain-intrinsic-size: 72px;
+        }
+        .chat-bubble { box-shadow: 0 1px 1px rgba(11,20,26,.08) !important; }
+        .chat-media-preview img { transform: translateZ(0); }
+        .chat-ai-summary { contain: content; }
+
+        /* Menu do usuário */
+        .panel-user-menu-wrap { position: relative; }
+        .panel-user-chip-button { appearance:none; cursor:pointer; text-align:left; }
+        .panel-user-chevron { margin-left:2px; color:#8a939f; font-size:.65rem; transition:transform .16s ease; }
+        .panel-user-chip-button[aria-expanded="true"] .panel-user-chevron { transform:rotate(180deg); }
+        .panel-user-menu {
+            position:absolute; z-index:1250; top:calc(100% + 8px); right:0; width:260px;
+            padding:6px; background:#fff; border:1px solid var(--border); border-radius:12px;
+            box-shadow:0 18px 48px rgba(17,22,30,.18);
+        }
+        .panel-user-menu-item {
+            width:100%; padding:10px; display:flex; align-items:center; gap:10px; text-align:left;
+            color:#3c4651; background:#fff; border:0; border-radius:9px;
+        }
+        .panel-user-menu-item:hover { background:#f5f7f8; }
+        .panel-user-menu-item > i {
+            width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center;
+            color:#806326; background:#fff7df; border-radius:9px; font-size:.95rem;
+        }
+        .panel-user-menu-item span { display:flex; flex-direction:column; min-width:0; }
+        .panel-user-menu-item strong { color:#303842; font-size:.78rem; }
+        .panel-user-menu-item small { margin-top:2px; color:#8a939f; font-size:.66rem; }
+
+        /* Textos rápidos */
+        #quick-texts-dialog {
+            width:min(820px,calc(100vw - 24px)); max-height:min(90vh,900px); padding:0; overflow:hidden;
+            color:var(--text); background:#fff; border:1px solid var(--border); border-radius:18px;
+            box-shadow:0 30px 90px rgba(17,22,30,.28);
+        }
+        #quick-texts-dialog::backdrop { background:rgba(17,22,30,.54); }
+        .quick-texts-shell { min-height:0; display:flex; flex-direction:column; }
+        .quick-texts-header {
+            padding:17px 19px; display:flex; align-items:flex-start; justify-content:space-between; gap:14px;
+            border-bottom:1px solid var(--border); background:#fbfcfc;
+        }
+        .quick-texts-title { margin:0; color:var(--adv-blue); font-size:1.02rem; font-weight:800; }
+        .quick-texts-subtitle { margin-top:3px; color:var(--text-muted); font-size:.74rem; }
+        .quick-texts-body { max-height:calc(90vh - 72px); padding:18px; overflow-y:auto; }
+        .quick-text-form { padding:16px; background:#f8faf9; border:1px solid #e2e8e4; border-radius:13px; }
+        .quick-text-form-grid { display:grid; grid-template-columns:minmax(0,.65fr) minmax(0,1fr); gap:12px; }
+        .quick-text-form .input-group-text { min-height:46px; color:#6d786f; background:#eef2ef; border-color:var(--border-strong); }
+        .quick-text-form-footer { margin-top:12px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+        .quick-text-status { min-height:18px; color:var(--text-muted); font-size:.72rem; font-weight:650; }
+        .quick-text-list-head { margin:18px 2px 9px; display:flex; justify-content:space-between; align-items:end; gap:12px; }
+        .quick-text-list-head > div { display:flex; align-items:center; gap:8px; color:#38423d; font-size:.80rem; }
+        .quick-text-list-head span { min-width:22px; padding:2px 6px; text-align:center; color:#6f5a26; background:#fff6dc; border-radius:999px; font-size:.64rem; font-weight:800; }
+        .quick-text-list-head small { color:var(--text-muted); font-size:.66rem; }
+        .quick-text-list { display:flex; flex-direction:column; gap:8px; }
+        .quick-text-card { padding:12px 13px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:start; background:#fff; border:1px solid #e2e7e4; border-radius:11px; }
+        .quick-text-card-main { min-width:0; }
+        .quick-text-shortcut { display:inline-flex; align-items:center; padding:4px 7px; color:#176b56; background:#edf8f4; border:1px solid #cde9df; border-radius:7px; font-size:.70rem; font-weight:800; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+        .quick-text-card-title { margin-left:7px; color:#35413b; font-size:.76rem; font-weight:760; }
+        .quick-text-preview { margin-top:7px; color:#69736e; font-size:.72rem; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+        .quick-text-card-actions { display:flex; gap:5px; }
+        .quick-text-card-actions button { width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; color:#65706a; background:#f7f8f8; border:1px solid #e1e6e3; border-radius:8px; }
+        .quick-text-card-actions button:hover { color:var(--adv-blue); background:#eef1f0; }
+        .quick-text-card-actions button.delete:hover { color:#b42318; background:#fff3f2; border-color:#f0d2cf; }
+        .quick-text-empty { padding:30px 16px; color:#8a958f; text-align:center; background:#fafbfb; border:1px dashed #d9e0dc; border-radius:11px; font-size:.75rem; }
+
+        /* Sugestões no composer */
+        .chat-quick-suggestions {
+            position:absolute; z-index:31; left:0; right:0; bottom:calc(100% + 7px); max-height:260px; overflow-y:auto;
+            padding:5px; background:#fff; border:1px solid #d9e0dc; border-radius:11px; box-shadow:0 14px 36px rgba(17,27,33,.18);
+        }
+        .chat-quick-suggestion {
+            width:100%; padding:9px 10px; display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px; align-items:start;
+            text-align:left; color:#35413b; background:#fff; border:0; border-radius:8px;
+        }
+        .chat-quick-suggestion:hover,.chat-quick-suggestion.active { background:#f1f6f4; }
+        .chat-quick-suggestion-code { padding:3px 6px; color:#176b56; background:#e9f6f1; border-radius:6px; font-size:.68rem; font-weight:800; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+        .chat-quick-suggestion-copy { min-width:0; }
+        .chat-quick-suggestion-title { color:#34413b; font-size:.72rem; font-weight:760; }
+        .chat-quick-suggestion-preview { margin-top:2px; color:#819088; font-size:.66rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .chat-compose-input { overflow-y:auto; }
+
+        @media (max-width:767.98px) {
+            .panel-user-menu { position:fixed; top:68px; right:10px; width:min(280px,calc(100vw - 20px)); }
+            #quick-texts-dialog { width:100vw; max-width:100vw; height:100dvh; max-height:100dvh; border:0; border-radius:0; }
+            .quick-texts-body { max-height:calc(100dvh - 70px); padding:13px; }
+            .quick-text-form-grid { grid-template-columns:1fr; }
+            .quick-text-form-footer,.quick-text-list-head { align-items:stretch; flex-direction:column; }
+            .quick-text-form-footer .d-flex { width:100%; }
+            .quick-text-form-footer .btn { flex:1; }
+            .chat-quick-suggestions { left:-40px; right:-50px; max-height:220px; }
+            .chat-message-row { contain-intrinsic-size: 62px; }
+        }
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -2634,12 +2742,21 @@
                             </div>
                         </div>
                     </div>
-                    <div class="panel-user-chip" id="panel-user-chip" title="Usuário conectado">
-                        <span class="panel-user-avatar"><i class="bi bi-person"></i></span>
-                        <span class="panel-user-copy">
-                            <strong class="panel-user-name" id="panel-user-name">Carregando...</strong>
-                            <span class="panel-user-role" id="panel-user-role">Sessão</span>
-                        </span>
+                    <div class="panel-user-menu-wrap">
+                        <button type="button" class="panel-user-chip panel-user-chip-button" id="panel-user-chip" title="Opções do usuário" aria-expanded="false" onclick="togglePanelUserMenu(event)">
+                            <span class="panel-user-avatar"><i class="bi bi-person"></i></span>
+                            <span class="panel-user-copy">
+                                <strong class="panel-user-name" id="panel-user-name">Carregando...</strong>
+                                <span class="panel-user-role" id="panel-user-role">Sessão</span>
+                            </span>
+                            <i class="bi bi-chevron-down panel-user-chevron"></i>
+                        </button>
+                        <div class="panel-user-menu hidden" id="panel-user-menu">
+                            <button type="button" class="panel-user-menu-item" onclick="abrirTextosRapidos()">
+                                <i class="bi bi-lightning-charge"></i>
+                                <span><strong>Meus textos rápidos</strong><small>Atalhos pessoais como /daniel</small></span>
+                            </button>
+                        </div>
                     </div>
                     <a class="topbar-logout" href="/logout-panel" title="Sair do painel"><i class="bi bi-box-arrow-right"></i><span>Sair</span></a>
                 </div>
@@ -3223,12 +3340,60 @@
                 </div>
                 <div class="chat-input-wrap">
                     <div id="ticket-chat-emoji-picker" class="chat-emoji-picker hidden" aria-label="Seletor de emojis"></div>
-                    <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem ou cole uma imagem com Ctrl+V" onkeydown="atalhoEnviarChat(event)"></textarea>
-                    <div class="chat-paste-hint"><i class="bi bi-clipboard"></i> Cole texto ou imagens diretamente aqui</div>
+                    <div id="chat-quick-suggestions" class="chat-quick-suggestions hidden" role="listbox" aria-label="Textos rápidos"></div>
+                    <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem, use /atalho ou cole uma imagem" onkeydown="atalhoEnviarChat(event)"></textarea>
+                    <div class="chat-paste-hint"><i class="bi bi-lightning-charge"></i> /atalho para texto rápido · Ctrl+V para colar</div>
                 </div>
                 <button type="submit" class="chat-send-btn" id="ticket-chat-send" title="Enviar"><i class="bi bi-send-fill"></i> Enviar</button>
                 <div class="chat-compose-status" id="ticket-chat-status"></div>
             </form>
+        </div>
+    </dialog>
+
+    <dialog id="quick-texts-dialog">
+        <div class="quick-texts-shell">
+            <div class="quick-texts-header">
+                <div>
+                    <h5 class="quick-texts-title"><i class="bi bi-lightning-charge me-1"></i> Meus textos rápidos</h5>
+                    <div class="quick-texts-subtitle">Crie respostas pessoais e use no chat digitando /atalho.</div>
+                </div>
+                <button type="button" class="ticket-chat-close" onclick="fecharTextosRapidos()" aria-label="Fechar"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <div class="quick-texts-body">
+                <form id="quick-text-form" class="quick-text-form" onsubmit="salvarTextoRapido(event)">
+                    <input type="hidden" id="quick-text-id">
+                    <div class="quick-text-form-grid">
+                        <div>
+                            <label class="form-label small fw-bold">Atalho *</label>
+                            <div class="input-group">
+                                <span class="input-group-text">/</span>
+                                <input id="quick-text-shortcut" class="form-control" maxlength="32" required placeholder="daniel" autocomplete="off">
+                            </div>
+                            <div class="form-text">Use letras, números, _ ou -. Ex.: /daniel.</div>
+                        </div>
+                        <div>
+                            <label class="form-label small fw-bold">Nome</label>
+                            <input id="quick-text-title" class="form-control" maxlength="90" placeholder="Apresentação Daniel">
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <label class="form-label small fw-bold">Texto *</label>
+                        <textarea id="quick-text-body" class="form-control" rows="5" maxlength="5000" required placeholder="Olá, sou o Dr. Daniel..."></textarea>
+                    </div>
+                    <div class="quick-text-form-footer">
+                        <div id="quick-text-status" class="quick-text-status"></div>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-outline-secondary hidden" id="quick-text-cancel-edit" onclick="limparFormularioTextoRapido()">Cancelar edição</button>
+                            <button type="submit" class="btn text-white" id="quick-text-save" style="background:var(--adv-blue)"><i class="bi bi-check2 me-1"></i> Salvar texto</button>
+                        </div>
+                    </div>
+                </form>
+                <div class="quick-text-list-head">
+                    <div><strong>Textos cadastrados</strong><span id="quick-text-count">0</span></div>
+                    <small>São pessoais e visíveis somente para seu usuário.</small>
+                </div>
+                <div id="quick-text-list" class="quick-text-list"><div class="quick-text-empty">Nenhum texto rápido cadastrado.</div></div>
+            </div>
         </div>
     </dialog>
 
@@ -3411,6 +3576,180 @@
             } catch (_) {}
         }
 
+
+        // ---------------------------------------------------------------------
+        // MEUS TEXTOS RÁPIDOS
+        // ---------------------------------------------------------------------
+        window.panelQuickTexts = [];
+        window.panelQuickTextsLoaded = false;
+        window.quickTextSuggestionIndex = 0;
+
+        function togglePanelUserMenu(event) {
+            event?.stopPropagation?.();
+            const menu=document.getElementById('panel-user-menu');
+            const chip=document.getElementById('panel-user-chip');
+            if(!menu||!chip)return;
+            const abrir=menu.classList.contains('hidden');
+            menu.classList.toggle('hidden',!abrir);
+            chip.setAttribute('aria-expanded',abrir?'true':'false');
+        }
+        function fecharPanelUserMenu() {
+            document.getElementById('panel-user-menu')?.classList.add('hidden');
+            document.getElementById('panel-user-chip')?.setAttribute('aria-expanded','false');
+        }
+
+        function limparFormularioTextoRapido() {
+            const form=document.getElementById('quick-text-form');
+            form?.reset();
+            const id=document.getElementById('quick-text-id'); if(id)id.value='';
+            document.getElementById('quick-text-cancel-edit')?.classList.add('hidden');
+            const status=document.getElementById('quick-text-status'); if(status){status.textContent='';status.className='quick-text-status';}
+            document.getElementById('quick-text-shortcut')?.focus();
+        }
+
+        function renderizarTextosRapidos() {
+            const list=document.getElementById('quick-text-list');
+            const count=document.getElementById('quick-text-count');
+            if(!list)return;
+            const items=Array.isArray(window.panelQuickTexts)?window.panelQuickTexts:[];
+            if(count)count.textContent=String(items.length);
+            list.innerHTML='';
+            if(!items.length){
+                const e=document.createElement('div'); e.className='quick-text-empty';
+                e.textContent='Nenhum texto rápido cadastrado. Crie o primeiro acima.';
+                list.appendChild(e); return;
+            }
+            items.forEach(item=>{
+                const card=document.createElement('div'); card.className='quick-text-card';
+                const main=document.createElement('div'); main.className='quick-text-card-main';
+                const head=document.createElement('div');
+                const code=document.createElement('span'); code.className='quick-text-shortcut'; code.textContent=`/${item.shortcut}`;
+                const title=document.createElement('span'); title.className='quick-text-card-title'; title.textContent=item.title||'Texto rápido';
+                head.append(code,title);
+                const preview=document.createElement('div'); preview.className='quick-text-preview'; preview.textContent=item.text||'';
+                main.append(head,preview);
+                const actions=document.createElement('div'); actions.className='quick-text-card-actions';
+                const edit=document.createElement('button'); edit.type='button'; edit.title='Editar'; edit.innerHTML='<i class="bi bi-pencil"></i>'; edit.onclick=()=>editarTextoRapido(item.id);
+                const del=document.createElement('button'); del.type='button'; del.title='Excluir'; del.className='delete'; del.innerHTML='<i class="bi bi-trash"></i>'; del.onclick=()=>excluirTextoRapido(item.id);
+                actions.append(edit,del); card.append(main,actions); list.appendChild(card);
+            });
+        }
+
+        async function carregarTextosRapidos(forcar=false) {
+            if(window.panelQuickTextsLoaded&&!forcar)return window.panelQuickTexts;
+            try{
+                const res=await fetch('/api/me/quick-texts',{cache:'no-store'});
+                const data=await res.json().catch(()=>({}));
+                if(!res.ok)throw new Error(data.erro||'Não foi possível carregar os textos rápidos.');
+                window.panelQuickTexts=Array.isArray(data.items)?data.items:[];
+                window.panelQuickTextsLoaded=true;
+                renderizarTextosRapidos();
+                return window.panelQuickTexts;
+            }catch(err){
+                console.warn('[Textos rápidos]',err?.message||err);
+                return [];
+            }
+        }
+
+        async function abrirTextosRapidos() {
+            fecharPanelUserMenu();
+            const d=document.getElementById('quick-texts-dialog');
+            if(d&&!d.open){if(typeof d.showModal==='function')d.showModal();else d.setAttribute('open','');}
+            const status=document.getElementById('quick-text-status'); if(status)status.textContent='Carregando...';
+            await carregarTextosRapidos(true);
+            if(status)status.textContent='';
+            document.getElementById('quick-text-shortcut')?.focus();
+        }
+        function fecharTextosRapidos() {
+            const d=document.getElementById('quick-texts-dialog');
+            if(!d)return;
+            if(typeof d.close==='function')d.close();else d.removeAttribute('open');
+            limparFormularioTextoRapido();
+        }
+        function editarTextoRapido(id) {
+            const item=(window.panelQuickTexts||[]).find(x=>String(x.id)===String(id)); if(!item)return;
+            document.getElementById('quick-text-id').value=item.id||'';
+            document.getElementById('quick-text-shortcut').value=item.shortcut||'';
+            document.getElementById('quick-text-title').value=item.title||'';
+            document.getElementById('quick-text-body').value=item.text||'';
+            document.getElementById('quick-text-cancel-edit')?.classList.remove('hidden');
+            const status=document.getElementById('quick-text-status'); if(status)status.textContent=`Editando /${item.shortcut}`;
+            document.getElementById('quick-text-shortcut')?.focus();
+        }
+        async function salvarTextoRapido(event) {
+            event?.preventDefault?.();
+            const id=document.getElementById('quick-text-id')?.value||'';
+            const payload={
+                shortcut:document.getElementById('quick-text-shortcut')?.value||'',
+                title:document.getElementById('quick-text-title')?.value||'',
+                text:document.getElementById('quick-text-body')?.value||''
+            };
+            const status=document.getElementById('quick-text-status'); const btn=document.getElementById('quick-text-save');
+            if(btn)btn.disabled=true; if(status){status.className='quick-text-status';status.textContent='Salvando...';}
+            try{
+                const res=await fetch(id?`/api/me/quick-texts/${encodeURIComponent(id)}`:'/api/me/quick-texts',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+                const data=await res.json().catch(()=>({})); if(!res.ok)throw new Error(data.erro||'Não foi possível salvar.');
+                window.panelQuickTextsLoaded=false; await carregarTextosRapidos(true); limparFormularioTextoRapido();
+                if(status){status.className='quick-text-status text-success';status.textContent='✓ Texto rápido salvo.';}
+                setTimeout(()=>{if(status&&status.textContent.startsWith('✓'))status.textContent='';},1800);
+            }catch(err){if(status){status.className='quick-text-status text-danger';status.textContent=err.message||'Não foi possível salvar.';}}
+            finally{if(btn)btn.disabled=false;}
+        }
+        async function excluirTextoRapido(id) {
+            const item=(window.panelQuickTexts||[]).find(x=>String(x.id)===String(id));
+            if(!item||!confirm(`Excluir o texto rápido /${item.shortcut}?`))return;
+            try{
+                const res=await fetch(`/api/me/quick-texts/${encodeURIComponent(id)}`,{method:'DELETE'});
+                const data=await res.json().catch(()=>({})); if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');
+                window.panelQuickTextsLoaded=false; await carregarTextosRapidos(true);
+            }catch(err){alert(err.message||'Não foi possível excluir o texto rápido.');}
+        }
+
+        function esconderSugestoesTextosRapidos() {
+            const box=document.getElementById('chat-quick-suggestions'); if(!box)return;
+            box.classList.add('hidden'); box.innerHTML=''; window.quickTextSuggestionIndex=0;
+        }
+        function sugestoesTextosRapidosAtuais() {
+            const input=document.getElementById('ticket-chat-input');
+            const valor=String(input?.value||'').trim();
+            const match=valor.match(/^\/([a-z0-9_-]{0,32})$/i);
+            if(!match)return [];
+            const busca=String(match[1]||'').toLowerCase();
+            return (window.panelQuickTexts||[]).filter(item=>String(item.shortcut||'').toLowerCase().startsWith(busca)).slice(0,7);
+        }
+        function renderizarSugestoesTextosRapidos() {
+            const box=document.getElementById('chat-quick-suggestions'); const input=document.getElementById('ticket-chat-input');
+            if(!box||!input||input.disabled||window.activeChatCanSend!==true){esconderSugestoesTextosRapidos();return;}
+            const items=sugestoesTextosRapidosAtuais();
+            if(!items.length){esconderSugestoesTextosRapidos();return;}
+            window.quickTextSuggestionIndex=Math.min(window.quickTextSuggestionIndex||0,items.length-1);
+            box.innerHTML='';
+            items.forEach((item,index)=>{
+                const b=document.createElement('button'); b.type='button'; b.className=`chat-quick-suggestion${index===window.quickTextSuggestionIndex?' active':''}`; b.setAttribute('role','option');
+                const code=document.createElement('span'); code.className='chat-quick-suggestion-code'; code.textContent=`/${item.shortcut}`;
+                const copy=document.createElement('span'); copy.className='chat-quick-suggestion-copy';
+                const title=document.createElement('div'); title.className='chat-quick-suggestion-title'; title.textContent=item.title||'Texto rápido';
+                const preview=document.createElement('div'); preview.className='chat-quick-suggestion-preview'; preview.textContent=String(item.text||'').replace(/\s+/g,' ').trim();
+                copy.append(title,preview); b.append(code,copy); b.onclick=()=>aplicarTextoRapidoNoChat(item); box.appendChild(b);
+            });
+            box.classList.remove('hidden');
+        }
+        function aplicarTextoRapidoNoChat(item) {
+            const input=document.getElementById('ticket-chat-input'); if(!input||!item)return;
+            input.value=String(item.text||''); esconderSugestoesTextosRapidos(); ajustarAlturaComposerChat(); input.focus();
+            input.setSelectionRange(input.value.length,input.value.length);
+            const status=document.getElementById('ticket-chat-status'); if(status){status.textContent=`/${item.shortcut} inserido. Revise e envie quando quiser.`;setTimeout(()=>{if(status.textContent.includes('inserido'))status.textContent='';},1800);}
+        }
+        function ajustarAlturaComposerChat() {
+            const input=document.getElementById('ticket-chat-input'); if(!input)return;
+            input.style.height='auto'; input.style.height=`${Math.min(130,Math.max(44,input.scrollHeight))}px`;
+        }
+
+        document.addEventListener('click',event=>{
+            if(!event.target.closest('.panel-user-menu-wrap'))fecharPanelUserMenu();
+            if(!event.target.closest('.chat-input-wrap'))esconderSugestoesTextosRapidos();
+        });
+
         async function carregarSessaoPainel() {
             try {
                 const res = await fetch('/api/me', { cache:'no-store' });
@@ -3419,6 +3758,7 @@
                 window.panelSessionUser = data.user || null;
                 aplicarPermissoesPainel();
                 carregarProfissionaisPainel();
+                carregarTextosRapidos(false);
             } catch (err) {
                 console.error('Erro ao carregar sessão:', err);
             } finally {
@@ -6485,7 +6825,7 @@ function renderizarLista(itens) {
                 : 'Nenhum arquivo analisável recebido pelo cliente';
         }
 
-        function adicionarResumoIAMensagemChat(bubble, msg) {
+        function adicionarResumoIAMensagemChat(bubble, msg, beforeNode = null) {
             const doc = msg?.documentAI;
             if (!bubble || !doc) return;
             const box = document.createElement('div');
@@ -6525,7 +6865,29 @@ function renderizarLista(itens) {
             open.innerHTML = '<i class="bi bi-files me-1"></i> Ver análise completa';
             open.onclick = () => abrirDocumentosChat(doc.messageId);
             box.appendChild(open);
-            bubble.appendChild(box);
+            if (beforeNode && beforeNode.parentNode === bubble) bubble.insertBefore(box, beforeNode);
+            else bubble.appendChild(box);
+            return box;
+        }
+
+        function atualizarResumosIADOMChat() {
+            const history = document.getElementById('ticket-chat-history');
+            if (!history) return;
+            const mapa = mapaDocumentosChat();
+            (window.activeChatMessages || []).forEach(msg => {
+                const id = String(msg?.messageId || msg?.id || '');
+                if (!id) return;
+                const row = history.querySelector(`[data-message-id="${CSS.escape(id)}"]`);
+                if (!row) return;
+                const bubble = row.querySelector('.chat-bubble');
+                if (!bubble) return;
+                bubble.querySelector('.chat-ai-summary')?.remove();
+                const doc = mapa.get(id) || null;
+                msg.documentAI = doc;
+                if (!doc) return;
+                const anchor = bubble.querySelector('.chat-text') || bubble.querySelector('.chat-time');
+                adicionarResumoIAMensagemChat(bubble, msg, anchor || null);
+            });
         }
 
         function criarBlocoDetalhesDocumentoChat(container, titulo, itens = []) {
@@ -6711,7 +7073,9 @@ function renderizarLista(itens) {
                 window.activeChatDocuments = Array.isArray(data.documents) ? data.documents : [];
                 atualizarContadorDocumentosChat(data.summary || null);
                 sincronizarDocumentosMensagensChat();
-                renderizarChat(window.activeChatMessages || [], window.activeChatHasMore === true, preservarScroll);
+                // Atualiza somente os blocos de IA já visíveis. Evita reconstruir todo o histórico
+                // a cada mudança de status do Gemini, reduzindo bastante o repaint durante a rolagem.
+                atualizarResumosIADOMChat();
                 if (!document.getElementById('chat-documents-panel')?.classList.contains('hidden')) renderizarDocumentosChat(window.activeChatDocuments);
             } catch (err) {
                 console.warn('[Chat] Não foi possível atualizar os documentos:', err?.message || err);
@@ -6763,10 +7127,10 @@ function renderizarLista(itens) {
                     wrap.appendChild(img); bubble.appendChild(wrap);
                 } else if (msg.tipo === 'video' && mediaUrl) {
                     const wrap=document.createElement('div'); wrap.className='chat-media-preview';
-                    const video=document.createElement('video'); video.controls=true; video.preload='metadata'; video.src=mediaUrl; wrap.appendChild(video); bubble.appendChild(wrap);
+                    const video=document.createElement('video'); video.controls=true; video.preload='none'; video.src=mediaUrl; wrap.appendChild(video); bubble.appendChild(wrap);
                 } else if (msg.tipo === 'audio' && mediaUrl) {
                     const wrap=document.createElement('div'); wrap.className='chat-media-preview';
-                    const audio=document.createElement('audio'); audio.controls=true; audio.preload='metadata'; audio.src=mediaUrl; wrap.appendChild(audio); bubble.appendChild(wrap);
+                    const audio=document.createElement('audio'); audio.controls=true; audio.preload='none'; audio.src=mediaUrl; wrap.appendChild(audio); bubble.appendChild(wrap);
                 }
 
                 const media = document.createElement(downloadUrl ? 'a' : 'div');
@@ -6826,13 +7190,15 @@ function renderizarLista(itens) {
         function renderizarChat(messages=[], hasMore=false, preserveScroll=false) {
             const history=document.getElementById('ticket-chat-history'); if(!history) return;
             const oldHeight=history.scrollHeight;
-            history.innerHTML='';
+            const oldTop=history.scrollTop;
+            const frag=document.createDocumentFragment();
             if(hasMore) {
-                const b=document.createElement('button'); b.type='button'; b.className='ticket-chat-load'; b.textContent='Carregar mensagens anteriores'; b.onclick=carregarMensagensAnterioresChat; history.appendChild(b);
+                const b=document.createElement('button'); b.type='button'; b.className='ticket-chat-load'; b.textContent='Carregar mensagens anteriores'; b.onclick=carregarMensagensAnterioresChat; frag.appendChild(b);
             }
-            if(!messages.length) { const e=document.createElement('div'); e.className='chat-empty'; e.textContent='Ainda não há mensagens armazenadas para este ticket. O histórico começa a ser registrado após esta atualização.'; history.appendChild(e); }
-            messages.forEach(m=>history.appendChild(criarElementoMensagemChat(m)));
-            if(preserveScroll) history.scrollTop=Math.max(0, history.scrollHeight-oldHeight);
+            if(!messages.length) { const e=document.createElement('div'); e.className='chat-empty'; e.textContent='Ainda não há mensagens armazenadas para este ticket. O histórico começa a ser registrado após esta atualização.'; frag.appendChild(e); }
+            messages.forEach(m=>frag.appendChild(criarElementoMensagemChat(m)));
+            history.replaceChildren(frag);
+            if(preserveScroll) history.scrollTop=Math.max(0, oldTop + (history.scrollHeight-oldHeight));
             else history.scrollTop=history.scrollHeight;
         }
         const CHAT_EMOJIS = [
@@ -7079,7 +7445,7 @@ function renderizarLista(itens) {
             }
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
-        function fecharChatTicket() { const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharEmojiPickerChat(); fecharTransferenciaChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
+        function fecharChatTicket() { const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
         async function carregarMensagensAnterioresChat() {
             if(!window.activeChatTicketNumber||!window.activeChatOldest) return;
             const history=document.getElementById('ticket-chat-history'); const beforeHeight=history?.scrollHeight||0;
@@ -7091,11 +7457,30 @@ function renderizarLista(itens) {
                 window.activeChatMessages=[...older,...window.activeChatMessages]; window.activeChatHasMore=data.hasMore===true;
                 sincronizarDocumentosMensagensChat();
                 window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
-                renderizarChat(window.activeChatMessages,window.activeChatHasMore,true);
-                if(history) history.scrollTop=Math.max(0,history.scrollHeight-beforeHeight);
+                if(history){
+                    history.querySelector('.ticket-chat-load')?.remove();
+                    const frag=document.createDocumentFragment();
+                    if(window.activeChatHasMore){
+                        const b=document.createElement('button'); b.type='button'; b.className='ticket-chat-load'; b.textContent='Carregar mensagens anteriores'; b.onclick=carregarMensagensAnterioresChat; frag.appendChild(b);
+                    }
+                    window.activeChatMessages.slice(0,older.length).forEach(m=>frag.appendChild(criarElementoMensagemChat(m)));
+                    history.insertBefore(frag,history.firstChild);
+                    history.scrollTop=Math.max(0,history.scrollHeight-beforeHeight);
+                }
             } catch(err) { document.getElementById('ticket-chat-status').textContent=err.message; }
         }
-        function atalhoEnviarChat(event) { if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemChat(event);} }
+        function atalhoEnviarChat(event) {
+            const box=document.getElementById('chat-quick-suggestions');
+            const aberto=box && !box.classList.contains('hidden');
+            const items=aberto?sugestoesTextosRapidosAtuais():[];
+            if(aberto&&items.length){
+                if(event.key==='ArrowDown'){event.preventDefault();window.quickTextSuggestionIndex=(window.quickTextSuggestionIndex+1)%items.length;renderizarSugestoesTextosRapidos();return;}
+                if(event.key==='ArrowUp'){event.preventDefault();window.quickTextSuggestionIndex=(window.quickTextSuggestionIndex-1+items.length)%items.length;renderizarSugestoesTextosRapidos();return;}
+                if(event.key==='Escape'){event.preventDefault();esconderSugestoesTextosRapidos();return;}
+                if(event.key==='Tab'||(event.key==='Enter'&&!event.shiftKey)){event.preventDefault();aplicarTextoRapidoNoChat(items[window.quickTextSuggestionIndex||0]);return;}
+            }
+            if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemChat(event);}
+        }
         async function enviarMensagemChat(event) {
             event?.preventDefault?.();
             const ticket=window.activeChatTicketNumber;
@@ -7109,7 +7494,7 @@ function renderizarLista(itens) {
             }
 
             const otimista=mensagemOtimistaChat({texto,tipo:'text'});
-            input.value='';adicionarMensagemChatNaTela(otimista,true);if(status)status.textContent='';input?.focus();
+            input.value=''; esconderSugestoesTextosRapidos(); ajustarAlturaComposerChat(); adicionarMensagemChatNaTela(otimista,true);if(status)status.textContent='';input?.focus();
 
             window.chatSendQueue=window.chatSendQueue.then(async()=>{
                 try{
@@ -7188,7 +7573,10 @@ function renderizarLista(itens) {
         }
 
         // Ctrl+V / Cmd+V mantém texto normal e envia imagens/arquivos presentes no clipboard.
-        document.getElementById('ticket-chat-input')?.addEventListener('paste',processarColagemChat);
+        const ticketChatInput=document.getElementById('ticket-chat-input');
+        ticketChatInput?.addEventListener('paste',processarColagemChat);
+        ticketChatInput?.addEventListener('input',()=>{window.quickTextSuggestionIndex=0;renderizarSugestoesTextosRapidos();ajustarAlturaComposerChat();});
+        ticketChatInput?.addEventListener('focus',()=>{if(String(ticketChatInput.value||'').trim().startsWith('/'))renderizarSugestoesTextosRapidos();});
         const chatComposerDrop=document.getElementById('ticket-chat-composer');
         chatComposerDrop?.addEventListener('dragover',event=>{event.preventDefault();if(window.activeChatCanSend===true)chatComposerDrop.classList.add('is-dragging');});
         chatComposerDrop?.addEventListener('dragleave',()=>chatComposerDrop.classList.remove('is-dragging'));

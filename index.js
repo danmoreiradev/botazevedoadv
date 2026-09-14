@@ -5653,6 +5653,134 @@ app.get('/api/me', exigirLogin, (req, res) => {
     res.json({ user: req.session.panelUser });
 });
 
+// -----------------------------------------------------------------------------
+// TEXTOS RÁPIDOS PESSOAIS
+// -----------------------------------------------------------------------------
+const QUICK_TEXT_MAX_ITEMS = 80;
+const QUICK_TEXT_MAX_SHORTCUT = 32;
+const QUICK_TEXT_MAX_TITLE = 90;
+const QUICK_TEXT_MAX_BODY = 5000;
+
+function normalizarAtalhoTextoRapido(valor = '') {
+    return String(valor || '')
+        .trim()
+        .replace(/^\/+/, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '')
+        .slice(0, QUICK_TEXT_MAX_SHORTCUT);
+}
+
+function normalizarTextoRapidoEntrada(body = {}) {
+    const shortcut = normalizarAtalhoTextoRapido(body.shortcut);
+    const titulo = String(body.title || '').trim().slice(0, QUICK_TEXT_MAX_TITLE);
+    const texto = String(body.text || '').trim().slice(0, QUICK_TEXT_MAX_BODY);
+
+    if (shortcut.length < 2) {
+        const erro = new Error('O atalho deve possuir ao menos 2 caracteres. Exemplo: /daniel.');
+        erro.status = 400;
+        throw erro;
+    }
+    if (!texto) {
+        const erro = new Error('Informe o texto que será inserido pelo atalho.');
+        erro.status = 400;
+        throw erro;
+    }
+
+    return { shortcut, title: titulo, text: texto };
+}
+
+function filtroUsuarioSessao(req) {
+    const id = String(req?.session?.panelUser?.id || '').trim();
+    if (ObjectId.isValid(id)) return { _id: new ObjectId(id) };
+    const user = String(req?.session?.panelUser?.user || '').trim();
+    return user ? { user } : null;
+}
+
+function serializarTextoRapido(item = {}) {
+    return {
+        id: String(item.id || item._id || ''),
+        shortcut: String(item.shortcut || ''),
+        title: String(item.title || ''),
+        text: String(item.text || ''),
+        createdAt: Number(item.createdAt || 0) || null,
+        updatedAt: Number(item.updatedAt || 0) || null
+    };
+}
+
+app.get('/api/me/quick-texts', exigirLogin, async (req, res) => {
+    try {
+        const filtro = filtroUsuarioSessao(req);
+        if (!filtro) return res.status(400).json({ erro: 'Usuário da sessão não identificado.' });
+        const conta = await userLoginColl.findOne(filtro, { projection: { quickTexts: 1 } });
+        const items = Array.isArray(conta?.quickTexts) ? conta.quickTexts : [];
+        return res.json({ items: items.map(serializarTextoRapido).sort((a, b) => a.shortcut.localeCompare(b.shortcut, 'pt-BR')) });
+    } catch (err) {
+        console.error('[Textos rápidos] Erro ao listar:', err);
+        return res.status(500).json({ erro: 'Não foi possível carregar seus textos rápidos.' });
+    }
+});
+
+app.post('/api/me/quick-texts', exigirLogin, async (req, res) => {
+    try {
+        const filtro = filtroUsuarioSessao(req);
+        if (!filtro) return res.status(400).json({ erro: 'Usuário da sessão não identificado.' });
+        const dados = normalizarTextoRapidoEntrada(req.body || {});
+        const conta = await userLoginColl.findOne(filtro, { projection: { quickTexts: 1 } });
+        const atuais = Array.isArray(conta?.quickTexts) ? conta.quickTexts : [];
+        if (atuais.length >= QUICK_TEXT_MAX_ITEMS) return res.status(400).json({ erro: `Cada usuário pode cadastrar até ${QUICK_TEXT_MAX_ITEMS} textos rápidos.` });
+        if (atuais.some(item => String(item.shortcut || '').toLowerCase() === dados.shortcut)) {
+            return res.status(409).json({ erro: `O atalho /${dados.shortcut} já está cadastrado.` });
+        }
+        const agora = Date.now();
+        const item = { id: new ObjectId().toString(), ...dados, createdAt: agora, updatedAt: agora };
+        await userLoginColl.updateOne(filtro, { $push: { quickTexts: item }, $set: { updatedAt: agora } });
+        return res.status(201).json({ item: serializarTextoRapido(item) });
+    } catch (err) {
+        console.error('[Textos rápidos] Erro ao criar:', err);
+        return res.status(err?.status || 500).json({ erro: err?.message || 'Não foi possível cadastrar o texto rápido.' });
+    }
+});
+
+app.put('/api/me/quick-texts/:id', exigirLogin, async (req, res) => {
+    try {
+        const filtro = filtroUsuarioSessao(req);
+        if (!filtro) return res.status(400).json({ erro: 'Usuário da sessão não identificado.' });
+        const id = String(req.params.id || '').trim();
+        const dados = normalizarTextoRapidoEntrada(req.body || {});
+        const conta = await userLoginColl.findOne(filtro, { projection: { quickTexts: 1 } });
+        const atuais = Array.isArray(conta?.quickTexts) ? conta.quickTexts : [];
+        const existente = atuais.find(item => String(item.id || '') === id);
+        if (!existente) return res.status(404).json({ erro: 'Texto rápido não encontrado.' });
+        if (atuais.some(item => String(item.id || '') !== id && String(item.shortcut || '').toLowerCase() === dados.shortcut)) {
+            return res.status(409).json({ erro: `O atalho /${dados.shortcut} já está cadastrado.` });
+        }
+        const agora = Date.now();
+        const atualizado = { ...existente, ...dados, updatedAt: agora };
+        await userLoginColl.updateOne(
+            { ...filtro, 'quickTexts.id': id },
+            { $set: { 'quickTexts.$': atualizado, updatedAt: agora } }
+        );
+        return res.json({ item: serializarTextoRapido(atualizado) });
+    } catch (err) {
+        console.error('[Textos rápidos] Erro ao atualizar:', err);
+        return res.status(err?.status || 500).json({ erro: err?.message || 'Não foi possível atualizar o texto rápido.' });
+    }
+});
+
+app.delete('/api/me/quick-texts/:id', exigirLogin, async (req, res) => {
+    try {
+        const filtro = filtroUsuarioSessao(req);
+        if (!filtro) return res.status(400).json({ erro: 'Usuário da sessão não identificado.' });
+        const id = String(req.params.id || '').trim();
+        const resultado = await userLoginColl.updateOne(filtro, { $pull: { quickTexts: { id } }, $set: { updatedAt: Date.now() } });
+        if (!resultado.matchedCount) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+        return res.json({ ok: true });
+    } catch (err) {
+        console.error('[Textos rápidos] Erro ao excluir:', err);
+        return res.status(500).json({ erro: 'Não foi possível excluir o texto rápido.' });
+    }
+});
+
 // Lista pública interna de profissionais ativos para campos como "advogado responsável".
 // Não expõe login, senha, e-mail ou permissões.
 app.get('/api/lawyers', exigirLogin, async (req, res) => {
