@@ -1665,42 +1665,76 @@ async function registrarMensagemAutomaticaChat(jid, sent, content) {
 }
 
 async function destinoWhatsAppTicket(ticket = {}) {
-    // Para envio 1:1, priorizamos SEMPRE o PN real (@s.whatsapp.net).
-    // Evitamos envio direto para @lid, que pode produzir o placeholder
-    // "Aguardando mensagem. Essa ação pode levar alguns instantes." no destinatário.
-    const numero = whatsappDoTicket(ticket);
-    if (numero) return `${numero}@s.whatsapp.net`;
+    // IMPORTANTE — WhatsApp Multi-Device / LID:
+    // o CHAT HUMANO deve continuar a conversa usando o MESMO modo de endereçamento
+    // observado nas mensagens recebidas. A triagem já faz isso porque responde ao
+    // rawJid do upsert. Forçar sempre numero@s.whatsapp.net (PN) aqui pode abrir uma
+    // rota criptográfica diferente daquela usada pelo celular do cliente e resultar
+    // em "Aguardando mensagem" principalmente em contas/conversas migradas para LID.
+    //
+    // Ordem segura:
+    //   1) lastRawJid, quando for LID;
+    //   2) algum LID já observado no ticket;
+    //   3) se só houver PN, consultar PN -> LID no Signal Repository;
+    //   4) PN como fallback para contatos que ainda não usam LID.
 
-    const candidatos = [
+    const identificadores = [
         ticket.lastRawJid,
         ...(Array.isArray(ticket.identificadores) ? ticket.identificadores : [])
-    ].map(normalizarJid).filter(Boolean);
+    ]
+        .map(valor => normalizarJid(String(valor || '')))
+        .filter(Boolean);
 
-    const pnDireto = candidatos.find(jid => String(jid).endsWith('@s.whatsapp.net'));
-    if (pnDireto) return pnDireto;
+    const lastRawJid = normalizarJid(String(ticket.lastRawJid || ''));
 
-    if (sock?.signalRepository?.lidMapping?.getPNForLID) {
-        for (const lid of candidatos.filter(jid => String(jid).endsWith('@lid'))) {
-            try {
-                const pn = await sock.signalRepository.lidMapping.getPNForLID(lid);
-                const numeroResolvido = normalizarNumeroWhatsApp(pn);
-                if (numeroResolvido) {
-                    const pnJid = `${numeroResolvido}@s.whatsapp.net`;
-                    if (ticket?._id && ticketsColl) {
-                        await ticketsColl.updateOne(
-                            { _id: ticket._id },
-                            {
-                                $set: { numeroReal: numeroResolvido, lastActivity: Date.now() },
-                                $addToSet: { whatsappNumbers: numeroResolvido, identificadores: pnJid }
-                            }
-                        ).catch(() => {});
-                    }
-                    return pnJid;
+    // Se a última mensagem do cliente chegou por LID, esta é a rota mais fiel à
+    // conversa ativa e deve ser preservada no envio feito pelo advogado.
+    if (lastRawJid?.endsWith('@lid')) {
+        console.log(`[Chat][Destino] Ticket ${ticket.ticketNumber || '-'} usando LID da conversa: ${lastRawJid}`);
+        return lastRawJid;
+    }
+
+    // Mesmo que lastRawJid antigo seja PN, um LID observado posteriormente no ticket
+    // é preferível ao PN para conversas já migradas para o addressingMode=lid.
+    const lidObservado = identificadores.find(jid => String(jid).endsWith('@lid'));
+    if (lidObservado) {
+        console.log(`[Chat][Destino] Ticket ${ticket.ticketNumber || '-'} usando LID observado: ${lidObservado}`);
+        return lidObservado;
+    }
+
+    const numero = whatsappDoTicket(ticket);
+    const pnJid = numero
+        ? normalizarJid(`${numero}@s.whatsapp.net`)
+        : identificadores.find(jid => String(jid).endsWith('@s.whatsapp.net')) || null;
+
+    // Nas versões atuais do Baileys, o Signal Repository pode conhecer o LID mesmo
+    // quando o ticket só guardou o PN. Se houver mapeamento, roteamos pelo LID.
+    if (pnJid && sock?.signalRepository?.lidMapping?.getLIDForPN) {
+        try {
+            const lidMapeado = normalizarJid(await sock.signalRepository.lidMapping.getLIDForPN(pnJid));
+            if (lidMapeado?.endsWith('@lid')) {
+                console.log(`[Chat][Destino] Ticket ${ticket.ticketNumber || '-'} mapeou ${pnJid} -> ${lidMapeado}`);
+
+                if (ticket?._id && ticketsColl) {
+                    await ticketsColl.updateOne(
+                        { _id: ticket._id },
+                        {
+                            $set: { lastActivity: Date.now() },
+                            $addToSet: { identificadores: lidMapeado }
+                        }
+                    ).catch(() => {});
                 }
-            } catch (err) {
-                console.warn(`[Chat] Não foi possível resolver LID ${lid} para PN:`, err?.message || err);
+
+                return lidMapeado;
             }
+        } catch (err) {
+            console.warn(`[Chat][Destino] Não foi possível resolver PN ${pnJid} para LID:`, err?.message || err);
         }
+    }
+
+    if (pnJid) {
+        console.log(`[Chat][Destino] Ticket ${ticket.ticketNumber || '-'} sem LID conhecido; usando PN: ${pnJid}`);
+        return pnJid;
     }
 
     return null;
