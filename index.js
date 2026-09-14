@@ -979,7 +979,7 @@ function liberarPayloadEntrada(fingerprint) {
     if (fingerprint) inboundPayloadInFlight.delete(fingerprint);
 }
 
-let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl, ticketMessagesColl;
+let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl, ticketMessagesColl, baileysSentMessagesColl;
 
 // -----------------------------------------------------------------------------
 // USUÁRIOS, PERMISSÕES E CHAT DO PAINEL
@@ -1011,15 +1011,109 @@ const baileysDeviceRefreshAt = new Map();
 
 // Cache efêmero de mensagens enviadas pelo Baileys. Não ocupa MongoDB e permite
 // que a biblioteca recupere a mensagem original caso o WhatsApp solicite retry.
-const BAILEYS_SENT_CACHE_TTL_MS = 15 * 60 * 1000;
-const BAILEYS_SENT_CACHE_MAX = 500;
+const BAILEYS_SENT_CACHE_TTL_MS = 30 * 60 * 1000;
+const BAILEYS_SENT_CACHE_MAX = 1000;
+const BAILEYS_SENT_STORE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const BAILEYS_RETRY_COUNTER_TTL_MS = 60 * 60 * 1000;
 const baileysSentMessageCache = new Map();
+
+// O cache de contagem de retry fica FORA do socket e sobrevive às recriações da
+// conexão dentro do mesmo processo. Isso evita loops de retry após reconexões.
+function criarCacheBaileysComTTL(ttlMs = BAILEYS_RETRY_COUNTER_TTL_MS, maxItems = 5000) {
+    const mapa = new Map();
+    const limpar = () => {
+        const agora = Date.now();
+        for (const [chave, item] of mapa) {
+            if ((agora - Number(item?.savedAt || 0)) > ttlMs) mapa.delete(chave);
+        }
+        while (mapa.size > maxItems) {
+            const primeira = mapa.keys().next().value;
+            if (!primeira) break;
+            mapa.delete(primeira);
+        }
+    };
+
+    return {
+        get: (key) => {
+            const item = mapa.get(String(key));
+            if (!item) return undefined;
+            if ((Date.now() - Number(item.savedAt || 0)) > ttlMs) {
+                mapa.delete(String(key));
+                return undefined;
+            }
+            return item.value;
+        },
+        set: (key, value) => {
+            mapa.set(String(key), { value, savedAt: Date.now() });
+            if (mapa.size > maxItems) limpar();
+            return true;
+        },
+        del: (key) => mapa.delete(String(key)),
+        flushAll: () => mapa.clear()
+    };
+}
+
+const baileysMsgRetryCounterCache = criarCacheBaileysComTTL();
+
+function serializarMensagemRetryBaileys(message) {
+    try {
+        return JSON.stringify(message, BufferJSON.replacer);
+    } catch (err) {
+        console.warn('[WhatsApp] Não foi possível serializar mensagem para retry persistente:', err?.message || err);
+        return null;
+    }
+}
+
+function desserializarMensagemRetryBaileys(valor) {
+    if (!valor) return undefined;
+    try {
+        return JSON.parse(String(valor), BufferJSON.reviver);
+    } catch (err) {
+        console.warn('[WhatsApp] Mensagem persistida de retry inválida:', err?.message || err);
+        return undefined;
+    }
+}
+
+function persistirMensagemEnviadaBaileys(sent) {
+    const id = String(sent?.key?.id || '').trim();
+    if (!id || !sent?.message || !baileysSentMessagesColl) return;
+
+    const messageJson = serializarMensagemRetryBaileys(sent.message);
+    if (!messageJson) return;
+
+    const agora = new Date();
+    const remoteJids = [...new Set([
+        sent?.key?.remoteJid,
+        sent?.key?.remoteJidAlt,
+        sent?.key?.participant,
+        sent?.key?.participantAlt
+    ].filter(Boolean).map(String))];
+
+    // Persistência assíncrona: o cache em memória cobre retries imediatos, enquanto
+    // o MongoDB permite que getMessage continue funcionando após reconnect/restart.
+    baileysSentMessagesColl.updateOne(
+        { _id: id },
+        {
+            $set: {
+                messageId: id,
+                messageJson,
+                remoteJids,
+                savedAt: agora,
+                expiresAt: new Date(agora.getTime() + BAILEYS_SENT_STORE_TTL_MS)
+            }
+        },
+        { upsert: true }
+    ).catch(err => {
+        console.warn('[WhatsApp] Falha ao persistir mensagem para retry:', err?.message || err);
+    });
+}
 
 function guardarMensagemEnviadaBaileys(sent) {
     const id = String(sent?.key?.id || '').trim();
     if (!id || !sent?.message) return;
 
     baileysSentMessageCache.set(id, { message: sent.message, savedAt: Date.now() });
+    persistirMensagemEnviadaBaileys(sent);
 
     const agora = Date.now();
     for (const [cacheId, item] of baileysSentMessageCache) {
@@ -1035,32 +1129,51 @@ function guardarMensagemEnviadaBaileys(sent) {
     }
 }
 
-function obterMensagemEnviadaBaileys(key = {}) {
+async function obterMensagemEnviadaBaileys(key = {}) {
     const id = String(key?.id || '').trim();
     if (!id) return undefined;
+
     const item = baileysSentMessageCache.get(id);
-    if (!item) return undefined;
-    if ((Date.now() - Number(item.savedAt || 0)) > BAILEYS_SENT_CACHE_TTL_MS) {
+    if (item) {
+        if ((Date.now() - Number(item.savedAt || 0)) <= BAILEYS_SENT_CACHE_TTL_MS) {
+            return item.message;
+        }
         baileysSentMessageCache.delete(id);
-        return undefined;
     }
-    return item.message;
+
+    if (!baileysSentMessagesColl) return undefined;
+
+    try {
+        const persistida = await baileysSentMessagesColl.findOne(
+            { _id: id },
+            { projection: { messageJson: 1, expiresAt: 1 } }
+        );
+        if (!persistida?.messageJson) return undefined;
+        if (persistida.expiresAt && new Date(persistida.expiresAt).getTime() <= Date.now()) return undefined;
+
+        const message = desserializarMensagemRetryBaileys(persistida.messageJson);
+        if (message) {
+            baileysSentMessageCache.set(id, { message, savedAt: Date.now() });
+            return message;
+        }
+    } catch (err) {
+        console.warn(`[WhatsApp] Falha ao recuperar mensagem ${id} para retry:`, err?.message || err);
+    }
+
+    return undefined;
 }
 
 async function enviarMensagemBaileys(jid, content, options = {}) {
     if (!sock?.user) throw new Error('WhatsApp não conectado.');
 
-    // PERFORMANCE: evita uma consulta de dispositivos em toda mensagem. Para contatos
-    // que acabaram de falar conosco, o cache do Baileys é usado imediatamente. Em
-    // conversas antigas, uma consulta fresca é feita no primeiro envio e reutilizada
-    // por alguns minutos. Se o envio com cache falhar, há um retry fresco automático.
     const jidNormalizado = normalizarJid(jid) || String(jid || '');
-    const agora = Date.now();
-    const ultimaAtualizacao = baileysDeviceRefreshAt.get(jidNormalizado) || 0;
     const opcaoExplicita = Object.prototype.hasOwnProperty.call(options, 'useUserDevicesCache');
-    const usarCacheDispositivos = opcaoExplicita
-        ? options.useUserDevicesCache
-        : (agora - ultimaAtualizacao) < BAILEYS_DEVICE_REFRESH_TTL_MS;
+
+    // CONFIABILIDADE > micro-otimização: em conversa 1:1, consultamos a lista de
+    // dispositivos fresca por padrão. Chaves/dispositivos podem mudar sem que o envio
+    // lance erro; nesses casos a mensagem pode aparecer como "Aguardando mensagem".
+    // Quem precisar sobrescrever o comportamento ainda pode passar a opção explicitamente.
+    const usarCacheDispositivos = opcaoExplicita ? options.useUserDevicesCache : false;
 
     try {
         const sent = await sock.sendMessage(jid, content, { ...options, useUserDevicesCache: usarCacheDispositivos });
@@ -1068,8 +1181,10 @@ async function enviarMensagemBaileys(jid, content, options = {}) {
         guardarMensagemEnviadaBaileys(sent);
         return sent;
     } catch (err) {
-        if (!opcaoExplicita && usarCacheDispositivos) {
-            console.warn(`[WhatsApp] Cache de dispositivos falhou para ${jidNormalizado}; repetindo com atualização fresca.`);
+        // Se o chamador forçou cache e houver falha explícita, fazemos uma única
+        // tentativa com device list fresca. Não repetimos indefinidamente.
+        if (usarCacheDispositivos) {
+            console.warn(`[WhatsApp] Envio com cache de dispositivos falhou para ${jidNormalizado}; repetindo com atualização fresca.`);
             const sent = await sock.sendMessage(jid, content, { ...options, useUserDevicesCache: false });
             baileysDeviceRefreshAt.set(jidNormalizado, Date.now());
             guardarMensagemEnviadaBaileys(sent);
@@ -1647,11 +1762,11 @@ async function enviarAvisoEncerramentoAoCliente(ticket, advogado) {
 // -----------------------------------------------------------------------------
 // ATRIBUIÇÃO OPERACIONAL DE ATENDIMENTO
 // -----------------------------------------------------------------------------
-// O primeiro advogado que abrir o chat fica registrado como responsável operacional.
-// IMPORTANTE: abrir/visualizar o chat NÃO interrompe a automação. O fluxo só passa
-// para atendimento humano quando houver uma intervenção real do escritório (mensagem
-// ou arquivo enviado pelo painel/WhatsApp).
-async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento = true } = {}) {
+// Abrir/visualizar o chat é SOMENTE LEITURA e nunca atribui responsável.
+// A atribuição ocorre exclusivamente por ação explícita em /claim. Se outro advogado
+// já estiver responsável, a mesma ação explícita transfere o atendimento de forma
+// atômica. Enviar mensagem/arquivo exige que o usuário atual seja o responsável.
+async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento = true, permitirTransferencia = true } = {}) {
     if (!ticketsColl) {
         return { ok: false, status: 503, erro: 'Banco de dados ainda não está disponível.' };
     }
@@ -1689,40 +1804,58 @@ async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento 
     }
 
     const responsavelAtualId = String(atual.advogadoResponsavelId || '').trim();
+    const responsavelAtualNome = String(atual.advogadoResponsavelNome || '').trim();
 
-    if (responsavelAtualId) {
+    if (responsavelAtualId === advogadoId) {
         return {
             ok: true,
-            alreadyOwned: responsavelAtualId === advogadoId,
-            assignedElsewhere: responsavelAtualId !== advogadoId,
+            alreadyOwned: true,
+            transferred: false,
             ticket: atual,
-            responsavel: {
-                id: responsavelAtualId,
-                nome: atual.advogadoResponsavelNome || (responsavelAtualId === advogadoId ? advogadoNome : 'Outro advogado')
-            }
+            responsavel: { id: advogadoId, nome: responsavelAtualNome || advogadoNome }
+        };
+    }
+
+    if (responsavelAtualId && !permitirTransferencia) {
+        return {
+            ok: false,
+            status: 409,
+            erro: `Este atendimento já está com ${responsavelAtualNome || 'outro advogado'}.`,
+            responsavel: { id: responsavelAtualId, nome: responsavelAtualNome || 'Outro advogado' }
         };
     }
 
     const agora = Date.now();
-
-    // Atribuição atômica, mas sem tocar em status/paused/until.
-    const resultado = await ticketsColl.findOneAndUpdate(
-        {
+    const filtroAtomico = responsavelAtualId
+        ? { ticketNumber: numero, advogadoResponsavelId: responsavelAtualId }
+        : {
             ticketNumber: numero,
             $or: [
                 { advogadoResponsavelId: { $exists: false } },
                 { advogadoResponsavelId: null },
                 { advogadoResponsavelId: '' }
             ]
-        },
-        {
-            $set: {
-                advogadoResponsavelId: advogadoId,
-                advogadoResponsavelNome: advogadoNome,
-                atendimentoAssumidoEm: agora,
-                chatAbertoEm: agora
-            }
-        },
+        };
+
+    const setCampos = {
+        advogadoResponsavelId: advogadoId,
+        advogadoResponsavelNome: advogadoNome,
+        atendimentoAssumidoEm: agora,
+        chatAbertoEm: agora
+    };
+
+    if (responsavelAtualId) {
+        setCampos.advogadoResponsavelAnteriorId = responsavelAtualId;
+        setCampos.advogadoResponsavelAnteriorNome = responsavelAtualNome || null;
+        setCampos.atendimentoTransferidoEm = agora;
+    }
+
+    const update = { $set: setCampos };
+    if (responsavelAtualId) update.$inc = { quantidadeTransferenciasAtendimento: 1 };
+
+    const resultado = await ticketsColl.findOneAndUpdate(
+        filtroAtomico,
+        update,
         { returnDocument: 'after', projection }
     );
 
@@ -1735,43 +1868,40 @@ async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento 
         }
 
         const vencedorId = String(atualizado.advogadoResponsavelId || '').trim();
-        return {
-            ok: true,
-            alreadyOwned: vencedorId === advogadoId,
-            assignedElsewhere: !!vencedorId && vencedorId !== advogadoId,
-            ticket: atualizado,
-            responsavel: {
-                id: vencedorId || null,
-                nome: atualizado.advogadoResponsavelNome || (vencedorId === advogadoId ? advogadoNome : 'Outro advogado')
-            }
-        };
+        if (vencedorId !== advogadoId) {
+            return {
+                ok: false,
+                status: 409,
+                erro: `O atendimento foi assumido por ${atualizado.advogadoResponsavelNome || 'outro advogado'} antes da sua confirmação.`,
+                responsavel: {
+                    id: vencedorId || null,
+                    nome: atualizado.advogadoResponsavelNome || 'Outro advogado'
+                }
+            };
+        }
     }
 
     await atualizarHistorico(numero, {
         advogadoResponsavelId: advogadoId,
         advogadoResponsavelNome: advogadoNome,
         atendimentoAssumidoEm: agora,
-        chatAbertoEm: agora
+        chatAbertoEm: agora,
+        ...(responsavelAtualId ? {
+            advogadoResponsavelAnteriorId: responsavelAtualId,
+            advogadoResponsavelAnteriorNome: responsavelAtualNome || null,
+            atendimentoTransferidoEm: agora
+        } : {})
     });
 
-    // O responsável do cadastro do cliente também pode ser preenchido na primeira
-    // assunção, sem alterar o fluxo automático daquele ticket.
     if (atualizado.clienteId && clientsColl) {
         await clientsColl.updateOne(
-            {
-                _id: atualizado.clienteId,
-                $or: [
-                    { advogadoResponsavel: { $exists: false } },
-                    { advogadoResponsavel: null },
-                    { advogadoResponsavel: '' }
-                ]
-            },
+            { _id: atualizado.clienteId },
             { $set: { advogadoResponsavel: advogadoNome, updatedAt: agora } }
         ).catch(() => {});
     }
 
-    // Avisa o cliente somente na PRIMEIRA atribuição do ticket. Como o envio usa
-    // sendBotMsg(), ele permanece classificado como automático e não interrompe a triagem.
+    // Toda assunção explícita (inclusive transferência) informa o cliente quem passou
+    // a conduzir o atendimento. Reabrir o próprio atendimento não envia aviso duplicado.
     await enviarAvisoAssuncaoAoCliente(atualizado, advogado);
 
     if (emitirEvento) {
@@ -1785,16 +1915,20 @@ async function assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento 
             statusLabel: classificacao.statusLabel,
             advogadoResponsavelId: advogadoId,
             advogadoResponsavelNome: advogadoNome,
-            atendimentoAssumidoEm: agora
+            atendimentoAssumidoEm: agora,
+            transferred: !!responsavelAtualId,
+            advogadoResponsavelAnteriorId: responsavelAtualId || null,
+            advogadoResponsavelAnteriorNome: responsavelAtualNome || null
         });
     }
 
     return {
         ok: true,
         alreadyOwned: false,
-        assignedElsewhere: false,
+        transferred: !!responsavelAtualId,
         ticket: atualizado,
-        responsavel: { id: advogadoId, nome: advogadoNome }
+        responsavel: { id: advogadoId, nome: advogadoNome },
+        responsavelAnterior: responsavelAtualId ? { id: responsavelAtualId, nome: responsavelAtualNome || 'Outro advogado' } : null
     };
 }
 
@@ -1824,23 +1958,39 @@ async function garantirTicketDoAdvogado(ticketNumber, advogado) {
     const responsavelId = String(ticket.advogadoResponsavelId || '').trim();
     const advogadoId = String(advogado?.id || '').trim();
 
-    // Se já existe responsável, o acesso continua liberado para qualquer advogado
-    // com permissão de chat. A atribuição é apenas uma referência operacional.
-    if (responsavelId) {
+    if (!responsavelId) {
         return {
-            ok: true,
+            ok: false,
+            status: 409,
+            codigo: 'ATENDIMENTO_NAO_INICIADO',
+            erro: 'Inicie o atendimento antes de enviar mensagens ou arquivos.'
+        };
+    }
+
+    if (responsavelId !== advogadoId) {
+        return {
+            ok: false,
+            status: 409,
+            codigo: 'ATENDIMENTO_DE_OUTRO_ADVOGADO',
+            erro: `Este atendimento está com ${ticket.advogadoResponsavelNome || 'outro advogado'}. Use “Assumir atendimento” antes de enviar.`,
             ticket,
             responsavel: {
                 id: responsavelId,
                 nome: ticket.advogadoResponsavelNome || 'Outro advogado'
             },
-            ehResponsavel: !!advogadoId && responsavelId === advogadoId
+            ehResponsavel: false
         };
     }
 
-    // Se ainda não há responsável e o advogado está efetivamente interagindo com o
-    // chat, ele pode ser o primeiro a assumir. A operação atômica preserva o vencedor.
-    return assumirTicketParaAdvogado(ticketNumber, advogado, { emitirEvento: true });
+    return {
+        ok: true,
+        ticket,
+        responsavel: {
+            id: responsavelId,
+            nome: ticket.advogadoResponsavelNome || advogado?.nome || 'Advogado(a)'
+        },
+        ehResponsavel: true
+    };
 }
 
 // -----------------------------------------------------------------------------
@@ -3979,6 +4129,7 @@ async function startBot() {
         settingsColl = db.collection('settings');
         crmLeadsColl = db.collection('crm_leads');
         ticketMessagesColl = db.collection('ticket_messages');
+        baileysSentMessagesColl = db.collection('baileys_sent_messages');
 
         // Cria as opções atuais e o horário padrão somente se ainda não existirem.
         await garantirMenuPadrao();
@@ -4039,7 +4190,9 @@ async function startBot() {
             userLoginColl.createIndex({ role: 1, ativo: 1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, createdAt: -1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, messageId: 1 }, { unique: true }),
-            ticketMessagesColl.createIndex({ createdAt: 1 }, { expireAfterSeconds: CHAT_RETENTION_DAYS * 24 * 60 * 60 })
+            ticketMessagesColl.createIndex({ createdAt: 1 }, { expireAfterSeconds: CHAT_RETENTION_DAYS * 24 * 60 * 60 }),
+            baileysSentMessagesColl.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+            baileysSentMessagesColl.createIndex({ messageId: 1 })
         ]);
         
         apiKeysColl = db.collection('api_keys');
@@ -4078,7 +4231,9 @@ async function startBot() {
             defaultQueryTimeoutMs: 60 * 1000,
             retryRequestDelayMs: 350,
             maxMsgRetryCount: 5,
+            msgRetryCounterCache: baileysMsgRetryCounterCache,
             enableAutoSessionRecreation: true,
+            enableRecentMessageCache: true,
             getMessage: async (key) => obterMensagemEnviadaBaileys(key)
         });
 
@@ -6649,9 +6804,9 @@ app.get('/api/tickets/:ticketNumber/chat/media/:messageId', async (req, res) => 
     }
 });
 
-// O clique em "Atender" chama este endpoint antes de abrir o chat.
-// A gravação é atômica apenas para definir o primeiro responsável; ela não restringe
-// a visualização ou o envio de mensagens por outros advogados autorizados.
+// Endpoint de assunção EXPLÍCITA. Abrir o chat não chama esta rota.
+// Se já houver outro responsável, a confirmação explícita transfere o atendimento
+// de forma atômica para o advogado conectado.
 app.post('/api/tickets/:ticketNumber/claim', async (req, res) => {
     if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para atender tickets.' });
 
@@ -6669,7 +6824,8 @@ app.post('/api/tickets/:ticketNumber/claim', async (req, res) => {
         res.json({
             ok: true,
             alreadyOwned: resultado.alreadyOwned === true,
-            assignedElsewhere: resultado.assignedElsewhere === true,
+            transferred: resultado.transferred === true,
+            responsavelAnterior: resultado.responsavelAnterior || null,
             responsavel: resultado.responsavel,
             ticket: {
                 ticketNumber: resultado.ticket?.ticketNumber || String(req.params.ticketNumber || ''),
@@ -6789,6 +6945,7 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
         if (!acessoTicket.ok) {
             return res.status(acessoTicket.status || 409).json({
                 erro: acessoTicket.erro || 'Este ticket está sendo atendido por outro advogado.',
+                codigo: acessoTicket.codigo || null,
                 responsavel: acessoTicket.responsavel || null
             });
         }
@@ -6851,6 +7008,7 @@ app.post(
             if (!acessoTicket.ok) {
                 return res.status(acessoTicket.status || 409).json({
                     erro: acessoTicket.erro || 'Este ticket está sendo atendido por outro advogado.',
+                    codigo: acessoTicket.codigo || null,
                     responsavel: acessoTicket.responsavel || null
                 });
             }
