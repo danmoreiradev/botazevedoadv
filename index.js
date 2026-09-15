@@ -2270,6 +2270,12 @@ async function sendBotMsg(jid, content) {
     }
 
     try {
+        // O indicador de digitação só deve aparecer quando o BOT realmente vai responder.
+        // Antes ele era disparado ao receber qualquer mensagem do cliente, mesmo quando
+        // nenhuma resposta seria enviada, gerando um falso "digitando..." no WhatsApp.
+        if (sock?.sendPresenceUpdate) {
+            Promise.resolve(sock.sendPresenceUpdate('composing', jid)).catch(() => {});
+        }
         const sent = await enviarMensagemBaileys(jid, content);
         const id = sent?.key?.id;
         const duracaoEnvio = Date.now() - inicioEnvio;
@@ -2297,6 +2303,9 @@ async function sendBotMsg(jid, content) {
         return sent;
     } catch (err) {
         console.error('Erro ao enviar:', err);
+        if (sock?.sendPresenceUpdate) {
+            Promise.resolve(sock.sendPresenceUpdate('paused', jid)).catch(() => {});
+        }
         return null;
     } finally {
         // Mantém uma pequena margem para cobrir o upsert local que pode chegar logo
@@ -4824,10 +4833,8 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                 return;
             }
 
-            // Feedback visual imediato no WhatsApp. Fire-and-forget para não aumentar latência.
-            if (sock?.sendPresenceUpdate) {
-                Promise.resolve(sock.sendPresenceUpdate('composing', rawJid)).catch(() => {});
-            }
+            // Não envia presença "composing" apenas porque uma mensagem entrou.
+            // O BOT ativa o indicador somente dentro de sendBotMsg(), quando há resposta real.
         }
 
         liberarFilaContato = await adquirirLockContato(chaveFila);

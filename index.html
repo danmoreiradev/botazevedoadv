@@ -2773,7 +2773,7 @@
         .quick-text-card-main { min-width:0; }
         .quick-text-shortcut { display:inline-flex; align-items:center; padding:4px 7px; color:#176b56; background:#edf8f4; border:1px solid #cde9df; border-radius:7px; font-size:.70rem; font-weight:800; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
         .quick-text-card-title { margin-left:7px; color:#35413b; font-size:.76rem; font-weight:760; }
-        .quick-text-preview { margin-top:7px; color:#69736e; font-size:.72rem; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+        .quick-text-preview { margin-top:7px; color:#69736e; font-size:.72rem; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; display:-webkit-box; line-clamp:2; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
         .quick-text-card-actions { display:flex; gap:5px; }
         .quick-text-card-actions button { width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; color:#65706a; background:#f7f8f8; border:1px solid #e1e6e3; border-radius:8px; }
         .quick-text-card-actions button:hover { color:var(--adv-blue); background:#eef1f0; }
@@ -3491,6 +3491,17 @@
     
         /* V22 - parâmetros administrativos e status internos */
         .param-admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start;}
+        .param-admin-shell{width:min(820px,100%);}
+        .param-admin-card-compact{padding:14px;}
+        .param-admin-tabs{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border);}
+        .param-admin-tab{min-height:34px;padding:6px 10px;display:inline-flex;align-items:center;gap:6px;color:var(--text-muted);background:transparent;border:1px solid transparent;border-radius:8px;font-size:.72rem;font-weight:760;white-space:nowrap;}
+        .param-admin-tab:hover{color:var(--adv-blue);background:#f5f6f8;}
+        .param-admin-tab.active{color:var(--adv-blue);background:#f2f4f7;border-color:var(--border-strong);}
+        .param-admin-panel[hidden]{display:none!important;}
+        .param-admin-panel{min-width:0;}
+        .param-admin-panel .param-admin-head{margin-bottom:10px;}
+        .param-admin-panel .param-admin-help{max-width:560px;}
+        .param-admin-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
         .param-admin-card{padding:18px;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-sm);}
         .param-admin-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px;}
         .param-admin-title{color:var(--adv-blue);font-size:.88rem;font-weight:800;}
@@ -3521,12 +3532,16 @@
         html[data-theme="dark"] .param-admin-card{background:#20252d;border-color:#343a45;}
         html[data-theme="dark"] .param-admin-title{color:#eef1f5;}
         html[data-theme="dark"] .param-admin-help{color:#9ba5b0;}
+        html[data-theme="dark"] .param-admin-tabs,html[data-theme="dark"] .param-admin-footer{border-color:#343a45;}
+        html[data-theme="dark"] .param-admin-tab{color:#aeb8c2;}
+        html[data-theme="dark"] .param-admin-tab:hover{color:#eef1f5;background:#272e37;}
+        html[data-theme="dark"] .param-admin-tab.active{color:#f1f4f7;background:#2c343e;border-color:#46505e;}
         html[data-theme="dark"] .param-row{background:#252b34;border-color:#3a424e;}
         html[data-theme="dark"] .param-remove,html[data-theme="dark"] .param-add{background:#252b34;border-color:#46505e;color:#dce2e8;}
         html[data-theme="dark"] .ticket-internal-status{background-color:#252b34;color:#e3e7ec;border-color:#46505e;}
         html[data-theme="dark"] #ticket-chat-dialog .chat-emoji-categories{background:#1b252b;border-color:#344149;}
         html[data-theme="dark"] #ticket-chat-dialog .chat-emoji-category.active,html[data-theme="dark"] #ticket-chat-dialog .chat-emoji-category:hover{background:#314049;}
-        @media(max-width:767.98px){.param-admin-grid{grid-template-columns:1fr}.param-row{grid-template-columns:1fr}.param-row.simple{grid-template-columns:1fr auto}.param-row.ticket-status{grid-template-columns:48px minmax(0,1fr) auto}.ticket-internal-status{min-width:125px}.chat-emoji-grid{grid-template-columns:repeat(7,1fr)}}
+        @media(max-width:767.98px){.param-admin-grid{grid-template-columns:1fr}.param-admin-card,.param-admin-card-compact{padding:12px}.param-admin-tabs{gap:4px}.param-admin-tab{flex:1 1 calc(50% - 4px);justify-content:center}.param-row{grid-template-columns:1fr}.param-row.simple{grid-template-columns:1fr auto}.param-row.ticket-status{grid-template-columns:48px minmax(0,1fr) auto}.ticket-internal-status{min-width:125px}.chat-emoji-grid{grid-template-columns:repeat(7,1fr)}}
     </style>
 
 </head>
@@ -4015,26 +4030,50 @@
 
 
         <div id="tab-parametros-crm" class="content-section hidden" data-permission="crm_params">
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-                <div><h4 class="mb-1" style="color:var(--adv-blue);font-weight:700;">Parâmetros CRM</h4><p class="text-muted mb-0">Cadastre e edite as opções utilizadas no Controle CRM sem alterar o código do sistema.</p></div>
-                <button type="button" class="btn btn-outline-secondary" onclick="carregarParametrosCRM(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3 param-admin-shell">
+                <div><h4 class="mb-1" style="color:var(--adv-blue);font-weight:700;">Parâmetros CRM</h4><p class="text-muted mb-0">Gerencie em um único espaço as opções utilizadas no Controle CRM.</p></div>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="carregarParametrosCRM(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
             </div>
-            <div id="crm-params-status" class="menu-save-status text-muted mb-3"></div>
-            <div class="param-admin-grid">
-                <section class="param-admin-card"><div class="param-admin-head"><div><div class="param-admin-title">Status do lead</div><div class="param-admin-help">O comportamento define como o CRM trata follow-up, conversão e perda.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('status')"><i class="bi bi-plus-lg"></i> Novo</button></div><div id="crm-params-status-list" class="param-admin-list"></div></section>
-                <section class="param-admin-card"><div class="param-admin-head"><div><div class="param-admin-title">Modelos de cobrança</div><div class="param-admin-help">O tipo de cálculo preserva a lógica da previsão de receita mesmo que o nome seja alterado.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('modelosCobranca')"><i class="bi bi-plus-lg"></i> Novo</button></div><div id="crm-params-modelosCobranca-list" class="param-admin-list"></div></section>
-                <section class="param-admin-card"><div class="param-admin-head"><div><div class="param-admin-title">Motivos de perda</div><div class="param-admin-help">Opções exibidas quando o lead é classificado como perdido.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('motivosPerda')"><i class="bi bi-plus-lg"></i> Novo</button></div><div id="crm-params-motivosPerda-list" class="param-admin-list"></div></section>
-                <section class="param-admin-card"><div class="param-admin-head"><div><div class="param-admin-title">Origens de anúncio</div><div class="param-admin-help">Fontes de mídia paga aceitas para os leads do CRM.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('origensAnuncio')"><i class="bi bi-plus-lg"></i> Novo</button></div><div id="crm-params-origensAnuncio-list" class="param-admin-list"></div></section>
+            <div class="param-admin-shell">
+                <section class="param-admin-card param-admin-card-compact">
+                    <div class="param-admin-tabs" role="tablist" aria-label="Grupos de parâmetros CRM">
+                        <button type="button" class="param-admin-tab active" data-param-crm-tab="status" onclick="selecionarGrupoParametroCRM('status',this)"><i class="bi bi-kanban"></i> Status</button>
+                        <button type="button" class="param-admin-tab" data-param-crm-tab="modelosCobranca" onclick="selecionarGrupoParametroCRM('modelosCobranca',this)"><i class="bi bi-cash-stack"></i> Cobrança</button>
+                        <button type="button" class="param-admin-tab" data-param-crm-tab="motivosPerda" onclick="selecionarGrupoParametroCRM('motivosPerda',this)"><i class="bi bi-x-circle"></i> Perdas</button>
+                        <button type="button" class="param-admin-tab" data-param-crm-tab="origensAnuncio" onclick="selecionarGrupoParametroCRM('origensAnuncio',this)"><i class="bi bi-megaphone"></i> Origens</button>
+                    </div>
+
+                    <section class="param-admin-panel" data-param-crm-panel="status">
+                        <div class="param-admin-head"><div><div class="param-admin-title">Status do lead</div><div class="param-admin-help">O comportamento define como o CRM trata follow-up, conversão e perda.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('status')"><i class="bi bi-plus-lg"></i> Novo</button></div>
+                        <div id="crm-params-status-list" class="param-admin-list"></div>
+                    </section>
+                    <section class="param-admin-panel" data-param-crm-panel="modelosCobranca" hidden>
+                        <div class="param-admin-head"><div><div class="param-admin-title">Modelos de cobrança</div><div class="param-admin-help">Preserva a lógica da previsão de receita mesmo que o nome seja alterado.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('modelosCobranca')"><i class="bi bi-plus-lg"></i> Novo</button></div>
+                        <div id="crm-params-modelosCobranca-list" class="param-admin-list"></div>
+                    </section>
+                    <section class="param-admin-panel" data-param-crm-panel="motivosPerda" hidden>
+                        <div class="param-admin-head"><div><div class="param-admin-title">Motivos de perda</div><div class="param-admin-help">Opções exibidas quando o lead é classificado como perdido.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('motivosPerda')"><i class="bi bi-plus-lg"></i> Novo</button></div>
+                        <div id="crm-params-motivosPerda-list" class="param-admin-list"></div>
+                    </section>
+                    <section class="param-admin-panel" data-param-crm-panel="origensAnuncio" hidden>
+                        <div class="param-admin-head"><div><div class="param-admin-title">Origens de anúncio</div><div class="param-admin-help">Fontes de mídia paga aceitas para os leads do CRM.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('origensAnuncio')"><i class="bi bi-plus-lg"></i> Novo</button></div>
+                        <div id="crm-params-origensAnuncio-list" class="param-admin-list"></div>
+                    </section>
+
+                    <div class="param-admin-footer">
+                        <div id="crm-params-status" class="menu-save-status text-muted mb-0"></div>
+                        <button type="button" class="btn btn-sm text-white" style="background:var(--adv-blue)" onclick="salvarParametrosCRM()"><i class="bi bi-check2 me-1"></i> Salvar parâmetros</button>
+                    </div>
+                </section>
             </div>
-            <div class="param-actions"><button type="button" class="btn text-white" style="background:var(--adv-blue)" onclick="salvarParametrosCRM()"><i class="bi bi-check2 me-1"></i> Salvar parâmetros</button></div>
         </div>
 
         <div id="tab-parametros-tickets" class="content-section hidden" data-permission="ticket_params">
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3 param-admin-shell">
                 <div><h4 class="mb-1" style="color:var(--adv-blue);font-weight:700;">Parâmetros de tickets</h4><p class="text-muted mb-0">Crie status internos para organização da equipe. Eles não alteram o fluxo automático do chatbot.</p></div>
                 <button type="button" class="btn btn-outline-secondary" onclick="carregarParametrosTickets(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
             </div>
-            <div class="param-admin-card" style="max-width:900px"><div class="param-admin-head"><div><div class="param-admin-title">Status internos</div><div class="param-admin-help">Defina o nome e a cor. A legenda da tela Tickets ativos é criada automaticamente.</div></div><button class="param-add" type="button" onclick="adicionarParametroTicket()"><i class="bi bi-plus-lg"></i> Novo status</button></div><div id="ticket-params-status" class="menu-save-status text-muted mb-2"></div><div id="ticket-params-status-list" class="param-admin-list"></div><div class="param-actions"><button type="button" class="btn text-white" style="background:var(--adv-blue)" onclick="salvarParametrosTickets()"><i class="bi bi-check2 me-1"></i> Salvar status</button></div></div>
+            <div class="param-admin-card param-admin-card-compact param-admin-shell"><div class="param-admin-head"><div><div class="param-admin-title">Status internos</div><div class="param-admin-help">Defina o nome e a cor. A legenda da tela Tickets ativos é criada automaticamente.</div></div><button class="param-add" type="button" onclick="adicionarParametroTicket()"><i class="bi bi-plus-lg"></i> Novo status</button></div><div id="ticket-params-status" class="menu-save-status text-muted mb-2"></div><div id="ticket-params-status-list" class="param-admin-list"></div><div class="param-actions"><button type="button" class="btn text-white" style="background:var(--adv-blue)" onclick="salvarParametrosTickets()"><i class="bi bi-check2 me-1"></i> Salvar status</button></div></div>
         </div>
 
         <div id="tab-usuarios" class="content-section hidden" data-permission="users">
@@ -7191,8 +7230,14 @@ function renderizarLista(itens) {
         const CRM_TIPOS_CALCULO=[['consulta','Consulta (entrada)'],['fixo','Fixo (valor potencial)'],['parcelado','Parcelado'],['exito','Êxito'],['misto','Misto'],['nenhum','Sem cálculo automático']];
         function idParametroLocal(nome='item'){return `${String(nome||'item').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)||'item'}-${Math.random().toString(36).slice(2,8)}`;}
         function criarSelectParametro(opcoes,valor){const sel=document.createElement('select');sel.className='form-select';opcoes.forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o)});sel.value=valor||opcoes[0]?.[0]||'';return sel;}
+        function selecionarGrupoParametroCRM(chave,botao=null){
+            const alvo=String(chave||'status');
+            document.querySelectorAll('[data-param-crm-panel]').forEach(panel=>{panel.hidden=panel.getAttribute('data-param-crm-panel')!==alvo;});
+            document.querySelectorAll('[data-param-crm-tab]').forEach(btn=>{const ativo=btn.getAttribute('data-param-crm-tab')===alvo;btn.classList.toggle('active',ativo);btn.setAttribute('aria-selected',String(ativo));});
+            if(botao) botao.blur?.();
+        }
         function renderizarParametrosCRM(){const p=window.crmParametrosAdmin||{};['status','modelosCobranca','motivosPerda','origensAnuncio'].forEach(chave=>{const box=document.getElementById(`crm-params-${chave}-list`);if(!box)return;box.replaceChildren();(p[chave]||[]).forEach((item,index)=>{const row=document.createElement('div');row.className=`param-row ${['motivosPerda','origensAnuncio'].includes(chave)?'simple':''}`;row.dataset.index=index;const input=document.createElement('input');input.className='form-control';input.value=item.nome||'';input.placeholder='Nome do parâmetro';input.oninput=()=>item.nome=input.value;row.appendChild(input);if(chave==='status'){const sel=criarSelectParametro(CRM_TIPOS_STATUS,item.tipo);sel.onchange=()=>item.tipo=sel.value;row.appendChild(sel)}else if(chave==='modelosCobranca'){const sel=criarSelectParametro(CRM_TIPOS_CALCULO,item.calculo);sel.onchange=()=>item.calculo=sel.value;row.appendChild(sel)}const rem=document.createElement('button');rem.type='button';rem.className='param-remove';rem.title='Remover';rem.innerHTML='<i class="bi bi-trash"></i>';rem.onclick=()=>{p[chave].splice(index,1);renderizarParametrosCRM()};row.appendChild(rem);box.appendChild(row)});if(!(p[chave]||[]).length){const e=document.createElement('div');e.className='text-muted small';e.textContent='Nenhum item cadastrado.';box.appendChild(e)}})}
-        function adicionarParametroCRM(chave){if(!window.crmParametrosAdmin)window.crmParametrosAdmin={status:[],modelosCobranca:[],motivosPerda:[],origensAnuncio:[]};const item={id:idParametroLocal(chave),nome:''};if(chave==='status')item.tipo='aberto';if(chave==='modelosCobranca')item.calculo='nenhum';window.crmParametrosAdmin[chave]=window.crmParametrosAdmin[chave]||[];window.crmParametrosAdmin[chave].push(item);renderizarParametrosCRM();setTimeout(()=>document.querySelector(`#crm-params-${chave}-list .param-row:last-child input`)?.focus(),0)}
+        function adicionarParametroCRM(chave){if(!window.crmParametrosAdmin)window.crmParametrosAdmin={status:[],modelosCobranca:[],motivosPerda:[],origensAnuncio:[]};const item={id:idParametroLocal(chave),nome:''};if(chave==='status')item.tipo='aberto';if(chave==='modelosCobranca')item.calculo='nenhum';window.crmParametrosAdmin[chave]=window.crmParametrosAdmin[chave]||[];window.crmParametrosAdmin[chave].push(item);selecionarGrupoParametroCRM(chave);renderizarParametrosCRM();setTimeout(()=>document.querySelector(`#crm-params-${chave}-list .param-row:last-child input`)?.focus({preventScroll:true}),0)}
         async function carregarParametrosCRM(forcar=false){if(window.crmParametrosAdmin&&!forcar){renderizarParametrosCRM();return}const st=document.getElementById('crm-params-status');if(st)st.textContent='Carregando parâmetros...';try{const r=await fetch('/api/admin/crm-params',{cache:'no-store'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Erro ao carregar parâmetros.');window.crmParametrosAdmin=d.parametros||{};renderizarParametrosCRM();if(st)st.textContent=''}catch(e){if(st){st.className='menu-save-status text-danger mb-3';st.textContent=e.message}}}
         async function salvarParametrosCRM(){const st=document.getElementById('crm-params-status');for(const chave of ['status','modelosCobranca','motivosPerda','origensAnuncio']){if((window.crmParametrosAdmin?.[chave]||[]).some(x=>!String(x.nome||'').trim())){alert('Preencha o nome de todos os parâmetros antes de salvar.');return}}if(st){st.className='menu-save-status text-muted mb-3';st.textContent='Salvando...'}try{const r=await fetch('/api/admin/crm-params',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(window.crmParametrosAdmin||{})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Erro ao salvar parâmetros.');window.crmParametrosAdmin=d.parametros;window.crmLoaded=false;if(st){st.className='menu-save-status text-success mb-3';st.textContent='Parâmetros salvos.'}renderizarParametrosCRM()}catch(e){if(st){st.className='menu-save-status text-danger mb-3';st.textContent=e.message}}}
         function renderizarParametrosTickets(){const box=document.getElementById('ticket-params-status-list');if(!box)return;box.replaceChildren();const lista=window.ticketParametrosAdmin?.status||[];lista.forEach((item,index)=>{const row=document.createElement('div');row.className='param-row ticket-status';const cor=document.createElement('input');cor.type='color';cor.className='form-control form-control-color param-color';cor.value=/^#[0-9a-f]{6}$/i.test(item.cor||'')?item.cor:'#667085';cor.oninput=()=>item.cor=cor.value;const nome=document.createElement('input');nome.className='form-control';nome.value=item.nome||'';nome.placeholder='Ex: Aguardando documentação';nome.oninput=()=>item.nome=nome.value;const rem=document.createElement('button');rem.type='button';rem.className='param-remove';rem.innerHTML='<i class="bi bi-trash"></i>';rem.onclick=()=>{lista.splice(index,1);renderizarParametrosTickets()};row.append(cor,nome,rem);box.appendChild(row)});if(!lista.length){const e=document.createElement('div');e.className='text-muted small';e.textContent='Nenhum status interno cadastrado. Clique em “Novo status” para começar.';box.appendChild(e)}}
