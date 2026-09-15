@@ -2877,6 +2877,382 @@
         }
     </style>
 
+
+
+    <style id="dark-theme-contrast-v10">
+        /* V10 — contraste completo das telas no modo escuro.
+           Este bloco fica por último de propósito para sobrescrever estilos claros
+           adicionados pelos módulos do chat e formulários das versões anteriores. */
+        html[data-theme="dark"] {
+            --dark-bg:#15181e;
+            --dark-surface:#1f242c;
+            --dark-surface-2:#252b34;
+            --dark-surface-3:#2b323c;
+            --dark-border:#39414c;
+            --dark-border-soft:#313842;
+            --dark-text:#eef1f5;
+            --dark-text-soft:#c4cbd4;
+            --dark-muted:#929ca9;
+            --dark-gold:#d4b36d;
+        }
+
+        /* Bootstrap mantém cores próprias em .table; sobrescrevemos as variáveis
+           para que nenhuma célula volte a ficar branca. */
+        html[data-theme="dark"] .table {
+            --bs-table-color:var(--dark-text-soft);
+            --bs-table-bg:transparent;
+            --bs-table-border-color:var(--dark-border-soft);
+            --bs-table-striped-color:var(--dark-text-soft);
+            --bs-table-striped-bg:#222832;
+            --bs-table-hover-color:var(--dark-text);
+            --bs-table-hover-bg:#282f39;
+            color:var(--dark-text-soft)!important;
+            background:transparent!important;
+        }
+        html[data-theme="dark"] .table > :not(caption) > * > * {
+            color:inherit;
+            background-color:transparent!important;
+            border-bottom-color:var(--dark-border-soft)!important;
+            box-shadow:none!important;
+        }
+        html[data-theme="dark"] .btn-close { filter:invert(1) grayscale(1) brightness(1.8); opacity:.72; }
+        html[data-theme="dark"] .btn-close:hover { opacity:1; }
+        html[data-theme="dark"] .text-muted,
+        html[data-theme="dark"] .form-text { color:var(--dark-muted)!important; }
+        html[data-theme="dark"] .form-label,
+        html[data-theme="dark"] .form-check-label { color:var(--dark-text-soft)!important; }
+        html[data-theme="dark"] .form-control,
+        html[data-theme="dark"] .form-select,
+        html[data-theme="dark"] textarea.form-control,
+        html[data-theme="dark"] .input-group-text {
+            color:var(--dark-text)!important;
+            background-color:#191e25!important;
+            border-color:var(--dark-border)!important;
+        }
+        html[data-theme="dark"] .form-select option { color:var(--dark-text); background:#191e25; }
+        html[data-theme="dark"] .form-control:disabled,
+        html[data-theme="dark"] .form-select:disabled,
+        html[data-theme="dark"] textarea.form-control:disabled {
+            color:#8c96a3!important; background:#20262e!important; opacity:1;
+        }
+        html[data-theme="dark"] .form-check-input { background-color:#20262e; border-color:#56606d; }
+        html[data-theme="dark"] .form-check-input:checked { background-color:#9f824a; border-color:#b79655; }
+        html[data-theme="dark"] code { color:#e1bf76; background:#2b2922; }
+
+        /* OPÇÕES DE ATENDIMENTO */
+        html[data-theme="dark"] #tab-opcoes .card-custom,
+        html[data-theme="dark"] #tab-opcoes .new-option-box,
+        html[data-theme="dark"] #tab-opcoes .menu-option-card,
+        html[data-theme="dark"] #tab-opcoes .questions-editor,
+        html[data-theme="dark"] #tab-opcoes .question-row,
+        html[data-theme="dark"] #tab-opcoes .question-validation-box,
+        html[data-theme="dark"] #tab-opcoes .menu-preview,
+        html[data-theme="dark"] #tab-opcoes .menu-pagination {
+            color:var(--dark-text-soft)!important;
+            background:var(--dark-surface)!important;
+            border-color:var(--dark-border)!important;
+            box-shadow:none!important;
+        }
+        html[data-theme="dark"] #tab-opcoes .new-option-box,
+        html[data-theme="dark"] #tab-opcoes .questions-editor,
+        html[data-theme="dark"] #tab-opcoes .question-validation-box,
+        html[data-theme="dark"] #tab-opcoes .menu-preview,
+        html[data-theme="dark"] #tab-opcoes .menu-pagination { background:#20262e!important; }
+        html[data-theme="dark"] #tab-opcoes .question-row,
+        html[data-theme="dark"] #tab-opcoes .menu-option-card { background:#232932!important; }
+        html[data-theme="dark"] #tab-opcoes .question-order {
+            color:#e3c27b!important; background:#303641!important;
+        }
+        html[data-theme="dark"] #tab-opcoes .emoji-choice,
+        html[data-theme="dark"] #tab-opcoes .btn-menu-icon,
+        html[data-theme="dark"] #tab-opcoes .btn-ai-suggest,
+        html[data-theme="dark"] #tab-opcoes .menu-page-btn {
+            color:var(--dark-text-soft)!important;
+            background:#29303a!important;
+            border-color:#424b58!important;
+        }
+        html[data-theme="dark"] #tab-opcoes .emoji-choice:hover,
+        html[data-theme="dark"] #tab-opcoes .btn-menu-icon:hover,
+        html[data-theme="dark"] #tab-opcoes .btn-ai-suggest:hover,
+        html[data-theme="dark"] #tab-opcoes .menu-page-btn:hover:not(:disabled) {
+            color:#fff!important; background:#353d49!important; border-color:#596473!important;
+        }
+        html[data-theme="dark"] #tab-opcoes .menu-page-btn.active,
+        html[data-theme="dark"] #tab-opcoes .menu-number-badge {
+            color:#fff!important; background:#4a5260!important; border-color:#5d6878!important;
+        }
+        html[data-theme="dark"] #tab-opcoes .menu-number-badge.inactive { background:#555d68!important; }
+        html[data-theme="dark"] #tab-opcoes h5,
+        html[data-theme="dark"] #tab-opcoes .question-validation-header,
+        html[data-theme="dark"] #tab-opcoes strong { color:var(--dark-text)!important; }
+
+        /* USUÁRIOS */
+        html[data-theme="dark"] #tab-usuarios .card-custom,
+        html[data-theme="dark"] #tab-usuarios .users-summary,
+        html[data-theme="dark"] #tab-usuarios .users-table-wrap {
+            color:var(--dark-text-soft)!important;
+            background:var(--dark-surface)!important;
+            border-color:var(--dark-border)!important;
+            box-shadow:none!important;
+        }
+        html[data-theme="dark"] #tab-usuarios .users-summary { background:#222832!important; }
+        html[data-theme="dark"] #tab-usuarios .users-table thead th {
+            color:#aeb7c3!important; background:#282e38!important; border-color:var(--dark-border)!important;
+        }
+        html[data-theme="dark"] #tab-usuarios .users-table tbody tr:hover > td { background:#272e37!important; }
+        html[data-theme="dark"] #tab-usuarios .user-main-name { color:var(--dark-text)!important; }
+        html[data-theme="dark"] #tab-usuarios .user-login,
+        html[data-theme="dark"] #tab-usuarios .user-permissions { color:var(--dark-muted)!important; }
+        html[data-theme="dark"] #tab-usuarios .user-role-pill {
+            color:#cbd2dc!important; background:#303741!important; border-color:#48515e!important;
+        }
+        html[data-theme="dark"] #tab-usuarios .user-role-pill.admin {
+            color:#ead094!important; background:#382f20!important; border-color:#5e4d2d!important;
+        }
+        html[data-theme="dark"] #tab-usuarios .user-status-pill { color:#7fd8a6!important; }
+        html[data-theme="dark"] #tab-usuarios .user-status-pill.inactive { color:#ff918b!important; }
+        html[data-theme="dark"] #tab-usuarios .user-edit-btn {
+            color:var(--dark-text)!important; background:#29303a!important; border-color:#454f5d!important;
+        }
+        html[data-theme="dark"] #tab-usuarios .user-edit-btn:hover { background:#353d49!important; }
+
+        html[data-theme="dark"] #user-form-dialog,
+        html[data-theme="dark"] #user-form-dialog .user-dialog-header,
+        html[data-theme="dark"] #user-form-dialog .user-dialog-body {
+            color:var(--dark-text-soft)!important; background:var(--dark-surface)!important; border-color:var(--dark-border)!important;
+        }
+        html[data-theme="dark"] #user-form-dialog .permission-item {
+            color:var(--dark-text-soft)!important; background:#252c35!important; border-color:#3d4652!important;
+        }
+        html[data-theme="dark"] #user-form-dialog .user-dialog-footer { border-color:var(--dark-border)!important; }
+        html[data-theme="dark"] #user-form-dialog h5,
+        html[data-theme="dark"] #user-form-dialog strong { color:var(--dark-text)!important; }
+
+        /* HORÁRIO DE FUNCIONAMENTO */
+        html[data-theme="dark"] #tab-horario .card-custom,
+        html[data-theme="dark"] #tab-horario .menu-preview {
+            color:var(--dark-text-soft)!important; background:var(--dark-surface)!important; border-color:var(--dark-border)!important;
+        }
+        html[data-theme="dark"] #tab-horario .menu-preview { background:#20262e!important; }
+        html[data-theme="dark"] #business-days-container .form-check-label {
+            color:#cbd2dc!important; background:#252c35!important; border-color:#424c59!important;
+        }
+        html[data-theme="dark"] #business-days-container .form-check-label:hover {
+            color:#fff!important; background:#303844!important; border-color:#5a6675!important;
+        }
+        html[data-theme="dark"] #business-days-container .form-check-input:checked + .form-check-label {
+            color:#181b20!important; background:#d4b36d!important; border-color:#d4b36d!important;
+        }
+        html[data-theme="dark"] #tab-horario .alert-light {
+            color:#cad1da!important; background:#222831!important; border-color:#3d4652!important;
+        }
+        html[data-theme="dark"] #tab-horario strong { color:var(--dark-text)!important; }
+
+        /* CLIENTES */
+        html[data-theme="dark"] #tab-clientes .card-custom,
+        html[data-theme="dark"] #tab-clientes .clients-summary-card,
+        html[data-theme="dark"] #tab-clientes .clients-table-wrap,
+        html[data-theme="dark"] #tab-clientes .clients-count {
+            color:var(--dark-text-soft)!important; background:var(--dark-surface)!important; border-color:var(--dark-border)!important; box-shadow:none!important;
+        }
+        html[data-theme="dark"] #tab-clientes .clients-count { background:#252c35!important; }
+        html[data-theme="dark"] #tab-clientes .clients-summary-label { color:var(--dark-muted)!important; }
+        html[data-theme="dark"] #tab-clientes .clients-summary-value { color:var(--dark-text)!important; }
+        html[data-theme="dark"] #tab-clientes .clients-summary-icon { color:#d6bd83!important; background:#303641!important; }
+        html[data-theme="dark"] #tab-clientes .clients-summary-card.is-registered .clients-summary-icon { color:#82d9a8!important; background:#203229!important; }
+        html[data-theme="dark"] #tab-clientes .clients-summary-card.is-unregistered .clients-summary-icon { color:#e2bf74!important; background:#342e22!important; }
+        html[data-theme="dark"] #tab-clientes .clients-table thead th {
+            color:#aeb7c3!important; background:#282e38!important; border-color:var(--dark-border)!important;
+        }
+        html[data-theme="dark"] #tab-clientes .clients-table tbody tr:hover > td { background:#272e37!important; }
+        html[data-theme="dark"] #tab-clientes .client-name,
+        html[data-theme="dark"] #tab-clientes .client-responsavel { color:var(--dark-text)!important; }
+        html[data-theme="dark"] #tab-clientes .client-secondary { color:var(--dark-muted)!important; }
+        html[data-theme="dark"] #tab-clientes .client-status-pill.registered {
+            color:#89ddb0!important; background:#203229!important; border-color:#355846!important;
+        }
+        html[data-theme="dark"] #tab-clientes .client-status-pill.unregistered {
+            color:#e5c477!important; background:#352f22!important; border-color:#5b4c2e!important;
+        }
+        html[data-theme="dark"] #tab-clientes .btn-client-register,
+        html[data-theme="dark"] #tab-clientes .btn-client-edit,
+        html[data-theme="dark"] #tab-clientes .btn-remove-client {
+            color:var(--dark-text-soft)!important; background:#29303a!important; border-color:#454f5d!important;
+        }
+        html[data-theme="dark"] #tab-clientes .btn-client-register { color:#e4c57f!important; }
+        html[data-theme="dark"] #tab-clientes .btn-remove-client { color:#ff8f89!important; }
+        html[data-theme="dark"] #tab-clientes .btn-client-register:hover,
+        html[data-theme="dark"] #tab-clientes .btn-client-edit:hover { background:#353d49!important; }
+        html[data-theme="dark"] #tab-clientes .btn-remove-client:hover { color:#fff!important; background:#9b413d!important; }
+
+        html[data-theme="dark"] #client-form-dialog,
+        html[data-theme="dark"] #client-form-dialog .client-dialog-header,
+        html[data-theme="dark"] #client-form-dialog .client-dialog-body {
+            color:var(--dark-text-soft)!important; background:var(--dark-surface)!important; border-color:var(--dark-border)!important;
+        }
+        html[data-theme="dark"] #client-form-dialog .client-form-section-title,
+        html[data-theme="dark"] #client-form-dialog .client-dialog-title { color:var(--dark-text)!important; border-color:var(--dark-border)!important; }
+        html[data-theme="dark"] #client-form-dialog .client-dialog-subtitle,
+        html[data-theme="dark"] #client-form-dialog .client-form-status { color:var(--dark-muted)!important; }
+        html[data-theme="dark"] #client-form-dialog .client-dialog-close { color:var(--dark-text-soft)!important; background:#29303a!important; border-color:#454f5d!important; }
+        html[data-theme="dark"] #client-form-dialog .client-dialog-footer { border-color:var(--dark-border)!important; }
+
+        /* CHAT — cabeçalho, status, compositor e histórico */
+        html[data-theme="dark"] #ticket-chat-dialog,
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-shell {
+            color:var(--dark-text-soft)!important; background:#111b21!important; border-color:#39434b!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-header {
+            color:var(--dark-text-soft)!important; background:#202c33!important; border-color:#303d45!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-avatar { color:#c9d2d8!important; background:#334047!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-title { color:#f0f3f5!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-subtitle { color:#9daab2!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-close { color:#c1cbd1!important; background:transparent!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-close:hover { background:#2b3940!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-operations,
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-user,
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-storage {
+            color:#aeb9c0!important; background:#182229!important; border-color:#2f3b43!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-op-pill {
+            color:#c6cfd5!important; background:#253139!important; border-color:#39474f!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-op-pill > i { color:#99a7ae!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-transfer,
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-documents-btn {
+            color:#d3dadd!important; background:#263239!important; border-color:#405058!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-transfer:hover:not(:disabled),
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-documents-btn:hover { background:#303e45!important; border-color:#56666e!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-transfer-panel {
+            color:#d5dce0!important; background:#202c33!important; border-color:#3a4951!important; box-shadow:0 18px 45px rgba(0,0,0,.38)!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-transfer-title { color:#f0f3f5!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-transfer-help { color:#95a2aa!important; }
+        html[data-theme="dark"] #ticket-chat-history { background-color:#0b141a!important; background-image:none!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.in .chat-bubble { color:#e9edef!important; background:#202c33!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.out .chat-bubble { color:#e9edef!important; background:#005c4b!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.bot .chat-bubble { color:#e9edef!important; background:#253744!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-text { color:#e9edef!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-sender { color:#65d9bd!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.in .chat-sender { color:#aeb9c0!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.bot .chat-sender { color:#78c9ed!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-time,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-pending-label,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-empty { color:#91a0a8!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-media-card,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-media-link,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-media-preview {
+            color:#d7dde1!important; background:#26343b!important; border-color:#3b4a52!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-media-link:hover { color:#fff!important; background:#303f46!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-composer {
+            color:#d7dde1!important; background:#202c33!important; border-color:#303d45!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-compose-input {
+            color:#f0f3f5!important; background:#2a3942!important; border-color:#3d4a52!important; box-shadow:none!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-compose-input::placeholder { color:#87969f!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-compose-input:disabled { color:#7f8d95!important; background:#263139!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-paste-hint,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-compose-status { color:#8998a0!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-emoji-btn,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-attach-btn,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-record-btn { color:#b7c2c8!important; background:transparent!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-emoji-btn:hover:not(:disabled),
+        html[data-theme="dark"] #ticket-chat-dialog .chat-attach-btn:hover:not(:disabled),
+        html[data-theme="dark"] #ticket-chat-dialog .chat-record-btn:hover:not(:disabled) { color:#6ce1c4!important; background:#2c3940!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-emoji-picker,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-quick-suggestions {
+            color:var(--dark-text-soft)!important; background:#202c33!important; border-color:#3a4951!important; box-shadow:0 14px 36px rgba(0,0,0,.42)!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-emoji-choice:hover,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-quick-suggestion:hover,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-quick-suggestion.active { background:#2d3a42!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-quick-suggestion { color:#dce2e6!important; background:#202c33!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-quick-suggestion-title { color:#edf1f3!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-quick-suggestion-preview { color:#96a5ad!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-quick-suggestion-code { color:#7ce0c6!important; background:#1b3b35!important; }
+
+        /* Responder mensagem / áudio */
+        html[data-theme="dark"] #ticket-chat-dialog .chat-reply-action { color:#b7c2c8!important; background:#26343b!important; border-color:#405058!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-reply-action:hover { color:#73e0c6!important; background:#303f46!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-quoted,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.in .chat-quoted,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-reply-compose {
+            color:#cbd4d9!important; background:#26343b!important; border-color:#00a884!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-quoted-name,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-reply-compose-name { color:#6fe0c4!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-reply-compose-close { color:#b6c2c8!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-reply-compose-close:hover { background:#334149!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-recording-bar { color:#dbe1e5!important; background:#26343b!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-recording-time { color:#eef2f4!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-recording-label { color:#9eabb2!important; }
+
+        /* Painel de documentos/IA dentro do chat */
+        html[data-theme="dark"] #ticket-chat-dialog .chat-documents-backdrop { background:rgba(0,0,0,.38)!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-documents-panel,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-documents-header {
+            color:#d7dde1!important; background:#182229!important; border-color:#303d45!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-documents-title { color:#f0f3f5!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-documents-subtitle,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-documents-empty { color:#95a2aa!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-documents-close { color:#c2ccd1!important; background:#26343b!important; border-color:#3b4a52!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-card,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-card-header {
+            color:#d7dde1!important; background:#202c33!important; border-color:#35434b!important; box-shadow:none!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-card-header { background:#243139!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-card-name,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-summary,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-type { color:#e6ebee!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-card-meta,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-details summary { color:#98a5ac!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-action {
+            color:#d3dadd!important; background:#29363d!important; border-color:#405058!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-action:hover { color:#fff!important; background:#33434a!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-ai-summary {
+            color:#d5dadd!important; background:#293127!important; border-color:#665a35!important;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-ai-summary-head,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-ai-summary-open { color:#dfc27f!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-ai-summary.processing,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-status-note { color:#e0c47f!important; background:#332e22!important; border-color:#5c4d2d!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-ai-summary.error,
+        html[data-theme="dark"] #ticket-chat-dialog .chat-doc-status-error { color:#ffaaa4!important; background:#372526!important; border-color:#634041!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-doc-subsection-title { color:#aeb9c0!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-doc-list { color:#d0d7db!important; }
+
+        /* Textos rápidos também fazem parte do fluxo do chat. */
+        html[data-theme="dark"] #quick-texts-dialog,
+        html[data-theme="dark"] #quick-texts-dialog .quick-texts-header,
+        html[data-theme="dark"] #quick-texts-dialog .quick-text-form,
+        html[data-theme="dark"] #quick-texts-dialog .quick-text-card,
+        html[data-theme="dark"] #quick-texts-dialog .quick-text-empty {
+            color:var(--dark-text-soft)!important; background:var(--dark-surface)!important; border-color:var(--dark-border)!important;
+        }
+        html[data-theme="dark"] #quick-texts-dialog .quick-text-form { background:#222832!important; }
+        html[data-theme="dark"] #quick-texts-dialog .quick-text-card { background:#252c35!important; }
+        html[data-theme="dark"] #quick-texts-dialog .quick-text-list-head > div,
+        html[data-theme="dark"] #quick-texts-dialog .quick-text-card-title { color:var(--dark-text)!important; }
+        html[data-theme="dark"] #quick-texts-dialog .quick-text-preview,
+        html[data-theme="dark"] #quick-texts-dialog .quick-text-list-head small { color:var(--dark-muted)!important; }
+        html[data-theme="dark"] #quick-texts-dialog .quick-text-card-actions button {
+            color:var(--dark-text-soft)!important; background:#2b323c!important; border-color:#424c59!important;
+        }
+
+        /* Segurança contra novos blocos claros dentro das cinco telas corrigidas. */
+        html[data-theme="dark"] #tab-opcoes .bg-white,
+        html[data-theme="dark"] #tab-usuarios .bg-white,
+        html[data-theme="dark"] #tab-horario .bg-white,
+        html[data-theme="dark"] #tab-clientes .bg-white,
+        html[data-theme="dark"] #ticket-chat-dialog .bg-white { background-color:var(--dark-surface)!important; }
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
