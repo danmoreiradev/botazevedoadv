@@ -1013,12 +1013,14 @@ const PERMISSOES_PAINEL = [
 ];
 const PERMISSOES_ADVOGADO_PADRAO = ['tickets', 'clients', 'chat'];
 
-// O MongoDB gratuito é protegido de duas formas: retenção temporal e limite por ticket.
-// Somente texto, metadados e referências criptográficas leves são persistidos.
-// Arquivos, imagens, áudios e vídeos NÃO são armazenados como binário no MongoDB.
-const CHAT_RETENTION_DAYS = 60;
-const CHAT_MAX_MESSAGES_PER_TICKET = 500;
-const CHAT_TRIM_TRIGGER = 540;
+// O histórico textual/metadados do chat é persistente e paginado.
+// Não há mais exclusão automática por quantidade (antigo limite de 500) nem por idade
+// (antigo TTL de 60 dias). Arquivos, imagens, áudios e vídeos continuam NÃO sendo
+// armazenados como binário no MongoDB; ficam somente as referências/metadados/resumos.
+// Caso futuramente seja necessário impor retenção, faça isso por política explícita,
+// nunca silenciosamente durante o atendimento.
+const CHAT_RETENTION_DAYS = null;
+const CHAT_MAX_MESSAGES_PER_TICKET = null;
 const CHAT_LIST_LIMIT_DEFAULT = 60;
 const CHAT_LIST_LIMIT_MAX = 100;
 const CHAT_MAX_TEXT_CHARS = 12000;
@@ -1600,27 +1602,27 @@ function serializarMensagemChat(doc = {}) {
 }
 
 async function apararHistoricoChatSeNecessario(ticketNumber) {
-    if (!ticketMessagesColl || !ticketNumber) return;
-    const agora = Date.now();
-    const ultima = chatLastTrimAt.get(ticketNumber) || 0;
-    if (agora - ultima < 60 * 60 * 1000) return;
-    chatLastTrimAt.set(ticketNumber, agora);
+    // Mantido por compatibilidade com os pontos que registram mensagens.
+    // A partir da V7, o histórico NÃO é aparado por quantidade. O carregamento
+    // continua paginado, então tickets extensos não precisam ser renderizados de uma vez.
+    return;
+}
 
-    setImmediate(async () => {
-        try {
-            const total = await ticketMessagesColl.countDocuments({ ticketNumber });
-            if (total <= CHAT_TRIM_TRIGGER) return;
-            const excedentes = await ticketMessagesColl.find(
-                { ticketNumber },
-                { projection: { _id: 1 } }
-            ).sort({ createdAt: -1 }).skip(CHAT_MAX_MESSAGES_PER_TICKET).toArray();
-            if (excedentes.length) {
-                await ticketMessagesColl.deleteMany({ _id: { $in: excedentes.map(item => item._id) } });
+async function removerPoliticasLegadasHistoricoChat() {
+    if (!ticketMessagesColl) return;
+    try {
+        const indexes = await ticketMessagesColl.indexes();
+        for (const index of indexes) {
+            const ehIndiceCreatedAt = index?.key && Object.keys(index.key).length === 1 && Number(index.key.createdAt) === 1;
+            if (ehIndiceCreatedAt && index.expireAfterSeconds !== undefined) {
+                await ticketMessagesColl.dropIndex(index.name);
+                console.log(`[Chat] TTL legado removido do histórico (${index.name}). Mensagens não expiram mais automaticamente.`);
             }
-        } catch (err) {
-            console.warn('[Chat] Não foi possível aparar histórico do ticket:', err?.message || err);
         }
-    });
+    } catch (err) {
+        // Namespace ainda vazio/índice inexistente não deve impedir a inicialização.
+        console.warn('[Chat] Não foi possível revisar o TTL legado do histórico:', err?.message || err);
+    }
 }
 
 async function registrarMensagemChat(documento = {}) {
@@ -4521,10 +4523,14 @@ async function startBotInterno() {
             ticketMessagesColl.createIndex({ ticketNumber: 1, createdAt: -1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, direction: 1, createdAt: -1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, messageId: 1 }, { unique: true }),
-            ticketMessagesColl.createIndex({ createdAt: 1 }, { expireAfterSeconds: CHAT_RETENTION_DAYS * 24 * 60 * 60 }),
             baileysSentMessagesColl.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
             baileysSentMessagesColl.createIndex({ messageId: 1 })
         ]);
+
+        // Migração automática da política antiga: versões anteriores criavam um TTL
+        // de 60 dias em ticket_messages. Apenas retirar createIndex não basta, pois o
+        // índice permanece no MongoDB; por isso removemos explicitamente o TTL legado.
+        await removerPoliticasLegadasHistoricoChat();
         
         apiKeysColl = db.collection('api_keys');
         const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
@@ -7290,7 +7296,8 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
             documentsSummary: resumoDocumentosIATicket(documentosIAChat),
             hasMore,
             retentionDays: CHAT_RETENTION_DAYS,
-            maxMessagesPerTicket: CHAT_MAX_MESSAGES_PER_TICKET
+            maxMessagesPerTicket: CHAT_MAX_MESSAGES_PER_TICKET,
+            unlimitedHistory: true
         });
     } catch (err) {
         console.error('[Chat] Erro ao carregar mensagens:', err);
@@ -8926,4 +8933,4 @@ setInterval(async () => {
     }
 }, 60 * 60 * 1000);
 
-server.listen(port, () => startBot());  
+server.listen(port, () => startBot());

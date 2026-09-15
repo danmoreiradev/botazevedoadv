@@ -2725,6 +2725,50 @@
         }
     </style>
 
+
+    <style id="layout-chat-admin-v7">
+        /* V7 — chat maior, envio por Enter e navegação administrativa agrupada */
+        #ticket-chat-dialog {
+            width:min(1320px, calc(100vw - 28px));
+            height:min(96vh, 1020px);
+            max-width:none;
+        }
+        .ticket-chat-history { padding-left:clamp(18px,3.2vw,52px); padding-right:clamp(18px,3.2vw,52px); }
+        .chat-bubble { max-width:min(70%,760px); }
+        .ticket-chat-composer { grid-template-columns:auto minmax(0,1fr) auto !important; }
+        .chat-compose-input { max-height:170px; }
+
+        .sidebar .nav { display:flex; flex-direction:column!important; flex-wrap:nowrap!important; }
+        .nav-group { margin-top:5px; border-top:1px solid rgba(255,255,255,.055); padding-top:7px; }
+        .nav-group-toggle {
+            width:100%; min-height:52px; padding:10px 13px; display:flex; align-items:center; gap:12px;
+            color:rgba(255,255,255,.66); background:transparent; border:1px solid transparent;
+            border-radius:12px; font-size:.90rem; font-weight:650; text-align:left; transition:var(--transition);
+        }
+        .nav-group-toggle:hover,.nav-group.has-active>.nav-group-toggle { color:#fff; background:rgba(255,255,255,.045); }
+        .nav-group.has-active>.nav-group-toggle .nav-icon { color:var(--adv-gold); }
+        .nav-group-label { flex:1; }
+        .nav-group-chevron { color:rgba(255,255,255,.44); font-size:.72rem; transition:transform .18s ease; }
+        .nav-group.open .nav-group-chevron { transform:rotate(180deg); }
+        .nav-submenu { display:none; margin:2px 0 5px 17px; padding:3px 0 3px 16px; border-left:1px solid rgba(197,160,89,.20); }
+        .nav-group.open .nav-submenu { display:block; }
+        .nav-sub-link {
+            min-height:40px!important; padding:7px 10px!important; gap:9px!important; border-radius:9px!important;
+            border-left:1px solid transparent!important; font-size:.80rem!important; font-weight:600!important;
+            box-shadow:none!important;
+        }
+        .nav-sub-link.active { background:rgba(197,160,89,.10)!important; border-color:rgba(197,160,89,.10)!important; box-shadow:none!important; }
+        .nav-sub-dot { width:5px; height:5px; flex:0 0 5px; border-radius:50%; background:rgba(255,255,255,.25); }
+        .nav-sub-link.active .nav-sub-dot { background:var(--adv-gold); box-shadow:0 0 0 3px rgba(197,160,89,.10); }
+
+        @media (max-width:767.98px) {
+            #ticket-chat-dialog { width:100vw; height:100dvh; max-height:100dvh; }
+            .ticket-chat-history { padding-left:12px; padding-right:12px; }
+            .chat-bubble { max-width:88%; }
+            .nav-submenu { margin-left:14px; }
+        }
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -2735,18 +2779,6 @@
             </div>
 
             <nav class="nav flex-column" aria-label="Seções do painel">
-                <div class="nav-link active" data-permission="whatsapp" onclick="switchTab('tab-chatbot', this)">
-                    <span class="nav-icon"><i class="bi bi-whatsapp"></i></span>
-                    <span>Conexão WhatsApp</span>
-                </div>
-                <div class="nav-link" data-permission="ia" onclick="switchTab('tab-ia', this)">
-                    <span class="nav-icon"><i class="bi bi-stars"></i></span>
-                    <span>Gestão da IA</span>
-                </div>
-                <div class="nav-link" data-permission="menu" onclick="switchTab('tab-opcoes', this)">
-                    <span class="nav-icon"><i class="bi bi-sliders2"></i></span>
-                    <span>Opções de atendimento</span>
-                </div>
                 <div class="nav-link" id="nav-tickets-link" data-permission="tickets" onclick="switchTab('tab-tickets', this)">
                     <span class="nav-icon"><i class="bi bi-inboxes"></i></span>
                     <span>Tickets ativos</span>
@@ -2756,13 +2788,30 @@
                     <span class="nav-icon"><i class="bi bi-people"></i></span>
                     <span>Clientes</span>
                 </div>
-                <div class="nav-link" data-permission="users" onclick="switchTab('tab-usuarios', this)">
-                    <span class="nav-icon"><i class="bi bi-person-gear"></i></span>
-                    <span>Usuários</span>
-                </div>
-                <div class="nav-link" data-permission="business_hours" onclick="switchTab('tab-horario', this)">
-                    <span class="nav-icon"><i class="bi bi-clock"></i></span>
-                    <span>Horário de funcionamento</span>
+
+                <div class="nav-group open has-active" id="nav-admin-group">
+                    <button type="button" class="nav-group-toggle" id="nav-admin-toggle" onclick="toggleAdminSubmenu(event)" aria-expanded="true" aria-controls="nav-admin-submenu">
+                        <span class="nav-icon"><i class="bi bi-gear"></i></span>
+                        <span class="nav-group-label">Administração</span>
+                        <i class="bi bi-chevron-down nav-group-chevron"></i>
+                    </button>
+                    <div class="nav-submenu" id="nav-admin-submenu">
+                        <div class="nav-link nav-sub-link active" data-permission="whatsapp" onclick="switchTab('tab-chatbot', this)">
+                            <span class="nav-sub-dot"></span><span>Conexão WhatsApp</span>
+                        </div>
+                        <div class="nav-link nav-sub-link" data-permission="ia" onclick="switchTab('tab-ia', this)">
+                            <span class="nav-sub-dot"></span><span>Gestão da IA</span>
+                        </div>
+                        <div class="nav-link nav-sub-link" data-permission="menu" onclick="switchTab('tab-opcoes', this)">
+                            <span class="nav-sub-dot"></span><span>Opções de atendimento</span>
+                        </div>
+                        <div class="nav-link nav-sub-link" data-permission="users" onclick="switchTab('tab-usuarios', this)">
+                            <span class="nav-sub-dot"></span><span>Usuários</span>
+                        </div>
+                        <div class="nav-link nav-sub-link" data-permission="business_hours" onclick="switchTab('tab-horario', this)">
+                            <span class="nav-sub-dot"></span><span>Horário de funcionamento</span>
+                        </div>
+                    </div>
                 </div>
             </nav>
 
@@ -3372,7 +3421,7 @@
             </div>
 
             <div class="ticket-chat-user" id="ticket-chat-current-user">Modo leitura</div>
-            <div class="ticket-chat-storage" id="ticket-chat-storage">Histórico operacional leve</div>
+            <div class="ticket-chat-storage" id="ticket-chat-storage">Histórico completo com carregamento paginado</div>
             <div class="ticket-chat-history" id="ticket-chat-history">
                 <div class="chat-empty">Carregando conversa...</div>
             </div>
@@ -3406,11 +3455,11 @@
                     <div id="ticket-chat-emoji-picker" class="chat-emoji-picker hidden" aria-label="Seletor de emojis"></div>
                     <div id="chat-quick-suggestions" class="chat-quick-suggestions hidden" role="listbox" aria-label="Textos rápidos"></div>
                     <div id="chat-recording-bar" class="chat-recording-bar hidden"><span class="chat-recording-dot"></span><span class="chat-recording-time" id="chat-recording-time">00:00</span><span class="chat-recording-label">Gravando áudio…</span><button type="button" class="chat-recording-cancel" onclick="cancelarGravacaoChat()">Cancelar</button><button type="button" class="chat-recording-send" onclick="finalizarGravacaoChat(true)" title="Enviar áudio"><i class="bi bi-send-fill"></i></button></div>
-                    <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem, use /atalho ou cole uma imagem" onkeydown="atalhoEnviarChat(event)"></textarea>
-                    <div class="chat-paste-hint"><i class="bi bi-lightning-charge"></i> /atalho para texto rápido · Ctrl+V para colar</div>
+                    <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem · Enter envia · Shift+Enter quebra linha" onkeydown="atalhoEnviarChat(event)"></textarea>
+                    <div class="chat-paste-hint"><i class="bi bi-lightning-charge"></i> Enter envia · Shift+Enter quebra linha · /atalho · Ctrl+V</div>
                 </div>
                 <button type="button" class="chat-record-btn" id="ticket-chat-record" onclick="toggleGravacaoChat()" title="Gravar áudio"><i class="bi bi-mic-fill"></i></button>
-                <button type="submit" class="chat-send-btn" id="ticket-chat-send" title="Enviar"><i class="bi bi-send-fill"></i> Enviar</button>
+
                 <div class="chat-compose-status" id="ticket-chat-status"></div>
             </form>
         </div>
@@ -3602,6 +3651,7 @@
                 const permissao = el.dataset.permission;
                 el.classList.toggle('permission-hidden', !temPermissaoPainel(permissao));
             });
+            atualizarMenuAdministracao();
             const user = window.panelSessionUser;
             const nome = document.getElementById('panel-user-name');
             const role = document.getElementById('panel-user-role');
@@ -4015,6 +4065,32 @@
             if (window.innerWidth >= 992) toggleSidebar(false);
         });
 
+        function atualizarMenuAdministracao() {
+            const group=document.getElementById('nav-admin-group');
+            if(!group)return;
+            const permissoes=['whatsapp','ia','menu','users','business_hours'];
+            const visivel=permissoes.some(perm=>temPermissaoPainel(perm));
+            group.classList.toggle('permission-hidden',!visivel);
+        }
+
+        function toggleAdminSubmenu(event, forceState) {
+            event?.stopPropagation?.();
+            const group=document.getElementById('nav-admin-group');
+            const toggle=document.getElementById('nav-admin-toggle');
+            if(!group||group.classList.contains('permission-hidden'))return;
+            const abrir=typeof forceState==='boolean'?forceState:!group.classList.contains('open');
+            group.classList.toggle('open',abrir);
+            toggle?.setAttribute('aria-expanded',String(abrir));
+        }
+
+        function sincronizarMenuAdministracaoAtivo(el) {
+            const group=document.getElementById('nav-admin-group');
+            if(!group)return;
+            const dentro=!!el?.closest?.('#nav-admin-submenu');
+            group.classList.toggle('has-active',dentro);
+            if(dentro)toggleAdminSubmenu(null,true);
+        }
+
         function switchTab(tabId, el) {
             const alvo = document.getElementById(tabId);
             if (alvo?.dataset?.permission && !temPermissaoPainel(alvo.dataset.permission)) return;
@@ -4023,6 +4099,7 @@
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
             document.getElementById(tabId).classList.remove('hidden');
             el.classList.add('active');
+            sincronizarMenuAdministracaoAtivo(el);
             if (window.innerWidth < 992) toggleSidebar(false);
             if(tabId === 'tab-ia') carregarConhecimento();
             if(tabId === 'tab-opcoes') carregarOpcoesAtendimento();
@@ -7506,7 +7583,7 @@ function renderizarLista(itens) {
                 const data=await res.json().catch(()=>({})); if(!res.ok)throw new Error(data.erro||'Não foi possível carregar o chat.');
                 document.getElementById('ticket-chat-title').textContent=`${data.ticket?.ticketNumber||ticketNumber} · ${data.ticket?.clienteNome||'Cliente não cadastrado'}`;
                 document.getElementById('ticket-chat-subtitle').textContent=[data.ticket?.area,data.ticket?.whatsapp?formatarWhatsAppCliente(data.ticket.whatsapp):null].filter(Boolean).join(' • ');
-                document.getElementById('ticket-chat-storage').textContent=`Histórico: até ${data.maxMessagesPerTicket||500} mensagens / ${data.retentionDays||60} dias. Anexos sob demanda.`;
+                document.getElementById('ticket-chat-storage').textContent=data.unlimitedHistory?'Histórico completo · carregamento paginado · anexos sob demanda.':`Histórico conforme política configurada. Anexos sob demanda.`;
                 window.activeChatMessages=Array.isArray(data.messages)?data.messages:[]; window.activeChatHasMore=data.hasMore===true; window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
                 window.activeChatDocuments=Array.isArray(data.documents)?data.documents:[];
                 atualizarContadorDocumentosChat(data.documentsSummary||null);
