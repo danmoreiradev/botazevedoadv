@@ -5077,6 +5077,74 @@
             }
         });
 
+        socket.on('ticket_triage_updated', (payload = {}) => {
+            const ticketNumber = String(payload.ticketNumber || '').trim();
+            if (!ticketNumber || !payload.triagem) return;
+
+            const ticket = (window.activeTicketsData || []).find(
+                item => String(item.ticketNumber || '') === ticketNumber
+            );
+
+            // Atualiza a lista em memória sem recarregar todos os tickets.
+            if (ticket) {
+                ticket.triagem = { ...(ticket.triagem || {}), ...(payload.triagem || {}) };
+                if (payload.status) ticket.status = payload.status;
+                if (payload.lastActivity) {
+                    ticket.lastActivity = Number(payload.lastActivity);
+                    ticket.idadeUltimaAtividadeMs = 0;
+                }
+                if (Object.prototype.hasOwnProperty.call(payload, 'perguntaAtual')) {
+                    ticket.perguntaAtual = payload.perguntaAtual || null;
+                }
+                recalcularResumoTicketsLocal();
+                filtrarTicketsAtivos();
+            } else {
+                // Se a tela de tickets ainda não foi carregada, garante dados frescos
+                // quando o advogado entrar nela.
+                window.activeTicketsLoaded = false;
+            }
+
+            // Se o chat deste ticket estiver aberto, o chip muda imediatamente
+            // (0/4 -> 1/4 -> 2/4...) sem depender de clique ou nova requisição.
+            if (String(window.activeChatTicketNumber || '') === ticketNumber) {
+                window.activeChatTicketData = {
+                    ...(window.activeChatTicketData || {}),
+                    triagem: { ...(window.activeChatTicketData?.triagem || {}), ...(payload.triagem || {}) },
+                    ...(payload.status ? { status: payload.status } : {}),
+                    ...(payload.lastActivity ? { lastActivity: Number(payload.lastActivity) } : {})
+                };
+                if (window.activeChatTriageDetails) {
+                    window.activeChatTriageDetails.triagem = {
+                        ...(window.activeChatTriageDetails.triagem || {}),
+                        ...(payload.triagem || {})
+                    };
+                }
+                atualizarStatusOperacionalChat(window.activeChatTicketData);
+
+                // Se o painel de respostas já estiver aberto, atualiza o subtítulo
+                // imediatamente; as respostas completas continuam vindo do endpoint
+                // sob demanda para não duplicar conteúdo pelo socket.
+                const subtitle = document.getElementById('chat-triage-subtitle');
+                const triagePanel = document.getElementById('chat-triage-panel');
+                if (subtitle && triagePanel && !triagePanel.classList.contains('hidden')) {
+                    const total = Number(payload.triagem.total || 0);
+                    const respondidas = Number(payload.triagem.respondidas || 0);
+                    subtitle.textContent = total
+                        ? `${respondidas} de ${total} pergunta${total === 1 ? '' : 's'} respondida${respondidas === 1 ? '' : 's'}`
+                        : 'Sem perguntas sequenciais cadastradas';
+                    // Atualiza também a relação de respostas quando a gaveta já está aberta.
+                    clearTimeout(window.chatTriagemRealtimeRefreshTimer);
+                    window.chatTriagemRealtimeRefreshTimer = setTimeout(() => carregarTriagemChat(), 120);
+                }
+            }
+
+            // Mantém o detalhe do ticket coerente quando estiver aberto.
+            if (String(window.activeTicketDialogNumber || '') === ticketNumber) {
+                clearTimeout(window.ticketTriagemDetailRefreshTimer);
+                window.ticketTriagemDetailRefreshTimer = setTimeout(() => abrirDetalheTicket(ticketNumber), 180);
+            }
+        });
+
         socket.on('ticket_claimed', (payload = {}) => {
             const atualizado = aplicarAtribuicaoTicketLocal(payload);
             if (atualizado) {

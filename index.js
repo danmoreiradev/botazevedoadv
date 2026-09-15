@@ -3148,8 +3148,168 @@ function respostaNegativa(texto = '') {
     return ['2', 'nao', 'n', 'nao obrigado', 'nao obrigada', 'nao quero', 'prefiro nao', 'agora nao'].includes(valor);
 }
 
+const POS_ENCERRAMENTO_JANELA_MS = 30 * 60 * 1000;
+const POS_ENCERRAMENTO_SILENCIO_REPETICAO_MS = 2 * 60 * 1000;
+
+function distanciaEdicaoLimitada(a = '', b = '', limite = 2) {
+    a = String(a || '');
+    b = String(b || '');
+    if (a === b) return 0;
+    if (!a || !b) return Math.max(a.length, b.length);
+    if (Math.abs(a.length - b.length) > limite) return limite + 1;
+
+    let anterior = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        const atual = [i];
+        let menorLinha = atual[0];
+        for (let j = 1; j <= b.length; j++) {
+            const custo = a[i - 1] === b[j - 1] ? 0 : 1;
+            const valor = Math.min(
+                anterior[j] + 1,
+                atual[j - 1] + 1,
+                anterior[j - 1] + custo
+            );
+            atual[j] = valor;
+            if (valor < menorLinha) menorLinha = valor;
+        }
+        if (menorLinha > limite) return limite + 1;
+        anterior = atual;
+    }
+    return anterior[b.length];
+}
+
+const TERMOS_OPERACIONAIS_CLIENTE = [
+    'encerrar', 'finalizar', 'fechar',
+    'obrigado', 'obrigada', 'valeu', 'agradeco',
+    'perfeito', 'beleza', 'certo', 'combinado', 'entendi', 'tranquilo',
+    'tchau', 'gratidao'
+];
+
+const ALIASES_OPERACIONAIS_CLIENTE = new Map([
+    ['encera', 'encerrar'], ['encerar', 'encerrar'], ['encerra', 'encerrar'], ['encerr', 'encerrar'],
+    ['finalizr', 'finalizar'], ['finaliza', 'finalizar'], ['finaliz', 'finalizar'],
+    ['fecha', 'fechar'], ['feche', 'fechar'],
+    ['obg', 'obrigado'], ['obgd', 'obrigado'], ['obgd', 'obrigado'], ['obrigdo', 'obrigado'],
+    ['obrigadoo', 'obrigado'], ['brigado', 'obrigado'], ['brigada', 'obrigada'], ['brigadao', 'obrigado'],
+    ['vlw', 'valeu'], ['vlww', 'valeu'], ['valew', 'valeu'],
+    ['agradecoo', 'agradeco'], ['agradecido', 'agradeco'], ['agradecida', 'agradeco'],
+    ['blz', 'beleza'], ['blza', 'beleza'], ['okay', 'ok'], ['oki', 'ok'], ['okk', 'ok'], ['okey', 'ok'],
+    ['flw', 'tchau'], ['falow', 'tchau'], ['falou', 'tchau'], ['xau', 'tchau'],
+    ['tmj', 'tmj'], ['showw', 'show']
+]);
+
+function canonicalizarTokenOperacional(token = '') {
+    let valor = String(token || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!valor) return '';
+    // Reduz exageros comuns de digitação: "obrigadooo", "vlwww" etc.
+    valor = valor.replace(/([a-z])\1{2,}/g, '$1$1');
+    if (ALIASES_OPERACIONAIS_CLIENTE.has(valor)) return ALIASES_OPERACIONAIS_CLIENTE.get(valor);
+    if (TERMOS_OPERACIONAIS_CLIENTE.includes(valor)) return valor;
+
+    // Fuzzy apenas para palavras suficientemente longas. Mantém o algoritmo conservador.
+    if (valor.length >= 5) {
+        let melhor = null;
+        let melhorDist = 99;
+        for (const termo of TERMOS_OPERACIONAIS_CLIENTE) {
+            const limite = Math.max(valor.length, termo.length) >= 8 ? 2 : 1;
+            const dist = distanciaEdicaoLimitada(valor, termo, limite);
+            if (dist < melhorDist && dist <= limite) {
+                melhor = termo;
+                melhorDist = dist;
+            }
+        }
+        if (melhor) return melhor;
+    }
+    return valor;
+}
+
+function normalizarIntencaoOperacional(texto = '') {
+    return normalizarTexto(texto)
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(canonicalizarTokenOperacional)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function analisarCortesiaPosEncerramento(texto = '') {
+    const original = String(texto || '').trim();
+    const valor = normalizarIntencaoOperacional(original);
+    if (!valor) return { cortesia: false, motivo: 'vazio' };
+
+    // Uma pergunta ou uma frase que expressa nova necessidade deve abrir novo atendimento.
+    if (original.includes('?')) return { cortesia: false, motivo: 'pergunta' };
+
+    const tokens = valor.split(/\s+/).filter(Boolean);
+    const nucleosGratidao = new Set(['obrigado', 'obrigada', 'valeu', 'agradeco', 'gratidao']);
+    const nucleosConfirmacao = new Set(['ok', 'certo', 'perfeito', 'beleza', 'combinado', 'entendi', 'tranquilo', 'show', 'joia', 'tmj']);
+    const nucleosDespedida = new Set(['tchau']);
+    const fillers = new Set([
+        'muito', 'muita', 'mesmo', 'pela', 'pelo', 'por', 'a', 'o', 'as', 'os', 'de', 'da', 'do',
+        'ajuda', 'atendimento', 'atencao', 'retorno', 'suporte', 'gentileza', 'tudo', 'bom', 'boa',
+        'ta', 'esta', 'isso', 'ai', 'viu', 'demais', 'legal', 'beleza', 'show', 'bola', 'e', 'so',
+        'ate', 'mais', 'logo', 'dia', 'tarde', 'noite', 'trabalho', 'abraco', 'abracos', 'um', 'uma', 'pra', 'voce', 'voces', 'tambem', 'tmj'
+    ]);
+
+    let tipo = null;
+    if (tokens.some(t => nucleosGratidao.has(t))) tipo = 'gratidao';
+    else if (tokens.some(t => nucleosDespedida.has(t))) tipo = 'despedida';
+    else if (tokens.some(t => nucleosConfirmacao.has(t))) tipo = 'confirmacao';
+    else if (/^(ate mais|boa noite|boa tarde|bom dia|bom trabalho|ate logo|um abraco|abraco)$/.test(valor)) tipo = 'despedida';
+
+    if (!tipo) return { cortesia: false, motivo: 'sem_nucleo' };
+
+    const nucleos = new Set([...nucleosGratidao, ...nucleosConfirmacao, ...nucleosDespedida]);
+    const desconhecidos = tokens.filter(t => !nucleos.has(t) && !fillers.has(t));
+
+    // Se sobrou conteúdo relevante, tratamos como novo assunto. Ex.:
+    // "obrigado, preciso de ajuda com outro processo" -> abre novo ticket.
+    if (desconhecidos.length) return { cortesia: false, motivo: 'conteudo_novo', desconhecidos };
+
+    return { cortesia: true, tipo, valorNormalizado: valor };
+}
+
+function filtrosHistoricoPorContato(contato = {}) {
+    const filtros = [];
+    const ids = Array.isArray(contato.identificadores) ? contato.identificadores.filter(Boolean) : [];
+    const numeros = Array.isArray(contato.whatsappNumbers) ? contato.whatsappNumbers.filter(Boolean) : [];
+    if (ids.length) {
+        filtros.push({ identificadores: { $in: ids } });
+        filtros.push({ lastRawJid: { $in: ids } });
+    }
+    if (numeros.length) {
+        filtros.push({ whatsappNumbers: { $in: numeros } });
+        filtros.push({ numeroReal: { $in: numeros } });
+    }
+    if (contato.numeroPrincipal) filtros.push({ numeroReal: contato.numeroPrincipal });
+    return filtros;
+}
+
+async function buscarEncerramentoRecenteDoContato(contato, janelaMs = POS_ENCERRAMENTO_JANELA_MS) {
+    if (!ticketHistoryColl) return null;
+    const filtros = filtrosHistoricoPorContato(contato);
+    if (!filtros.length) return null;
+    const desde = Date.now() - Math.max(60_000, Number(janelaMs || POS_ENCERRAMENTO_JANELA_MS));
+    return ticketHistoryColl.find({
+        $and: [
+            { $or: filtros },
+            { closedAt: { $gte: desde } }
+        ]
+    }).sort({ closedAt: -1 }).limit(1).next();
+}
+
+function respostaCortesiaPosEncerramento(historico = {}, analise = {}) {
+    const nome = primeiroNome(historico?.clienteNome || '');
+    const vocativo = nome ? `, ${nome}` : '';
+    if (analise?.tipo === 'gratidao') return `Por nada${vocativo}! Ficamos à disposição quando precisar. 😊`;
+    if (analise?.tipo === 'despedida') return `Até mais${vocativo}! Ficamos à disposição. 👋`;
+    return `Perfeito${vocativo}. Ficamos à disposição quando precisar. 😊`;
+}
+
 function clienteQuerEncerrar(texto = '') {
-    const valor = normalizarTexto(texto).replace(/\s+/g, ' ').trim();
+    const valor = normalizarIntencaoOperacional(texto).replace(/\s+/g, ' ').trim();
     if (!valor) return false;
 
     // Evita falsos positivos quando o cliente explicitamente diz para NÃO encerrar.
@@ -4781,6 +4941,53 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             return;
         }
 
+        // JANELA PÓS-ENCERRAMENTO: uma cortesia enviada logo após o fechamento
+        // ("obrigado", "obg", "vlw", "ok", "brigado", inclusive pequenos erros)
+        // pertence à conversa que acabou e NÃO deve abrir outro ticket.
+        // Se houver conteúdo novo real, a mensagem segue normalmente e um novo atendimento é criado.
+        if (!ticket && texto && !isMedia) {
+            const analisePosEncerramento = analisarCortesiaPosEncerramento(texto);
+            if (analisePosEncerramento.cortesia) {
+                const historicoEncerrado = await buscarEncerramentoRecenteDoContato(contato);
+                if (historicoEncerrado) {
+                    const agoraPosEncerramento = Date.now();
+                    const ultimaResposta = Number(historicoEncerrado.ultimaCortesiaPosEncerramentoRespondidaEm || 0);
+
+                    // Guarda a interação no histórico do atendimento encerrado para auditoria,
+                    // sem ressuscitar ticket e sem misturar com um atendimento novo.
+                    await ticketHistoryColl.updateOne(
+                        { _id: historicoEncerrado._id },
+                        {
+                            $set: {
+                                ultimaCortesiaPosEncerramento: String(texto).slice(0, 500),
+                                ultimaCortesiaPosEncerramentoEm: agoraPosEncerramento,
+                                updatedAt: agoraPosEncerramento
+                            }
+                        }
+                    ).catch(err => console.warn('[Pós-encerramento] Falha ao registrar cortesia:', err?.message || err));
+
+                    // Evita uma sequência robótica de respostas se o cliente mandar "ok", "obg", "vlw" em seguida.
+                    if (!ultimaResposta || (agoraPosEncerramento - ultimaResposta) >= POS_ENCERRAMENTO_SILENCIO_REPETICAO_MS) {
+                        const enviada = await sendBotMsg(rawJid, {
+                            text: respostaCortesiaPosEncerramento(historicoEncerrado, analisePosEncerramento)
+                        }).catch(err => {
+                            console.warn('[Pós-encerramento] Falha ao responder cortesia:', err?.message || err);
+                            return false;
+                        });
+                        if (enviada) {
+                            await ticketHistoryColl.updateOne(
+                                { _id: historicoEncerrado._id },
+                                { $set: { ultimaCortesiaPosEncerramentoRespondidaEm: agoraPosEncerramento, updatedAt: agoraPosEncerramento } }
+                            ).catch(() => {});
+                        }
+                    }
+
+                    console.log(`[Pós-encerramento] Cortesia absorvida sem novo ticket (${historicoEncerrado.ticketNumber || historicoEncerrado._id}): ${analisePosEncerramento.valorNormalizado}`);
+                    return;
+                }
+            }
+        }
+
         // Antes de iniciar/continuar menu ou triagem, verifica o horário do escritório.
         // Fora do horário iniciamos um fluxo específico: mensagem de aviso -> relato/documentos
         // -> cadastro opcional -> encaminhamento ao especialista. Conversas humanas e cadastros
@@ -5219,6 +5426,11 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             const proximoIndice = indiceAtual + 1;
             const temProximaPergunta = proximoIndice < perguntas.length;
 
+            const agoraEtapaTriagem = Date.now();
+            const statusEtapaTriagem = temProximaPergunta
+                ? 'aguardando_pergunta_fluxo'
+                : (ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro');
+
             await ticketsColl.updateOne(
                 { _id: ticket._id },
                 {
@@ -5226,11 +5438,26 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                         respostasFluxo: respostasAtualizadas,
                         indicePerguntaFluxo: proximoIndice,
                         aguardandoPerguntaFluxo: temProximaPergunta,
-                        status: temProximaPergunta ? 'aguardando_pergunta_fluxo' : (ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro'),
-                        lastActivity: Date.now()
+                        status: statusEtapaTriagem,
+                        lastActivity: agoraEtapaTriagem
                     }
                 }
             );
+
+            // O painel precisa receber o progresso da triagem no exato momento em que
+            // cada resposta é persistida. Sem este evento, o chip do chat só descobria
+            // o novo percentual quando o advogado abria manualmente as respostas.
+            const triagemAtualizada = progressoTriagemTicket(
+                { ...ticket, perguntasFluxo: perguntas, status: statusEtapaTriagem },
+                respostasAtualizadas
+            );
+            io.emit('ticket_triage_updated', {
+                ticketNumber: ticket.ticketNumber,
+                triagem: triagemAtualizada,
+                status: statusEtapaTriagem,
+                lastActivity: agoraEtapaTriagem,
+                perguntaAtual: temProximaPergunta ? String(perguntas[proximoIndice]?.texto || '') : null
+            });
 
             atualizarHistorico(ticket.ticketNumber, {
                 respostasTriagem: respostasAtualizadas,
