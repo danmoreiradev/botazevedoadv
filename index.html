@@ -3253,6 +3253,162 @@
         html[data-theme="dark"] #ticket-chat-dialog .bg-white { background-color:var(--dark-surface)!important; }
     </style>
 
+
+
+    <style id="mobile-navigation-user-menu-v12">
+        /* V12 — navegação mobile alinhada + contraste do botão menu */
+        .panel-user-menu-item { text-decoration:none; }
+        .panel-user-logout-item { color:#9d433e; }
+        .panel-user-logout-item > i { color:#a9433d; background:#fff1f0; }
+        .panel-user-logout-item strong { color:#943c37; }
+        .panel-user-logout-item:hover { color:#87352f; background:#fff5f4; }
+
+        html[data-theme="dark"] .mobile-menu-btn {
+            color:#f1f4f8 !important;
+            background:#252b34 !important;
+            border-color:#3d4652 !important;
+            box-shadow:none !important;
+        }
+        html[data-theme="dark"] .mobile-menu-btn:hover,
+        html[data-theme="dark"] .mobile-menu-btn:focus-visible {
+            color:#ffffff !important;
+            background:#303742 !important;
+            border-color:#566170 !important;
+        }
+        html[data-theme="dark"] .panel-user-logout-item { color:#f0a09a !important; background:#20252d !important; }
+        html[data-theme="dark"] .panel-user-logout-item:hover { background:#342729 !important; }
+        html[data-theme="dark"] .panel-user-logout-item > i { color:#f0a09a !important; background:#3a292b !important; }
+        html[data-theme="dark"] .panel-user-logout-item strong { color:#f3b0ab !important; }
+
+        @media (max-width: 991.98px) {
+            .sidebar {
+                overflow-y:auto;
+                overflow-x:hidden;
+                overscroll-behavior:contain;
+            }
+            .sidebar-brand { flex:0 0 auto; }
+            .sidebar .nav {
+                width:100%;
+                padding:12px 12px 8px !important;
+                gap:4px !important;
+                align-items:stretch !important;
+            }
+            .sidebar .nav > .nav-link,
+            .sidebar .nav > .nav-group {
+                width:100% !important;
+                min-width:0 !important;
+                flex:0 0 auto !important;
+            }
+            .sidebar .nav .nav-link {
+                width:100% !important;
+                min-height:48px !important;
+                padding:8px 11px !important;
+                flex:0 0 auto !important;
+                justify-content:flex-start !important;
+                align-items:center !important;
+                gap:10px !important;
+                text-align:left !important;
+                font-size:.84rem !important;
+                border:1px solid transparent !important;
+                border-radius:10px !important;
+            }
+            .sidebar .nav .nav-link.active {
+                border-color:rgba(197,160,89,.16) !important;
+                box-shadow:inset 3px 0 0 var(--adv-gold) !important;
+            }
+            .sidebar .nav .nav-link .nav-icon,
+            .nav-group-toggle .nav-icon {
+                width:32px !important;
+                height:32px !important;
+                min-width:32px !important;
+                border-radius:9px !important;
+                font-size:.95rem !important;
+            }
+            .nav-group {
+                width:100% !important;
+                margin-top:4px !important;
+                padding-top:6px !important;
+                flex:0 0 auto !important;
+            }
+            .nav-group-toggle {
+                width:100% !important;
+                min-height:48px !important;
+                padding:8px 11px !important;
+                gap:10px !important;
+                justify-content:flex-start !important;
+                font-size:.84rem !important;
+                border-radius:10px !important;
+            }
+            .nav-group-label { min-width:0; text-align:left; }
+            .nav-group-chevron { margin-left:auto; }
+            .nav-submenu {
+                width:calc(100% - 15px) !important;
+                margin:4px 0 5px 15px !important;
+                padding:2px 0 2px 11px !important;
+            }
+            .nav-sub-link {
+                width:100% !important;
+                min-height:40px !important;
+                padding:7px 9px !important;
+                flex:0 0 auto !important;
+                justify-content:flex-start !important;
+                text-align:left !important;
+                border:1px solid transparent !important;
+                border-radius:8px !important;
+                font-size:.79rem !important;
+            }
+            .sidebar-logout {
+                width:auto !important;
+                min-height:42px !important;
+                margin:auto 12px 12px !important;
+                padding:7px 10px !important;
+                flex:0 0 auto !important;
+                justify-content:flex-start !important;
+                gap:9px !important;
+                font-size:.79rem !important;
+                border-radius:10px !important;
+                border:1px solid rgba(255,255,255,.07) !important;
+            }
+            .sidebar-logout .nav-icon {
+                width:30px !important;
+                height:30px !important;
+                min-width:30px !important;
+                border-radius:8px !important;
+                font-size:.9rem !important;
+            }
+            .mobile-menu-btn {
+                width:40px !important;
+                height:40px !important;
+                flex:0 0 40px !important;
+            }
+        }
+
+        @media (max-width: 767.98px) {
+            .sidebar { width:min(88vw, 300px) !important; }
+            .sidebar-brand { min-height:142px !important; padding:10px 14px 8px !important; }
+            .sidebar-brand .logo-img,
+            .sidebar-brand .logo-img:hover { height:96px !important; max-width:245px !important; transform:scale(1.48) !important; }
+            .sidebar-brand .brand-kicker { font-size:.64rem !important; }
+            .sidebar .nav { padding-top:9px !important; }
+            .topbar-left { gap:9px !important; }
+            .topbar-copy { max-width:min(42vw,180px); }
+            .topbar-title { font-size:.88rem !important; }
+            .panel-user-menu { width:min(270px, calc(100vw - 22px)); right:0; }
+            .panel-user-chip { min-height:40px; }
+            .panel-user-avatar { width:28px; height:28px; }
+            .panel-user-chevron { margin-left:0; }
+        }
+
+        @media (max-width: 420px) {
+            .topbar { padding-left:10px !important; padding-right:10px !important; gap:8px !important; }
+            .topbar-actions { gap:6px !important; }
+            .notification-bell { width:38px !important; height:38px !important; }
+            .panel-user-chip { padding:5px 6px !important; }
+            .panel-user-name { max-width:86px !important; }
+            .panel-user-menu { right:-2px; }
+        }
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -3358,6 +3514,11 @@
                                 <span><strong id="panel-theme-title">Modo escuro</strong><small id="panel-theme-subtitle">Melhor conforto visual</small></span>
                                 <span class="theme-switch" id="panel-theme-switch" aria-hidden="true"><span></span></span>
                             </button>
+                            <div class="panel-user-menu-separator"></div>
+                            <a class="panel-user-menu-item panel-user-logout-item" href="/logout-panel">
+                                <i class="bi bi-box-arrow-right"></i>
+                                <span><strong>Sair</strong><small>Encerrar sessão do painel</small></span>
+                            </a>
                         </div>
                     </div>
                 </div>
