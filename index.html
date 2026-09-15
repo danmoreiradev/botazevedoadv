@@ -2308,7 +2308,7 @@
         /* Gestão de usuários */
         .users-summary { margin-bottom:16px; padding:12px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; color:#606976; background:#f8f9fb; border:1px solid var(--border); border-radius:12px; font-size:.78rem; }
         .users-table-wrap { overflow-x:auto; background:#fff; border:1px solid var(--border); border-radius:14px; }
-        .users-table { min-width:980px; margin:0; }
+        .users-table { min-width:1120px; margin:0; }
         .users-table thead th { padding:12px 14px; color:#6a7280; background:#f8f9fb; font-size:.68rem; font-weight:760; letter-spacing:.05em; text-transform:uppercase; }
         .users-table tbody td { padding:13px 14px; vertical-align:middle; border-color:#edf0f3; }
         .user-main-name { color:#303842; font-weight:760; }
@@ -4154,8 +4154,8 @@
                 <div id="users-status" class="menu-save-status text-muted mb-2"></div>
                 <div class="users-table-wrap">
                     <table class="table users-table align-middle">
-                        <thead><tr><th data-excel-table="users" data-excel-key="nome">Usuário</th><th data-excel-table="users" data-excel-key="assinatura">Identificação no chat</th><th data-excel-table="users" data-excel-key="celular">Celular</th><th data-excel-table="users" data-excel-key="role">Perfil</th><th data-excel-table="users" data-excel-key="permissions">Permissões</th><th data-excel-table="users" data-excel-key="ativo">Status</th><th class="text-end" data-excel-table="users" data-excel-key="acoes">Ação</th></tr></thead>
-                        <tbody id="users-table-body"><tr><td colspan="7" class="clients-empty">Carregando usuários...</td></tr></tbody>
+                        <thead><tr><th data-excel-table="users" data-excel-key="nome">Usuário</th><th data-excel-table="users" data-excel-key="assinatura">Identificação no chat</th><th data-excel-table="users" data-excel-key="celular">Celular</th><th data-excel-table="users" data-excel-key="role">Perfil</th><th data-excel-table="users" data-excel-key="permissions">Permissões</th><th data-excel-table="users" data-excel-key="lastAccessAt">Último acesso</th><th data-excel-table="users" data-excel-key="ativo">Status</th><th class="text-end" data-excel-table="users" data-excel-key="acoes">Ação</th></tr></thead>
+                        <tbody id="users-table-body"><tr><td colspan="8" class="clients-empty">Carregando usuários...</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -7246,11 +7246,11 @@
             }
             if(tabela==='users'){
                 const perms=(item.permissions||[]).map(p=>PERMISSION_LABELS?.[p]||p).join(', ');
-                const mapa={nome:item.nome||item.user||'',assinatura:item.assinatura||'',celular:item.celular||'',role:item.roleLabel||item.role||'',permissions:item.role==='admin'?'Acesso completo':perms,ativo:item.ativo===false?'Inativo':'Ativo',updatedAt:Number(item.updatedAt||item.createdAt||0),acoes:'Editar'};return mapa[chave]??'';
+                const mapa={nome:item.nome||item.user||'',assinatura:item.assinatura||'',celular:item.celular||'',role:item.roleLabel||item.role||'',permissions:item.role==='admin'?'Acesso completo':perms,lastAccessAt:Number(item.lastAccessAt||0),ativo:item.ativo===false?'Inativo':'Ativo',updatedAt:Number(item.updatedAt||item.createdAt||0),acoes:'Editar'};return mapa[chave]??'';
             }
             return item?.[chave]??'';
         }
-        function textoVisivelColunaExcel(tabela,item,chave){const v=valorColunaExcel(tabela,item,chave);if(['lastActivity','createdAt','updatedAt','lastSeenAt'].includes(chave)&&Number(v))return new Date(Number(v)).toLocaleString('pt-BR');return String(v??'');}
+        function textoVisivelColunaExcel(tabela,item,chave){const v=valorColunaExcel(tabela,item,chave);if(['lastActivity','createdAt','updatedAt','lastSeenAt','lastAccessAt'].includes(chave)&&Number(v))return new Date(Number(v)).toLocaleString('pt-BR');return String(v??'');}
         function dadosFonteTabelaExcel(tabela){
             if(tabela==='tickets')return Array.isArray(window.activeTicketsData)?window.activeTicketsData:[];
             if(tabela==='crm')return Array.isArray(window.crmLeadsData)?window.crmLeadsData:[];
@@ -9383,23 +9383,30 @@
         document.getElementById('user-assinatura')?.addEventListener('input',e=>e.target.dataset.touched='1');
         function permissoesUsuarioSelecionadas(){return [...document.querySelectorAll('.user-permission-check:checked')].map(c=>c.value);}
         function formatarCelularUsuarioPainel(valor='') { const original=String(valor||'').trim(); let d=original.replace(/\D/g,''); if(!d)return ''; if(d.startsWith('55')&&(d.length===12||d.length===13))d=d.slice(2); if(d.length===11)return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`; if(d.length===10)return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`; return original; }
+        function formatarUltimoAcessoUsuario(valor) {
+            const n=Number(valor||0);
+            if(!n)return 'Nunca acessou';
+            try{return new Date(n).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(_){return '—';}
+        }
         function renderizarUsuarios(data = null) {
             const tbody=document.getElementById('users-table-body'); if(!tbody)return;
             tbody.innerHTML=''; data=Array.isArray(data)?data:(window.panelUsersData||[]);
             document.getElementById('users-count').textContent=`${data.length} usuário${data.length===1?'':'s'}`;
-            if(!data.length){tbody.innerHTML='<tr><td colspan="7" class="clients-empty">Nenhum usuário cadastrado.</td></tr>';return;}
+            if(!data.length){tbody.innerHTML='<tr><td colspan="8" class="clients-empty">Nenhum usuário cadastrado.</td></tr>';return;}
             data.forEach(u=>{
                 const tr=document.createElement('tr');
                 const perms=(u.permissions||[]).map(p=>PERMISSION_LABELS[p]||p).join(', ');
-                tr.innerHTML=`<td><div class="user-main-name"></div><div class="user-login"></div></td><td></td><td></td><td><span class="user-role-pill ${u.role==='admin'?'admin':''}"></span></td><td><div class="user-permissions"></div></td><td><span class="user-status-pill ${u.ativo===false?'inactive':''}"></span></td><td class="text-end"></td>`;
+                tr.innerHTML=`<td><div class="user-main-name"></div><div class="user-login"></div></td><td></td><td></td><td><span class="user-role-pill ${u.role==='admin'?'admin':''}"></span></td><td><div class="user-permissions"></div></td><td></td><td><span class="user-status-pill ${u.ativo===false?'inactive':''}"></span></td><td class="text-end"></td>`;
                 tr.children[0].querySelector('.user-main-name').textContent=u.nome||u.user;
                 tr.children[0].querySelector('.user-login').textContent=`@${u.user}${u.oab?' • '+u.oab:''}`;
                 tr.children[1].textContent=u.assinatura||'—';
                 tr.children[2].textContent=formatarCelularUsuarioPainel(u.celular)||'—';
                 tr.children[3].querySelector('span').textContent=u.roleLabel||u.role;
                 tr.children[4].querySelector('.user-permissions').textContent=u.role==='admin'?'Acesso completo':perms;
-                tr.children[5].querySelector('span').textContent=u.ativo===false?'Inativo':'Ativo';
-                const b=document.createElement('button'); b.type='button'; b.className='user-edit-btn'; b.innerHTML='<i class="bi bi-pencil me-1"></i> Editar'; b.onclick=()=>abrirFormularioUsuario(u.id); tr.children[6].appendChild(b); tbody.appendChild(tr);
+                tr.children[5].textContent=formatarUltimoAcessoUsuario(u.lastAccessAt);
+                tr.children[5].title=u.lastAccessAt?`Último acesso registrado em ${formatarUltimoAcessoUsuario(u.lastAccessAt)}`:'Este usuário ainda não realizou login após a ativação deste controle.';
+                tr.children[6].querySelector('span').textContent=u.ativo===false?'Inativo':'Ativo';
+                const b=document.createElement('button'); b.type='button'; b.className='user-edit-btn'; b.innerHTML='<i class="bi bi-pencil me-1"></i> Editar'; b.onclick=()=>abrirFormularioUsuario(u.id); tr.children[7].appendChild(b); tbody.appendChild(tr);
             });
         }
         function filtrarUsuarios(){const dados=aplicarEstadoExcel('users',window.panelUsersData||[]);renderizarUsuarios(dados);atualizarIndicadoresFiltrosExcel();}

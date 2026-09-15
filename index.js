@@ -1318,6 +1318,7 @@ function sessaoPublicaDaConta(conta = {}) {
         oab: String(conta.oab || '').trim(),
         celular: String(conta.celular || '').trim(),
         theme: String(conta.theme || '').toLowerCase() === 'dark' ? 'dark' : 'light',
+        lastAccessAt: Number(conta.lastAccessAt || 0) || null,
         role,
         roleLabel: role === 'admin' ? 'Administrador' : 'Advogado',
         permissions: normalizarPermissoesUsuario(conta)
@@ -6296,6 +6297,12 @@ app.post('/login', async (req, res) => {
         }
 
         await migrarSenhaLegadaSeNecessario(conta, pass);
+        const ultimoAcessoEm = Date.now();
+        await userLoginColl.updateOne(
+            { _id: conta._id },
+            { $set: { lastAccessAt: ultimoAcessoEm } }
+        );
+        conta.lastAccessAt = ultimoAcessoEm;
         const painelUser = sessaoPublicaDaConta(conta);
         req.session.loggedIn = true;
         req.session.panelUser = painelUser;
@@ -6689,7 +6696,7 @@ app.get('/api/users', async (req, res) => {
             projection: { pass: 0, passwordHash: 0, passwordSalt: 0 }
         }).sort({ updatedAt: -1, createdAt: -1, nome: 1, user: 1 }).toArray();
         res.json({
-            usuarios: usuarios.map(item => ({ ...sessaoPublicaDaConta(item), ativo: item.ativo !== false, createdAt: item.createdAt || null, updatedAt: item.updatedAt || null })),
+            usuarios: usuarios.map(item => ({ ...sessaoPublicaDaConta(item), ativo: item.ativo !== false, createdAt: item.createdAt || null, updatedAt: item.updatedAt || null, lastAccessAt: Number(item.lastAccessAt || 0) || null })),
             permissionsAvailable: PERMISSOES_PAINEL,
             defaultLawyerPermissions: PERMISSOES_ADVOGADO_PADRAO
         });
