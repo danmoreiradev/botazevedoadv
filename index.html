@@ -2162,7 +2162,7 @@
 
     <style id="users-chat-module">
         body.session-loading .content-container { visibility: hidden; }
-        [data-permission].permission-hidden { display: none !important; }
+        .permission-hidden { display: none !important; }
 
         .panel-user-chip {
             min-height: 42px; padding: 6px 11px; display:flex; align-items:center; gap:9px;
@@ -4053,7 +4053,7 @@
                     <div class="col-md-3"><label class="form-label small fw-bold">Perfil</label><select id="user-role" class="form-select" onchange="atualizarPermissoesFormularioUsuario()"><option value="advogado">Advogado</option><option value="admin">Administrador</option></select></div>
                     <div class="col-md-3"><label class="form-label small fw-bold">OAB</label><input id="user-oab" class="form-control" maxlength="80" placeholder="OAB/SP ..."></div>
                     <div class="col-md-6"><label class="form-label small fw-bold">E-mail</label><input id="user-email" type="email" class="form-control" maxlength="240"></div>
-                    <div class="col-md-6"><label class="form-label small fw-bold">Celular</label><input id="user-celular" type="tel" inputmode="tel" class="form-control" maxlength="24" placeholder="Ex.: (19) 99999-9999"><div class="form-text">Ao criar um advogado, este número recebe a mensagem de boas-vindas. Se ficar vazio, nada será enviado.</div></div>
+                    <div class="col-md-6"><label class="form-label small fw-bold">Celular</label><input id="user-celular" type="tel" inputmode="tel" class="form-control" maxlength="24" placeholder="Ex.: (19) 99999-9999"></div>
                     <div class="col-md-6"><label class="form-label small fw-bold">Senha <span class="text-muted" id="user-password-help">*</span></label><input id="user-password" type="password" class="form-control" minlength="6" autocomplete="new-password"><div class="form-text">Ao editar, deixe em branco para manter a senha atual.</div></div>
                     <div class="col-12"><label class="form-label small fw-bold">Permissões</label><div class="permission-grid" id="user-permissions-grid"></div><div class="permission-note">Administradores possuem acesso completo. O perfil Advogado inicia com Tickets ativos, Clientes e Chat.</div></div>
                     <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="user-active" checked><label class="form-check-label fw-bold" for="user-active">Usuário ativo</label></div></div>
@@ -4669,7 +4669,17 @@
             if(!group)return;
             const permissoes=['whatsapp','ia','menu','users','business_hours'];
             const visivel=permissoes.some(perm=>temPermissaoPainel(perm));
+
+            // O agrupador "Administração" não possui data-permission próprio.
+            // Por isso a visibilidade precisa ser aplicada ao grupo inteiro.
             group.classList.toggle('permission-hidden',!visivel);
+            group.hidden=!visivel;
+            group.setAttribute('aria-hidden',String(!visivel));
+
+            if(!visivel){
+                group.classList.remove('open','has-active');
+                document.getElementById('nav-admin-toggle')?.setAttribute('aria-expanded','false');
+            }
         }
 
         function toggleAdminSubmenu(event, forceState) {
