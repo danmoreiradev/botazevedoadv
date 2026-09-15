@@ -4532,6 +4532,9 @@ async function startBotInterno() {
             crmLeadsColl.createIndex({ status: 1, dataProximaAcao: 1 }),
             crmLeadsColl.createIndex({ responsavel: 1, status: 1 }),
             crmLeadsColl.createIndex({ origemTipo: 1, status: 1 }),
+            crmLeadsColl.createIndex({ origemTipo: 1, updatedAt: -1 }),
+            crmLeadsColl.createIndex({ origemTecnica: 1, updatedAt: -1 }),
+            crmLeadsColl.createIndex({ origem: 1, updatedAt: -1 }),
             crmLeadsColl.createIndex({ updatedAt: -1 }),
             userLoginColl.createIndex({ userLower: 1 }),
             userLoginColl.createIndex({ role: 1, ativo: 1 }),
@@ -8334,15 +8337,27 @@ app.get('/api/crm/leads', async (req, res) => {
     if (!crmLeadsColl) return res.status(503).json({ erro: 'CRM ainda não está disponível.' });
 
     try {
-        // Self-healing: se havia um ticket de anúncio ativo antes da criação automática
-        // ser implementada, ele é criado/sincronizado no CRM ao abrir esta tela.
-        await reconciliarTicketsAnuncioNoCRM();
+        // PERFORMANCE: a reconciliação de tickets antigos é uma rotina de consistência,
+        // não deve bloquear a abertura do CRM. O fluxo normal já cria/sincroniza o lead
+        // quando o ticket nasce; esta verificação fica em segundo plano e no máximo uma
+        // vez a cada 5 minutos.
+        reconciliarTicketsAnuncioNoCRMComThrottle();
 
-        const leadsBrutos = await crmLeadsColl.find({}).sort({ updatedAt: -1 }).limit(3000).toArray();
-        // O CRM é exclusivamente de leads originados de mídia paga/anúncios.
-        // Registros orgânicos eventualmente criados por versões anteriores permanecem
-        // preservados no MongoDB, mas não entram na listagem nem nas métricas comerciais.
-        const leads = leadsBrutos.filter(leadCRMDeAnuncio);
+        // Filtra os leads de anúncio diretamente no MongoDB. A versão anterior buscava até
+        // 3.000 documentos de qualquer origem e descartava os orgânicos apenas no Node.js.
+        // Além de transferir menos dados, isso permite aproveitar os índices existentes.
+        const filtroLeadsAnuncio = {
+            $or: [
+                { origemTipo: 'anuncio' },
+                { origemTecnica: 'lead_anuncio' },
+                { origem: { $in: CRM_ORIGENS_ANUNCIO } }
+            ]
+        };
+        const leads = await crmLeadsColl
+            .find(filtroLeadsAnuncio)
+            .sort({ updatedAt: -1 })
+            .limit(3000)
+            .toArray();
         res.json({
             generatedAt: Date.now(),
             resumo: resumoCRM(leads),

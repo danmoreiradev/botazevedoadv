@@ -1880,6 +1880,35 @@
         }
         .crm-helper-strip strong { color: var(--adv-blue); }
 
+        /* CRM - paginação e navegação leve */
+        .crm-table-footer {
+            margin-top: 12px;
+            padding: 10px 4px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            color: var(--text-muted);
+            font-size: .75rem;
+        }
+        .crm-page-actions { display:flex; align-items:center; gap:7px; }
+        .crm-page-btn {
+            min-height: 35px; padding: 6px 10px; color: var(--adv-blue); background: #fff;
+            border: 1px solid var(--border-strong); border-radius: 9px; font-size: .74rem; font-weight: 750;
+        }
+        .crm-page-btn:disabled { opacity:.45; cursor:not-allowed; }
+        .crm-ticket-btn { color:#245f95; background:#f4f8fc; border-color:#d7e4f0; }
+        .crm-ticket-btn:hover { color:#194c78; background:#eaf3fa; border-color:#c5d9e9; }
+        .ticket-row-crm-focus > td { animation: crmTicketFocus 1.8s ease; }
+        @keyframes crmTicketFocus {
+            0%, 35% { box-shadow: inset 0 0 0 9999px rgba(197,160,89,.14); }
+            100% { box-shadow: inset 0 0 0 9999px rgba(197,160,89,0); }
+        }
+        html[data-theme="dark"] .crm-page-btn { color:#e4e8ee; background:#252b34; border-color:#3b4350; }
+        html[data-theme="dark"] .crm-page-btn:hover:not(:disabled) { background:#2c333d; }
+        html[data-theme="dark"] .crm-ticket-btn { color:#9fc8eb; background:#202c38; border-color:#354b60; }
+
         #crm-lead-dialog {
             width: min(980px, calc(100vw - 26px));
             max-height: min(92vh, 980px);
@@ -3785,12 +3814,12 @@
                     <div class="crm-toolbar">
                         <div class="crm-search">
                             <span class="search-icon"><i class="bi bi-search"></i></span>
-                            <input type="text" id="crm-search-input" class="form-control" placeholder="Buscar cliente, CRM, ticket, telefone, área ou assunto..." oninput="filtrarCRM()">
+                            <input type="text" id="crm-search-input" class="form-control" placeholder="Buscar cliente, CRM, ticket, telefone, área ou assunto..." oninput="agendarFiltroCRM()">
                         </div>
-                        <select id="crm-filter-status" class="form-select" onchange="filtrarCRM()"><option value="">Todos os status</option></select>
-                        <select id="crm-filter-responsavel" class="form-select" onchange="filtrarCRM()"><option value="">Todos os responsáveis</option></select>
-                        <select id="crm-filter-area" class="form-select" onchange="filtrarCRM()"><option value="">Todas as áreas</option></select>
-                        <select id="crm-filter-acao" class="form-select" onchange="filtrarCRM()">
+                        <select id="crm-filter-status" class="form-select" onchange="filtrarCRM(true)"><option value="">Todos os status</option></select>
+                        <select id="crm-filter-responsavel" class="form-select" onchange="filtrarCRM(true)"><option value="">Todos os responsáveis</option></select>
+                        <select id="crm-filter-area" class="form-select" onchange="filtrarCRM(true)"><option value="">Todas as áreas</option></select>
+                        <select id="crm-filter-acao" class="form-select" onchange="filtrarCRM(true)">
                             <option value="">Todas as ações</option>
                             <option value="atrasado">Follow-up atrasado</option>
                             <option value="hoje">Ação hoje</option>
@@ -3813,13 +3842,21 @@
                                     <th>Responsável</th>
                                     <th>Receita prevista</th>
                                     <th>Atualizado</th>
-                                    <th class="text-end">Ação</th>
+                                    <th class="text-end">Ações</th>
                                 </tr>
                             </thead>
                             <tbody id="crm-table-body">
                                 <tr><td colspan="9" class="crm-empty">Abra o CRM para carregar os leads.</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                    <div class="crm-table-footer" id="crm-table-footer">
+                        <span id="crm-page-info">0 leads</span>
+                        <div class="crm-page-actions">
+                            <button type="button" class="crm-page-btn" id="crm-page-prev" onclick="mudarPaginaCRM(-1)"><i class="bi bi-chevron-left"></i> Anterior</button>
+                            <span id="crm-page-label">Página 1</span>
+                            <button type="button" class="crm-page-btn" id="crm-page-next" onclick="mudarPaginaCRM(1)">Próxima <i class="bi bi-chevron-right"></i></button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -4307,6 +4344,7 @@
                 <div class="crm-dialog-footer">
                     <div><button type="button" id="crm-btn-delete" class="btn btn-outline-danger hidden" onclick="excluirLeadCRM()"><i class="bi bi-trash me-1"></i> Excluir lead</button></div>
                     <div class="d-flex gap-2 flex-wrap">
+                        <button type="button" id="crm-btn-ticket" class="btn btn-outline-secondary hidden" onclick="direcionarLeadCRMAtualParaTicket()"><i class="bi bi-chat-dots me-1"></i> Abrir chat</button>
                         <button type="button" class="btn btn-outline-secondary" onclick="fecharLeadCRM()">Cancelar</button>
                         <button type="submit" id="crm-btn-save" class="btn text-white" style="background:var(--adv-blue)"><i class="bi bi-check2 me-1"></i> Salvar lead</button>
                     </div>
@@ -6852,6 +6890,9 @@ function renderizarLista(itens) {
         const CRM_ORIGENS_ANUNCIO_FALLBACK = ['Meta Ads','Instagram Ads','Facebook Ads','Google Ads','TikTok Ads','YouTube Ads','LinkedIn Ads','Outro anúncio'];
         const CRM_STATUS_ENCERRADOS_JS = new Set(['Encerrado - ganho','Encerrado - perdido']);
         const CRM_STATUS_GANHOS_JS = new Set(['Contrato assinado','Em andamento','Encerrado - ganho']);
+        const CRM_PAGE_SIZE = 50;
+        window.crmCurrentPage = 1;
+        window.crmFilteredData = [];
 
         function hojeCRMJS() {
             const partes = new Intl.DateTimeFormat('en-CA', {
@@ -7028,6 +7069,15 @@ function renderizarLista(itens) {
                     wa.innerHTML = '<i class="bi bi-whatsapp"></i>';
                     actions.appendChild(wa);
                 }
+                if (lead.ticketNumber) {
+                    const chatBtn = document.createElement('button');
+                    chatBtn.type = 'button';
+                    chatBtn.className = 'crm-edit-btn crm-ticket-btn';
+                    chatBtn.innerHTML = '<i class="bi bi-chat-dots me-1"></i> Abrir chat';
+                    chatBtn.title = 'Ir para o ticket correspondente';
+                    chatBtn.onclick = () => direcionarLeadParaTicket(lead);
+                    actions.appendChild(chatBtn);
+                }
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'crm-edit-btn';
@@ -7075,19 +7125,112 @@ function renderizarLista(itens) {
                 if (da !== db) return da.localeCompare(db);
                 return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
             });
-            renderizarCRM(filtrados);
+
+            window.crmFilteredData = filtrados;
+            if (arguments[0] === true) window.crmCurrentPage = 1;
+            renderizarPaginaCRM();
+        }
+
+        function renderizarPaginaCRM() {
+            const leads = Array.isArray(window.crmFilteredData) ? window.crmFilteredData : [];
+            const total = leads.length;
+            const totalPaginas = Math.max(1, Math.ceil(total / CRM_PAGE_SIZE));
+            window.crmCurrentPage = Math.min(Math.max(1, Number(window.crmCurrentPage || 1)), totalPaginas);
+            const inicio = (window.crmCurrentPage - 1) * CRM_PAGE_SIZE;
+            const fim = Math.min(total, inicio + CRM_PAGE_SIZE);
+            renderizarCRM(leads.slice(inicio, fim));
+
+            const info = document.getElementById('crm-page-info');
+            const label = document.getElementById('crm-page-label');
+            const prev = document.getElementById('crm-page-prev');
+            const next = document.getElementById('crm-page-next');
+            if (info) info.textContent = total ? `Mostrando ${inicio + 1}–${fim} de ${total} leads` : '0 leads';
+            if (label) label.textContent = `Página ${window.crmCurrentPage} de ${totalPaginas}`;
+            if (prev) prev.disabled = window.crmCurrentPage <= 1;
+            if (next) next.disabled = window.crmCurrentPage >= totalPaginas;
+        }
+
+        function mudarPaginaCRM(delta = 0) {
+            const total = Array.isArray(window.crmFilteredData) ? window.crmFilteredData.length : 0;
+            const totalPaginas = Math.max(1, Math.ceil(total / CRM_PAGE_SIZE));
+            window.crmCurrentPage = Math.min(totalPaginas, Math.max(1, Number(window.crmCurrentPage || 1) + Number(delta || 0)));
+            renderizarPaginaCRM();
+            document.querySelector('.crm-table-wrap')?.scrollIntoView({ behavior:'smooth', block:'start' });
+        }
+
+        function agendarFiltroCRM() {
+            clearTimeout(window.crmSearchDebounceTimer);
+            window.crmSearchDebounceTimer = setTimeout(() => filtrarCRM(true), 140);
+        }
+
+        async function direcionarLeadParaTicket(lead = {}) {
+            const ticketNumber = String(lead?.ticketNumber || '').trim();
+            if (!ticketNumber) {
+                alert('Este lead não possui ticket vinculado.');
+                return;
+            }
+
+            fecharLeadCRM();
+            switchTicketsSubtab('active');
+
+            // switchTicketsSubtab já dispara o carregamento. Se ele estiver em andamento,
+            // aguardamos terminar antes de aplicar o filtro do ticket; assim o botão nunca
+            // abre o chat automaticamente nem perde o direcionamento por condição de corrida.
+            if (window.activeTicketsLoading) {
+                await new Promise(resolve => {
+                    const inicioEspera = Date.now();
+                    const timer = setInterval(() => {
+                        if (!window.activeTicketsLoading || (Date.now() - inicioEspera) > 7000) {
+                            clearInterval(timer);
+                            resolve();
+                        }
+                    }, 60);
+                });
+            } else if (!window.activeTicketsLoaded) {
+                await carregarTicketsAtivos(false);
+            }
+
+            const busca = document.getElementById('tickets-search-input');
+            const area = document.getElementById('tickets-filter-area');
+            const unread = document.getElementById('tickets-filter-unread');
+            if (busca) busca.value = ticketNumber;
+            if (area) area.value = '';
+            if (unread) unread.value = '';
+            filtrarTicketsAtivos();
+
+            requestAnimationFrame(() => {
+                const linha = [...document.querySelectorAll('#tickets-table-body tr[data-ticket-number]')]
+                    .find(item => String(item.dataset.ticketNumber || '') === ticketNumber);
+                if (linha) {
+                    linha.scrollIntoView({ behavior:'smooth', block:'center' });
+                    linha.classList.add('ticket-row-crm-focus');
+                    setTimeout(() => linha.classList.remove('ticket-row-crm-focus'), 1900);
+                    document.getElementById('tickets-search-input')?.focus();
+                    return;
+                }
+                const status = document.getElementById('tickets-status');
+                if (status) {
+                    status.className = 'menu-save-status text-muted mb-2';
+                    status.textContent = `O ticket ${ticketNumber} não está mais entre os tickets ativos.`;
+                }
+            });
+        }
+
+        function direcionarLeadCRMAtualParaTicket() {
+            const lead = (window.crmLeadsData || []).find(item => String(item.id || '') === String(window.crmEditingId || ''));
+            if (lead) direcionarLeadParaTicket(lead);
         }
 
         function limparFiltrosCRM() {
             ['crm-search-input','crm-filter-status','crm-filter-responsavel','crm-filter-area','crm-filter-acao'].forEach(id => {
                 const el = document.getElementById(id); if (el) el.value = '';
             });
-            filtrarCRM();
+            filtrarCRM(true);
         }
 
         async function carregarCRM(forcar = false) {
             if (window.crmLoading) return;
-            if (window.crmLoaded && !forcar) { filtrarCRM(); return; }
+            if (window.crmLoaded && !forcar) { filtrarCRM(false); return; }
             const status = document.getElementById('crm-status');
             window.crmLoading = true;
             if (status) { status.className='menu-save-status text-muted mb-2'; status.textContent='Carregando CRM...'; }
@@ -7100,7 +7243,8 @@ function renderizarLista(itens) {
                 window.crmLoaded = true;
                 atualizarResumoCRM(data.resumo || {});
                 preencherFiltrosCRM();
-                filtrarCRM();
+                window.crmCurrentPage = 1;
+                filtrarCRM(true);
                 if (status) status.textContent = '';
             } catch (err) {
                 console.error(err);
@@ -7178,6 +7322,8 @@ function renderizarLista(itens) {
             document.getElementById('crm-dialog-subtitle').textContent = lead?.ticketNumber ? `Originado do ticket ${lead.ticketNumber}` : 'Cadastre somente o necessário agora; o restante pode ser atualizado durante o acompanhamento.';
             document.getElementById('crm-form-status').textContent = '';
             document.getElementById('crm-btn-delete').classList.toggle('hidden', !lead);
+            const btnTicket = document.getElementById('crm-btn-ticket');
+            if (btnTicket) btnTicket.classList.toggle('hidden', !lead?.ticketNumber);
             atualizarCamposCondicionaisCRM();
             atualizarPreviewReceitaCRM();
 
