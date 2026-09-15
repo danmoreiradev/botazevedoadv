@@ -7448,6 +7448,51 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
     }
 });
 
+// Perguntas e respostas da triagem carregadas somente quando o advogado solicita.
+// Mantém a abertura inicial do chat leve e evita carregar conteúdo extenso sem necessidade.
+app.get('/api/tickets/:ticketNumber/chat/triage', async (req, res) => {
+    if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
+    if (!ticketsColl) return res.status(503).json({ erro: 'Chat ainda não está disponível.' });
+
+    try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        const [ticket, historico] = await Promise.all([
+            ticketsColl.findOne(
+                { ticketNumber },
+                { projection: { ticketNumber: 1, perguntasFluxo: 1, respostasFluxo: 1, indicePerguntaFluxo: 1, status: 1 } }
+            ),
+            ticketHistoryColl
+                ? ticketHistoryColl.findOne(
+                    { _id: ticketNumber },
+                    { projection: { respostasTriagem: 1, perguntasTriagem: 1, triagemConcluidaEm: 1 } }
+                )
+                : Promise.resolve(null)
+        ]);
+
+        if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+
+        const respostas = Array.isArray(ticket.respostasFluxo) && ticket.respostasFluxo.length
+            ? ticket.respostasFluxo
+            : (Array.isArray(historico?.respostasTriagem) ? historico.respostasTriagem : []);
+        const triagem = progressoTriagemTicket(ticket, respostas);
+
+        res.json({
+            ticketNumber,
+            triagem,
+            concluidaEm: historico?.triagemConcluidaEm || null,
+            respostas: respostas.map(item => ({
+                pergunta: String(item?.pergunta || '').trim(),
+                resposta: String(item?.resposta || '').trim(),
+                tipo: String(item?.tipo || 'texto').trim(),
+                respondidaEm: item?.respondidaEm || null
+            }))
+        });
+    } catch (err) {
+        console.error('[Chat] Erro ao carregar triagem:', err);
+        res.status(500).json({ erro: 'Não foi possível carregar as respostas da triagem.' });
+    }
+});
+
 // Lista consolidada das análises de anexos do ticket para o painel lateral do chat.
 // O binário continua fora do MongoDB; aqui retornamos somente metadados e os resumos
 // estruturados já persistidos pela rotina do Gemini.

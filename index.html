@@ -3438,6 +3438,44 @@
         }
     </style>
 
+
+    <style id="ticket-triage-unread-v14">
+        .nav-ticket-badges{margin-left:auto;display:inline-flex;align-items:center;gap:5px;min-width:0;}
+        #nav-tickets-link .nav-notification-badge{position:static;margin-left:0;border-color:var(--adv-blue-strong);}
+        .nav-ticket-unread-badge{display:inline-flex;align-items:center;justify-content:center;min-height:21px;padding:3px 7px;color:#fff;background:#d92d20;border:1px solid rgba(255,255,255,.18);border-radius:999px;font-size:.62rem;font-weight:800;line-height:1;white-space:nowrap;box-shadow:0 0 0 3px rgba(217,45,32,.10);}
+        .nav-ticket-unread-badge.hidden{display:none!important;}
+        .chat-op-pill-action{font-family:inherit;cursor:pointer;appearance:none;outline:none;transition:background .16s ease,border-color .16s ease,box-shadow .16s ease;}
+        .chat-op-pill-action:hover{background:#edf3f0;border-color:#c8d4ce;}
+        .chat-op-pill-action:focus-visible{box-shadow:0 0 0 3px rgba(41,45,56,.10);}
+        .chat-op-chevron{font-size:.58rem!important;transition:transform .16s ease;}
+        .chat-op-pill-action[aria-expanded="true"] .chat-op-chevron{transform:rotate(180deg);}
+        .chat-triage-panel{padding:12px 14px 14px;background:#fbfcfb;border-bottom:1px solid #e1e7e4;}
+        .chat-triage-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px;color:#28352f;font-size:.78rem;}
+        .chat-triage-subtitle{margin-top:3px;color:#7a8680;font-size:.67rem;font-weight:600;}
+        .chat-triage-close{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;color:#69756f;background:#fff;border:1px solid #d9e0dc;border-radius:8px;}
+        .chat-triage-body{display:grid;gap:8px;max-height:245px;overflow-y:auto;padding-right:3px;}
+        .chat-triage-item{padding:10px 11px;background:#fff;border:1px solid #e0e6e3;border-radius:10px;}
+        .chat-triage-question{margin-bottom:5px;color:#5e6a64;font-size:.68rem;font-weight:800;line-height:1.35;}
+        .chat-triage-answer{color:#29342f;font-size:.78rem;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;}
+        .chat-triage-meta{margin-top:5px;color:#929b96;font-size:.60rem;}
+        .chat-triage-empty{padding:18px;color:#7d8883;background:#fff;border:1px dashed #d9dfdc;border-radius:10px;text-align:center;font-size:.72rem;}
+        html[data-theme="dark"] .chat-op-pill-action:hover{background:#263139!important;border-color:#445159!important;}
+        html[data-theme="dark"] .chat-triage-panel{background:#171d22!important;border-bottom-color:#313a41!important;}
+        html[data-theme="dark"] .chat-triage-header{color:#e9eef1!important;}
+        html[data-theme="dark"] .chat-triage-subtitle{color:#9ca8af!important;}
+        html[data-theme="dark"] .chat-triage-close{color:#c9d1d6!important;background:#222a30!important;border-color:#39444c!important;}
+        html[data-theme="dark"] .chat-triage-item{background:#20272d!important;border-color:#343e46!important;}
+        html[data-theme="dark"] .chat-triage-question{color:#aab5bb!important;}
+        html[data-theme="dark"] .chat-triage-answer{color:#eef2f4!important;}
+        html[data-theme="dark"] .chat-triage-meta{color:#89959c!important;}
+        html[data-theme="dark"] .chat-triage-empty{color:#9ba7ad!important;background:#20272d!important;border-color:#3a444c!important;}
+        @media(max-width:767.98px){
+            .nav-ticket-unread-badge{font-size:.58rem;padding:3px 6px;}
+            .chat-triage-panel{padding:10px;}
+            .chat-triage-body{max-height:210px;}
+        }
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -3451,7 +3489,10 @@
                 <div class="nav-link" id="nav-tickets-link" data-permission="tickets" onclick="switchTab('tab-tickets', this)">
                     <span class="nav-icon"><i class="bi bi-inboxes"></i></span>
                     <span>Tickets ativos</span>
-                    <span id="nav-notification-badge" class="nav-notification-badge hidden" aria-label="Notificações não lidas">0</span>
+                    <span class="nav-ticket-badges" aria-live="polite">
+                        <span id="nav-ticket-unread-badge" class="nav-ticket-unread-badge hidden" aria-label="Mensagens não lidas nos tickets">msg não lida</span>
+                        <span id="nav-notification-badge" class="nav-notification-badge hidden" aria-label="Notificações não lidas">0</span>
+                    </span>
                 </div>
                 <div class="nav-link" data-permission="clients" onclick="switchTab('tab-clientes', this)">
                     <span class="nav-icon"><i class="bi bi-people"></i></span>
@@ -4082,7 +4123,7 @@
                 <div class="ticket-chat-statuses">
                     <span class="chat-op-pill" id="ticket-chat-op-situation"><i class="bi bi-circle-fill"></i><span>Situação</span></span>
                     <span class="chat-op-pill" id="ticket-chat-op-owner"><i class="bi bi-person-badge"></i><span>Sem responsável</span></span>
-                    <span class="chat-op-pill" id="ticket-chat-op-triage"><i class="bi bi-list-check"></i><span>Triagem</span></span>
+                    <button type="button" class="chat-op-pill chat-op-pill-action" id="ticket-chat-op-triage" onclick="toggleTriagemChat(event)" aria-expanded="false" title="Ver perguntas e respostas da triagem"><i class="bi bi-list-check"></i><span>Triagem</span><i class="bi bi-chevron-down chat-op-chevron"></i></button>
                     <span class="chat-op-pill" id="ticket-chat-op-time"><i class="bi bi-clock"></i><span>Atividade</span></span>
                 </div>
                 <div class="ticket-chat-operation-actions">
@@ -4110,6 +4151,17 @@
                     </div>
                 </div>
             </div>
+
+            <section class="chat-triage-panel hidden" id="chat-triage-panel" aria-label="Perguntas e respostas da triagem">
+                <div class="chat-triage-header">
+                    <div>
+                        <strong><i class="bi bi-list-check me-1"></i> Respostas da triagem</strong>
+                        <div class="chat-triage-subtitle" id="chat-triage-subtitle">Carregando informações...</div>
+                    </div>
+                    <button type="button" class="chat-triage-close" onclick="fecharTriagemChat()" aria-label="Fechar triagem"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="chat-triage-body" id="chat-triage-body"><div class="chat-triage-empty">Carregando perguntas e respostas...</div></div>
+            </section>
 
             <div class="ticket-chat-user" id="ticket-chat-current-user">Modo leitura</div>
             <div class="ticket-chat-storage" id="ticket-chat-storage">Histórico completo com carregamento paginado</div>
@@ -6127,11 +6179,22 @@ function renderizarLista(itens) {
             return origem || '—';
         }
 
+        function atualizarBadgeMensagensNaoLidasTickets(totalNaoLidas = 0) {
+            const badge = document.getElementById('nav-ticket-unread-badge');
+            if (!badge) return;
+            const total = Math.max(0, Number(totalNaoLidas || 0));
+            badge.classList.toggle('hidden', total <= 0);
+            badge.textContent = total === 1 ? '1 msg não lida' : `${total} msgs não lidas`;
+            badge.setAttribute('aria-label', total === 1 ? '1 mensagem não lida nos tickets' : `${total} mensagens não lidas nos tickets`);
+        }
+
         function atualizarResumoTickets(resumo = {}) {
             const total = document.getElementById('tickets-metric-total');
             const unread = document.getElementById('tickets-metric-unread');
+            const totalNaoLidas = Number(resumo.mensagensNaoLidas || 0);
             if (total) total.textContent = Number(resumo.total || 0);
-            if (unread) unread.textContent = Number(resumo.mensagensNaoLidas || 0);
+            if (unread) unread.textContent = totalNaoLidas;
+            atualizarBadgeMensagensNaoLidasTickets(totalNaoLidas);
         }
 
 
@@ -6920,11 +6983,6 @@ function renderizarLista(itens) {
             return numero.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
         }
 
-        function numeroWhatsAppLinkCRM(valor = '') {
-            let digitos = String(valor || '').replace(/\D/g, '');
-            if ((digitos.length === 10 || digitos.length === 11) && !digitos.startsWith('55')) digitos = `55${digitos}`;
-            return digitos;
-        }
 
         function normalizarBuscaCRM(valor = '') {
             return String(valor || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
@@ -7059,16 +7117,6 @@ function renderizarLista(itens) {
                 acaoTd.className = 'text-end';
                 const actions = document.createElement('div');
                 actions.className = 'd-inline-flex gap-1';
-                if (lead.telefone) {
-                    const wa = document.createElement('a');
-                    wa.className = 'crm-edit-btn text-decoration-none';
-                    wa.href = `https://wa.me/${numeroWhatsAppLinkCRM(lead.telefone)}`;
-                    wa.target = '_blank';
-                    wa.rel = 'noopener noreferrer';
-                    wa.title = 'Abrir WhatsApp';
-                    wa.innerHTML = '<i class="bi bi-whatsapp"></i>';
-                    actions.appendChild(wa);
-                }
                 if (lead.ticketNumber) {
                     const chatBtn = document.createElement('button');
                     chatBtn.type = 'button';
@@ -8326,6 +8374,81 @@ function renderizarLista(itens) {
             return `Triagem ${respondidas}/${total} · ${percentual}%`;
         }
 
+
+        function fecharTriagemChat() {
+            const panel = document.getElementById('chat-triage-panel');
+            const btn = document.getElementById('ticket-chat-op-triage');
+            panel?.classList.add('hidden');
+            btn?.setAttribute('aria-expanded', 'false');
+        }
+
+        function formatarDataRespostaTriagem(valor) {
+            const n = Number(valor || 0);
+            if (!n) return '';
+            try { return new Date(n).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
+            catch (_) { return ''; }
+        }
+
+        function renderizarTriagemChat(data = {}) {
+            const body = document.getElementById('chat-triage-body');
+            const subtitle = document.getElementById('chat-triage-subtitle');
+            if (!body) return;
+            const triagem = data.triagem || {};
+            const respostas = Array.isArray(data.respostas) ? data.respostas : [];
+            if (subtitle) {
+                const total = Number(triagem.total || respostas.length || 0);
+                const respondidas = Number(triagem.respondidas || respostas.length || 0);
+                subtitle.textContent = total ? `${respondidas} de ${total} pergunta${total === 1 ? '' : 's'} respondida${respondidas === 1 ? '' : 's'}` : 'Sem perguntas sequenciais cadastradas';
+            }
+            body.replaceChildren();
+            if (!respostas.length) {
+                const empty = document.createElement('div');
+                empty.className = 'chat-triage-empty';
+                empty.textContent = 'Ainda não há respostas de triagem registradas neste ticket.';
+                body.appendChild(empty);
+                return;
+            }
+            const frag = document.createDocumentFragment();
+            respostas.forEach((item, index) => {
+                const card = document.createElement('div'); card.className = 'chat-triage-item';
+                const pergunta = document.createElement('div'); pergunta.className = 'chat-triage-question'; pergunta.textContent = `${index + 1}. ${item.pergunta || 'Pergunta da triagem'}`;
+                const resposta = document.createElement('div'); resposta.className = 'chat-triage-answer'; resposta.textContent = item.resposta || 'Sem resposta registrada';
+                card.append(pergunta, resposta);
+                const dataResposta = formatarDataRespostaTriagem(item.respondidaEm);
+                if (dataResposta) { const meta=document.createElement('div'); meta.className='chat-triage-meta'; meta.textContent=`Respondida em ${dataResposta}`; card.appendChild(meta); }
+                frag.appendChild(card);
+            });
+            body.appendChild(frag);
+        }
+
+        async function carregarTriagemChat() {
+            const ticketNumber = String(window.activeChatTicketNumber || '').trim();
+            if (!ticketNumber) return;
+            const body = document.getElementById('chat-triage-body');
+            if (body) body.innerHTML = '<div class="chat-triage-empty"><span class="spinner-border spinner-border-sm me-1"></span> Carregando perguntas e respostas...</div>';
+            try {
+                const res = await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/chat/triage`, { cache:'no-store' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar a triagem.');
+                window.activeChatTriageDetails = data;
+                renderizarTriagemChat(data);
+            } catch (err) {
+                if (body) { body.innerHTML=''; const empty=document.createElement('div'); empty.className='chat-triage-empty'; empty.textContent=err.message || 'Não foi possível carregar a triagem.'; body.appendChild(empty); }
+            }
+        }
+
+        function toggleTriagemChat(event) {
+            event?.stopPropagation?.();
+            if (!window.activeChatTicketNumber) return;
+            const panel = document.getElementById('chat-triage-panel');
+            const btn = document.getElementById('ticket-chat-op-triage');
+            if (!panel || !btn) return;
+            const abrir = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden', !abrir);
+            btn.setAttribute('aria-expanded', String(abrir));
+            if (abrir) carregarTriagemChat();
+        }
+
         function atualizarStatusOperacionalChat(ticketData = {}) {
             const data = { ...(window.activeChatTicketData || {}), ...(ticketData || {}) };
             window.activeChatTicketData = data;
@@ -8335,7 +8458,7 @@ function renderizarLista(itens) {
             const time = document.getElementById('ticket-chat-op-time');
             if (situation) situation.querySelector('span:last-child').textContent = data.pendenciaLabel || data.statusLabel || data.status || 'Em acompanhamento';
             if (owner) owner.querySelector('span:last-child').textContent = data.advogadoResponsavelNome ? `Responsável: ${data.advogadoResponsavelNome}` : 'Sem responsável';
-            if (triage) triage.querySelector('span:last-child').textContent = textoTriagemChat(data.triagem || {});
+            if (triage) { const label = triage.querySelector('span'); if (label) label.textContent = textoTriagemChat(data.triagem || {}); }
             if (time) time.querySelector('span:last-child').textContent = data.lastActivity ? `Atividade ${formatarDataTicket(data.lastActivity)}` : 'Atividade não informada';
         }
 
@@ -8482,7 +8605,7 @@ function renderizarLista(itens) {
         }
 
         async function abrirChatTicket(ticketNumber, triggerButton = null) {
-            cancelarRespostaChat(); cancelarGravacaoChat();
+            cancelarRespostaChat(); cancelarGravacaoChat(); fecharTriagemChat(); window.activeChatTriageDetails = null;
             if(!temPermissaoPainel('chat') || !ticketNumber) return;
             const originalButtonHtml = triggerButton?.innerHTML || '';
             const dialog=document.getElementById('ticket-chat-dialog');
@@ -8519,7 +8642,7 @@ function renderizarLista(itens) {
             }
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
-        function fecharChatTicket() { const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
+        function fecharChatTicket() { const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; window.activeChatTriageDetails=null; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharTriagemChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
         async function carregarMensagensAnterioresChat() {
             if(!window.activeChatTicketNumber||!window.activeChatOldest) return;
             const history=document.getElementById('ticket-chat-history'); const beforeHeight=history?.scrollHeight||0;
