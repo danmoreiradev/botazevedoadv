@@ -1309,6 +1309,7 @@ function sessaoPublicaDaConta(conta = {}) {
         assinatura,
         email: String(conta.email || '').trim(),
         oab: String(conta.oab || '').trim(),
+        celular: String(conta.celular || '').trim(),
         theme: String(conta.theme || '').toLowerCase() === 'dark' ? 'dark' : 'light',
         role,
         roleLabel: role === 'admin' ? 'Administrador' : 'Advogado',
@@ -3686,6 +3687,19 @@ function normalizarNumeroWhatsApp(valor = '') {
     return digitos.length >= 10 && digitos.length <= 15 ? digitos : null;
 }
 
+
+function normalizarCelularUsuario(valor = '') {
+    const texto = String(valor || '').trim();
+    if (!texto) return '';
+
+    let digitos = texto.replace(/\D/g, '');
+    // Para números brasileiros informados apenas com DDD + telefone, armazenamos
+    // em E.164 sem o sinal de +. Números internacionais já completos são preservados.
+    if (digitos.length === 10 || digitos.length === 11) digitos = `55${digitos}`;
+    if (digitos.length < 12 || digitos.length > 15) return '';
+    return digitos;
+}
+
 function extrairNumeroWhatsAppDeFontes(...fontes) {
     const fila = [...fontes];
 
@@ -5768,11 +5782,14 @@ app.put('/api/me/profile', exigirLogin, async (req, res) => {
         const assinatura = assinaturaInformada || assinaturaPadraoUsuario(nome);
         const email = String(req.body?.email ?? '').trim().slice(0, 240);
         const oab = String(req.body?.oab ?? '').trim().slice(0, 80);
+        const celularInformado = String(req.body?.celular ?? existente.celular ?? '').trim();
+        const celular = normalizarCelularUsuario(celularInformado);
+        if (celularInformado && !celular) return res.status(400).json({ erro: 'Informe um celular válido com DDD.' });
         const currentPassword = String(req.body?.currentPassword || '');
         const newPassword = String(req.body?.newPassword || '');
 
         const update = {
-            $set: { nome, assinatura, email, oab, updatedAt: Date.now() }
+            $set: { nome, assinatura, email, oab, celular, updatedAt: Date.now() }
         };
 
         if (newPassword) {
@@ -6037,6 +6054,51 @@ app.get('/logout-whatsapp', exigirPermissao('whatsapp'), async (req, res) => {
 });
 
 
+async function enviarBoasVindasNovoAdvogado(conta = {}) {
+    const celular = normalizarCelularUsuario(conta.celular || '');
+    if (normalizarPapelUsuario(conta.role) !== 'advogado') {
+        return { enviado: false, motivo: 'perfil_nao_advogado' };
+    }
+    if (conta.ativo === false) return { enviado: false, motivo: 'usuario_inativo' };
+    if (!celular) return { enviado: false, motivo: 'sem_celular' };
+    if (!sock?.user) return { enviado: false, motivo: 'whatsapp_desconectado' };
+
+    const pnJid = normalizarJid(`${celular}@s.whatsapp.net`) || `${celular}@s.whatsapp.net`;
+    let jidDestino = pnJid;
+
+    // Se a sessão já conhecer o LID deste número, preferimos o mesmo addressing mode
+    // usado pelo WhatsApp Multi-Device. Caso contrário, o PN é um fallback válido.
+    if (sock?.signalRepository?.lidMapping?.getLIDForPN) {
+        try {
+            const lid = normalizarJid(await sock.signalRepository.lidMapping.getLIDForPN(pnJid));
+            if (lid?.endsWith('@lid')) jidDestino = lid;
+        } catch (err) {
+            console.warn(`[Usuários] Não foi possível resolver LID para boas-vindas de ${celular}:`, err?.message || err);
+        }
+    }
+
+    const nomeExibicao = String(conta.assinatura || conta.nome || conta.user || 'novo usuário').trim();
+    const login = String(conta.user || '').trim();
+    const texto = `Olá, *${nomeExibicao}*! 👋
+
+Seu acesso ao painel interno da *Azevedo & Juvêncio* foi criado com sucesso.${login ? `
+
+Usuário: *${login}*` : ''}
+
+Por segurança, sua senha não é enviada pelo WhatsApp. Utilize os dados fornecidos pelo administrador para realizar o acesso.
+
+Seja bem-vindo(a) à equipe.`;
+
+    try {
+        const sent = await sendBotMsg(jidDestino, { text: texto });
+        if (!sent?.key?.id) return { enviado: false, motivo: 'falha_envio' };
+        return { enviado: true, motivo: null };
+    } catch (err) {
+        console.warn(`[Usuários] Falha ao enviar boas-vindas para ${celular}:`, err?.message || err);
+        return { enviado: false, motivo: 'falha_envio' };
+    }
+}
+
 // -----------------------------------------------------------------------------
 // GESTÃO DE USUÁRIOS DO PAINEL - somente administradores
 // -----------------------------------------------------------------------------
@@ -6056,6 +6118,7 @@ function normalizarDadosUsuarioPainel(body = {}, existente = null) {
         assinatura: assinatura || assinaturaPadraoUsuario(nome),
         email: String(body.email ?? existente?.email ?? '').trim().slice(0, 240),
         oab: String(body.oab ?? existente?.oab ?? '').trim().slice(0, 80),
+        celular: normalizarCelularUsuario(body.celular ?? existente?.celular ?? ''),
         role,
         permissions,
         ativo: body.ativo !== undefined ? body.ativo !== false : existente?.ativo !== false
@@ -6082,6 +6145,8 @@ app.post('/api/users', async (req, res) => {
     try {
         const dados = normalizarDadosUsuarioPainel(req.body || {});
         const senha = String(req.body?.password || '');
+        const celularInformado = String(req.body?.celular || '').trim();
+        if (celularInformado && !dados.celular) return res.status(400).json({ erro: 'Informe um celular válido com DDD.' });
         if (!dados.user || dados.user.length < 3) return res.status(400).json({ erro: 'O usuário deve possuir ao menos 3 caracteres.' });
         if (!dados.nome || dados.nome.length < 3) return res.status(400).json({ erro: 'Informe o nome do usuário.' });
         if (senha.length < 6) return res.status(400).json({ erro: 'A senha deve possuir ao menos 6 caracteres.' });
@@ -6103,7 +6168,15 @@ app.post('/api/users', async (req, res) => {
         delete salvo.passwordHash;
         delete salvo.passwordSalt;
         io.emit('panel_users_updated', { action: 'created', id: String(result.insertedId) });
-        res.status(201).json({ ok: true, user: { ...sessaoPublicaDaConta(salvo), ativo: salvo.ativo !== false } });
+
+        // O cadastro não depende do WhatsApp. A mensagem é uma cortesia pós-cadastro:
+        // somente advogado ativo + celular válido + conexão disponível recebem boas-vindas.
+        const boasVindas = await enviarBoasVindasNovoAdvogado(salvo);
+        res.status(201).json({
+            ok: true,
+            user: { ...sessaoPublicaDaConta(salvo), ativo: salvo.ativo !== false },
+            boasVindas
+        });
     } catch (err) {
         console.error('[Usuários] Erro ao criar:', err);
         res.status(500).json({ erro: 'Não foi possível criar o usuário.' });
@@ -6117,6 +6190,8 @@ app.put('/api/users/:id', async (req, res) => {
         const existente = await userLoginColl.findOne({ _id: id });
         if (!existente) return res.status(404).json({ erro: 'Usuário não encontrado.' });
         const dados = normalizarDadosUsuarioPainel(req.body || {}, existente);
+        const celularInformado = String(req.body?.celular ?? existente.celular ?? '').trim();
+        if (celularInformado && !dados.celular) return res.status(400).json({ erro: 'Informe um celular válido com DDD.' });
         if (!dados.user || dados.user.length < 3 || !dados.nome) return res.status(400).json({ erro: 'Usuário e nome são obrigatórios.' });
 
         const duplicado = await userLoginColl.findOne({

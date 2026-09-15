@@ -2232,7 +2232,7 @@
         /* Gestão de usuários */
         .users-summary { margin-bottom:16px; padding:12px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; color:#606976; background:#f8f9fb; border:1px solid var(--border); border-radius:12px; font-size:.78rem; }
         .users-table-wrap { overflow-x:auto; background:#fff; border:1px solid var(--border); border-radius:14px; }
-        .users-table { min-width:850px; margin:0; }
+        .users-table { min-width:980px; margin:0; }
         .users-table thead th { padding:12px 14px; color:#6a7280; background:#f8f9fb; font-size:.68rem; font-weight:760; letter-spacing:.05em; text-transform:uppercase; }
         .users-table tbody td { padding:13px 14px; vertical-align:middle; border-color:#edf0f3; }
         .user-main-name { color:#303842; font-weight:760; }
@@ -2666,6 +2666,48 @@
         html[data-theme="dark"] .quick-texts-header, html[data-theme="dark"] .quick-text-form { background:#252a33; border-color:#343a45; }
         html[data-theme="dark"] .quick-text-card { background:#22272f; border-color:#343a45; }
         html[data-theme="dark"] dialog::backdrop { background:rgba(0,0,0,.68); }
+
+        /* V9 — contraste reforçado no modo escuro */
+        html[data-theme="dark"] .tickets-subnav { background:#1d2229; border-color:#343b46; }
+        html[data-theme="dark"] .tickets-subnav-btn { color:#aeb7c3; }
+        html[data-theme="dark"] .tickets-subnav-btn:hover { color:#f4f6f8; background:#292f38; }
+        html[data-theme="dark"] .tickets-subnav-btn.active { color:#f4f6f8; background:#303743; box-shadow:0 2px 8px rgba(0,0,0,.22); }
+        html[data-theme="dark"] .tickets-table tbody tr.ticket-row-mine > td { background:#1b2923 !important; color:#dfe7e1 !important; }
+        html[data-theme="dark"] .tickets-table tbody tr.ticket-row-mine:hover > td { background:#203229 !important; }
+        html[data-theme="dark"] .tickets-table tbody tr.ticket-row-assigned > td { background:#1c242e !important; color:#d9dfe7 !important; }
+        html[data-theme="dark"] .tickets-table tbody tr.ticket-row-assigned:hover > td { background:#222d39 !important; }
+        html[data-theme="dark"] .ticket-number,
+        html[data-theme="dark"] .ticket-client-name,
+        html[data-theme="dark"] .ticket-area,
+        html[data-theme="dark"] .ticket-responsavel-name,
+        html[data-theme="dark"] .ticket-time-main { color:#edf1f5 !important; }
+        html[data-theme="dark"] .ticket-client-phone,
+        html[data-theme="dark"] .ticket-time-sub,
+        html[data-theme="dark"] .ticket-responsavel-meta,
+        html[data-theme="dark"] .ticket-stage,
+        html[data-theme="dark"] .ticket-owner-line { color:#9da7b4 !important; }
+        html[data-theme="dark"] .ticket-owner-line.mine { color:#c8d8cc !important; }
+        html[data-theme="dark"] .ticket-summary-icon { color:#d4b36d; background:#2b313b; }
+        html[data-theme="dark"] .ticket-summary-card.is-alert .ticket-summary-icon { color:#ff8179; background:#392425; }
+        html[data-theme="dark"] .btn-outline-secondary { color:#cbd2db; background:#242a33; border-color:#424b58; }
+        html[data-theme="dark"] .btn-outline-secondary:hover { color:#fff; background:#303743; border-color:#566171; }
+        html[data-theme="dark"] .btn[style*="background:var(--adv-blue)"] { background:#353d49 !important; color:#f5f7f9 !important; border-color:#4a5564 !important; }
+        html[data-theme="dark"] .btn[style*="background: var(--adv-blue)"] { background:#353d49 !important; color:#f5f7f9 !important; border-color:#4a5564 !important; }
+        html[data-theme="dark"] .ticket-view-btn { color:#e7ebef; background:#252b34; border-color:#404955; }
+        html[data-theme="dark"] .ticket-view-btn:hover { color:#fff; background:#303743; border-color:#566171; }
+        html[data-theme="dark"] .ticket-close-btn { color:#ff9a93; background:#2d2425; border-color:#633b3c; }
+        html[data-theme="dark"] .ticket-close-btn:hover:not(:disabled) { color:#fff; background:#a94742; border-color:#a94742; }
+        html[data-theme="dark"] .alert.alert-light { color:#c9d0d9; background:#222831; border-color:#39414c !important; }
+        html[data-theme="dark"] .users-summary,
+        html[data-theme="dark"] .crm-helper-strip,
+        html[data-theme="dark"] .tickets-refresh-status { color:#aeb7c3; }
+        html[data-theme="dark"] .user-main-name,
+        html[data-theme="dark"] .client-name,
+        html[data-theme="dark"] .crm-client-name { color:#eef1f5 !important; }
+        html[data-theme="dark"] .user-login,
+        html[data-theme="dark"] .user-permissions,
+        html[data-theme="dark"] .client-secondary,
+        html[data-theme="dark"] .crm-client-contact { color:#9da7b4 !important; }
 
         /* Textos rápidos */
         #quick-texts-dialog {
@@ -3311,8 +3353,8 @@
                 <div id="users-status" class="menu-save-status text-muted mb-2"></div>
                 <div class="users-table-wrap">
                     <table class="table users-table align-middle">
-                        <thead><tr><th>Usuário</th><th>Identificação no chat</th><th>Perfil</th><th>Permissões</th><th>Status</th><th class="text-end">Ação</th></tr></thead>
-                        <tbody id="users-table-body"><tr><td colspan="6" class="clients-empty">Carregando usuários...</td></tr></tbody>
+                        <thead><tr><th>Usuário</th><th>Identificação no chat</th><th>Celular</th><th>Perfil</th><th>Permissões</th><th>Status</th><th class="text-end">Ação</th></tr></thead>
+                        <tbody id="users-table-body"><tr><td colspan="7" class="clients-empty">Carregando usuários...</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -3557,6 +3599,7 @@
                 <div><label class="form-label fw-semibold">Nome</label><input type="text" class="form-control" id="my-profile-name" maxlength="180" required></div>
                 <div><label class="form-label fw-semibold">Nome de atendimento</label><input type="text" class="form-control" id="my-profile-signature" maxlength="180" placeholder="Ex.: Dr. Daniel"></div>
                 <div><label class="form-label fw-semibold">E-mail</label><input type="email" class="form-control" id="my-profile-email" maxlength="240"></div>
+                <div><label class="form-label fw-semibold">Celular</label><input type="tel" inputmode="tel" class="form-control" id="my-profile-celular" maxlength="24" placeholder="Ex.: (19) 99999-9999"><div class="form-text">Usado apenas para controle interno e comunicações da plataforma.</div></div>
                 <div><label class="form-label fw-semibold">OAB</label><input type="text" class="form-control" id="my-profile-oab" maxlength="80" placeholder="Ex.: SP 123.456"></div>
             </div>
             <div class="my-profile-section-title">Alterar senha</div>
@@ -3634,6 +3677,7 @@
                     <div class="col-md-3"><label class="form-label small fw-bold">Perfil</label><select id="user-role" class="form-select" onchange="atualizarPermissoesFormularioUsuario()"><option value="advogado">Advogado</option><option value="admin">Administrador</option></select></div>
                     <div class="col-md-3"><label class="form-label small fw-bold">OAB</label><input id="user-oab" class="form-control" maxlength="80" placeholder="OAB/SP ..."></div>
                     <div class="col-md-6"><label class="form-label small fw-bold">E-mail</label><input id="user-email" type="email" class="form-control" maxlength="240"></div>
+                    <div class="col-md-6"><label class="form-label small fw-bold">Celular</label><input id="user-celular" type="tel" inputmode="tel" class="form-control" maxlength="24" placeholder="Ex.: (19) 99999-9999"><div class="form-text">Ao criar um advogado, este número recebe a mensagem de boas-vindas. Se ficar vazio, nada será enviado.</div></div>
                     <div class="col-md-6"><label class="form-label small fw-bold">Senha <span class="text-muted" id="user-password-help">*</span></label><input id="user-password" type="password" class="form-control" minlength="6" autocomplete="new-password"><div class="form-text">Ao editar, deixe em branco para manter a senha atual.</div></div>
                     <div class="col-12"><label class="form-label small fw-bold">Permissões</label><div class="permission-grid" id="user-permissions-grid"></div><div class="permission-note">Administradores possuem acesso completo. O perfil Advogado inicia com Tickets ativos, Clientes e Chat.</div></div>
                     <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="user-active" checked><label class="form-check-label fw-bold" for="user-active">Usuário ativo</label></div></div>
@@ -3836,6 +3880,7 @@
             document.getElementById('my-profile-name').value=u.nome||'';
             document.getElementById('my-profile-signature').value=u.assinatura||'';
             document.getElementById('my-profile-email').value=u.email||'';
+            document.getElementById('my-profile-celular').value=formatarCelularUsuarioPainel(u.celular||'');
             document.getElementById('my-profile-oab').value=u.oab||'';
             document.getElementById('my-profile-current-password').value='';
             document.getElementById('my-profile-new-password').value='';
@@ -3852,6 +3897,7 @@
                 nome:document.getElementById('my-profile-name').value.trim(),
                 assinatura:document.getElementById('my-profile-signature').value.trim(),
                 email:document.getElementById('my-profile-email').value.trim(),
+                celular:document.getElementById('my-profile-celular').value.trim(),
                 oab:document.getElementById('my-profile-oab').value.trim(),
                 currentPassword:document.getElementById('my-profile-current-password').value,
                 newPassword:document.getElementById('my-profile-new-password').value
@@ -8025,11 +8071,33 @@ function renderizarLista(itens) {
         function sugerirAssinaturaUsuario(){const nome=document.getElementById('user-nome')?.value.trim();const a=document.getElementById('user-assinatura');if(a&&!a.dataset.touched)a.value=nome?`Dr(a). ${nome}`:'';}
         document.getElementById('user-assinatura')?.addEventListener('input',e=>e.target.dataset.touched='1');
         function permissoesUsuarioSelecionadas(){return [...document.querySelectorAll('.user-permission-check:checked')].map(c=>c.value);}
-        function renderizarUsuarios() { const tbody=document.getElementById('users-table-body'); if(!tbody)return; tbody.innerHTML=''; const data=window.panelUsersData||[]; document.getElementById('users-count').textContent=`${data.length} usuário${data.length===1?'':'s'}`; if(!data.length){tbody.innerHTML='<tr><td colspan="6" class="clients-empty">Nenhum usuário cadastrado.</td></tr>';return;} data.forEach(u=>{const tr=document.createElement('tr');const perms=(u.permissions||[]).map(p=>PERMISSION_LABELS[p]||p).join(', ');tr.innerHTML=`<td><div class="user-main-name"></div><div class="user-login"></div></td><td></td><td><span class="user-role-pill ${u.role==='admin'?'admin':''}"></span></td><td><div class="user-permissions"></div></td><td><span class="user-status-pill ${u.ativo===false?'inactive':''}"></span></td><td class="text-end"></td>`;tr.children[0].querySelector('.user-main-name').textContent=u.nome||u.user;tr.children[0].querySelector('.user-login').textContent=`@${u.user}${u.oab?' • '+u.oab:''}`;tr.children[1].textContent=u.assinatura||'—';tr.children[2].querySelector('span').textContent=u.roleLabel||u.role;tr.children[3].querySelector('.user-permissions').textContent=u.role==='admin'?'Acesso completo':perms;tr.children[4].querySelector('span').textContent=u.ativo===false?'Inativo':'Ativo';const b=document.createElement('button');b.type='button';b.className='user-edit-btn';b.innerHTML='<i class="bi bi-pencil me-1"></i> Editar';b.onclick=()=>abrirFormularioUsuario(u.id);tr.children[5].appendChild(b);tbody.appendChild(tr);}); }
+        function formatarCelularUsuarioPainel(valor='') { const original=String(valor||'').trim(); let d=original.replace(/\D/g,''); if(!d)return ''; if(d.startsWith('55')&&(d.length===12||d.length===13))d=d.slice(2); if(d.length===11)return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`; if(d.length===10)return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`; return original; }
+        function renderizarUsuarios() {
+            const tbody=document.getElementById('users-table-body'); if(!tbody)return;
+            tbody.innerHTML=''; const data=window.panelUsersData||[];
+            document.getElementById('users-count').textContent=`${data.length} usuário${data.length===1?'':'s'}`;
+            if(!data.length){tbody.innerHTML='<tr><td colspan="7" class="clients-empty">Nenhum usuário cadastrado.</td></tr>';return;}
+            data.forEach(u=>{
+                const tr=document.createElement('tr');
+                const perms=(u.permissions||[]).map(p=>PERMISSION_LABELS[p]||p).join(', ');
+                tr.innerHTML=`<td><div class="user-main-name"></div><div class="user-login"></div></td><td></td><td></td><td><span class="user-role-pill ${u.role==='admin'?'admin':''}"></span></td><td><div class="user-permissions"></div></td><td><span class="user-status-pill ${u.ativo===false?'inactive':''}"></span></td><td class="text-end"></td>`;
+                tr.children[0].querySelector('.user-main-name').textContent=u.nome||u.user;
+                tr.children[0].querySelector('.user-login').textContent=`@${u.user}${u.oab?' • '+u.oab:''}`;
+                tr.children[1].textContent=u.assinatura||'—';
+                tr.children[2].textContent=formatarCelularUsuarioPainel(u.celular)||'—';
+                tr.children[3].querySelector('span').textContent=u.roleLabel||u.role;
+                tr.children[4].querySelector('.user-permissions').textContent=u.role==='admin'?'Acesso completo':perms;
+                tr.children[5].querySelector('span').textContent=u.ativo===false?'Inativo':'Ativo';
+                const b=document.createElement('button'); b.type='button'; b.className='user-edit-btn'; b.innerHTML='<i class="bi bi-pencil me-1"></i> Editar'; b.onclick=()=>abrirFormularioUsuario(u.id); tr.children[6].appendChild(b); tbody.appendChild(tr);
+            });
+        }
         async function carregarUsuarios(forcar=false){if(!temPermissaoPainel('users'))return;if(window.panelUsersLoaded&&!forcar){renderizarUsuarios();return;}const status=document.getElementById('users-status');try{if(status)status.textContent='Carregando usuários...';const res=await fetch('/api/users');const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível carregar usuários.');window.panelUsersData=Array.isArray(data.usuarios)?data.usuarios:[];window.panelUsersLoaded=true;renderizarUsuarios();if(status)status.textContent='';}catch(err){if(status){status.className='menu-save-status text-danger mb-2';status.textContent=err.message;}}}
-        function abrirFormularioUsuario(id=null){const d=document.getElementById('user-form-dialog');const u=id?(window.panelUsersData||[]).find(x=>String(x.id)===String(id)):null;document.getElementById('user-form').reset();document.getElementById('user-form-id').value=u?.id||'';document.getElementById('user-login').value=u?.user||'';document.getElementById('user-nome').value=u?.nome||'';const ass=document.getElementById('user-assinatura');ass.value=u?.assinatura||'';ass.dataset.touched=u?'1':'';document.getElementById('user-email').value=u?.email||'';document.getElementById('user-oab').value=u?.oab||'';document.getElementById('user-role').value=u?.role||'advogado';document.getElementById('user-active').checked=u?.ativo!==false;document.getElementById('user-password').value='';document.getElementById('user-password').required=!u;document.getElementById('user-password-help').textContent=u?'(opcional)':'*';document.getElementById('user-form-title').textContent=u?'Editar usuário':'Novo usuário';document.getElementById('user-delete-btn').classList.toggle('hidden',!u||String(u.id)===String(window.panelSessionUser?.id));document.getElementById('user-form-status').textContent='';renderizarPermissoesFormularioUsuario(u?.permissions||['tickets','clients','chat']);if(!d.open){if(typeof d.showModal==='function')d.showModal();else d.setAttribute('open','');}}
+        function abrirFormularioUsuario(id=null){const d=document.getElementById('user-form-dialog');const u=id?(window.panelUsersData||[]).find(x=>String(x.id)===String(id)):null;document.getElementById('user-form').reset();document.getElementById('user-form-id').value=u?.id||'';document.getElementById('user-login').value=u?.user||'';document.getElementById('user-nome').value=u?.nome||'';const ass=document.getElementById('user-assinatura');ass.value=u?.assinatura||'';ass.dataset.touched=u?'1':'';document.getElementById('user-email').value=u?.email||'';document.getElementById('user-celular').value=formatarCelularUsuarioPainel(u?.celular||'');document.getElementById('user-oab').value=u?.oab||'';document.getElementById('user-role').value=u?.role||'advogado';document.getElementById('user-active').checked=u?.ativo!==false;document.getElementById('user-password').value='';document.getElementById('user-password').required=!u;document.getElementById('user-password-help').textContent=u?'(opcional)':'*';document.getElementById('user-form-title').textContent=u?'Editar usuário':'Novo usuário';document.getElementById('user-delete-btn').classList.toggle('hidden',!u||String(u.id)===String(window.panelSessionUser?.id));document.getElementById('user-form-status').textContent='';renderizarPermissoesFormularioUsuario(u?.permissions||['tickets','clients','chat']);if(!d.open){if(typeof d.showModal==='function')d.showModal();else d.setAttribute('open','');}}
         function fecharFormularioUsuario(){const d=document.getElementById('user-form-dialog');if(!d)return;if(typeof d.close==='function')d.close();else d.removeAttribute('open');}
-        async function salvarUsuario(event){event.preventDefault();const id=document.getElementById('user-form-id').value;const payload={user:document.getElementById('user-login').value.trim(),nome:document.getElementById('user-nome').value.trim(),assinatura:document.getElementById('user-assinatura').value.trim(),email:document.getElementById('user-email').value.trim(),oab:document.getElementById('user-oab').value.trim(),role:document.getElementById('user-role').value,permissions:permissoesUsuarioSelecionadas(),ativo:document.getElementById('user-active').checked,password:document.getElementById('user-password').value};const status=document.getElementById('user-form-status');const btn=document.getElementById('user-save-btn');btn.disabled=true;status.textContent='Salvando...';try{const res=await fetch(id?`/api/users/${encodeURIComponent(id)}`:'/api/users',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível salvar.');if(data.user&&String(data.user.id||'')===String(window.panelSessionUser?.id||'')){window.panelSessionUser=data.user;aplicarPermissoesPainel();}window.panelUsersLoaded=false;await carregarUsuarios(true);carregarProfissionaisPainel();status.textContent='✓ Usuário salvo.';setTimeout(fecharFormularioUsuario,300);}catch(err){status.textContent=err.message;status.className='client-form-status text-danger mt-2';}finally{btn.disabled=false;}}
+        async function salvarUsuario(event){event.preventDefault();const id=document.getElementById('user-form-id').value;const payload={user:document.getElementById('user-login').value.trim(),nome:document.getElementById('user-nome').value.trim(),assinatura:document.getElementById('user-assinatura').value.trim(),email:document.getElementById('user-email').value.trim(),celular:document.getElementById('user-celular').value.trim(),oab:document.getElementById('user-oab').value.trim(),role:document.getElementById('user-role').value,permissions:permissoesUsuarioSelecionadas(),ativo:document.getElementById('user-active').checked,password:document.getElementById('user-password').value};const status=document.getElementById('user-form-status');const btn=document.getElementById('user-save-btn');btn.disabled=true;status.textContent='Salvando...';try{const res=await fetch(id?`/api/users/${encodeURIComponent(id)}`:'/api/users',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível salvar.');if(data.user&&String(data.user.id||'')===String(window.panelSessionUser?.id||'')){window.panelSessionUser=data.user;aplicarPermissoesPainel();}window.panelUsersLoaded=false;await carregarUsuarios(true);carregarProfissionaisPainel();
+                if(!id&&data.boasVindas?.enviado){status.textContent='✓ Usuário salvo. Mensagem de boas-vindas enviada no WhatsApp.';setTimeout(fecharFormularioUsuario,900);}
+                else if(!id&&document.getElementById('user-celular').value.trim()&&data.boasVindas?.motivo==='whatsapp_desconectado'){status.textContent='✓ Usuário salvo. Boas-vindas não enviada porque o WhatsApp está desconectado.';setTimeout(fecharFormularioUsuario,1400);}
+                else {status.textContent='✓ Usuário salvo.';setTimeout(fecharFormularioUsuario,500);}}catch(err){status.textContent=err.message;status.className='client-form-status text-danger mt-2';}finally{btn.disabled=false;}}
         async function excluirUsuarioAtual(){const id=document.getElementById('user-form-id').value;if(!id||!confirm('Deseja realmente excluir este usuário?'))return;const status=document.getElementById('user-form-status');try{const res=await fetch(`/api/users/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');fecharFormularioUsuario();window.panelUsersLoaded=false;await carregarUsuarios(true);}catch(err){status.textContent=err.message;status.className='client-form-status text-danger mt-2';}}
 
         function diasSelecionadosHorario() {
