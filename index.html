@@ -2505,7 +2505,7 @@
 
     <style id="ticket-chat-documents-v4">
         /* V4 — documentos dentro do chat + responsável na fila */
-        .tickets-table { min-width:1080px; }
+        .tickets-table { min-width:1220px; }
         .ticket-responsavel-cell { min-width:150px; }
         .ticket-responsavel-name { color:#2f3b35; font-size:.80rem; font-weight:760; white-space:nowrap; }
         .ticket-responsavel-meta { margin-top:3px; color:#87908b; font-size:.67rem; white-space:nowrap; }
@@ -3488,6 +3488,45 @@
             .chat-triage-panel{padding:10px;}
             .chat-triage-body{max-height:210px;}
         }
+    
+        /* V22 - parâmetros administrativos e status internos */
+        .param-admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start;}
+        .param-admin-card{padding:18px;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-sm);}
+        .param-admin-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px;}
+        .param-admin-title{color:var(--adv-blue);font-size:.88rem;font-weight:800;}
+        .param-admin-help{margin-top:3px;color:var(--text-muted);font-size:.73rem;line-height:1.45;}
+        .param-admin-list{display:grid;gap:8px;}
+        .param-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(130px,.55fr) auto;gap:8px;align-items:center;padding:9px;background:#f8f9fb;border:1px solid var(--border);border-radius:10px;}
+        .param-row.simple{grid-template-columns:minmax(150px,1fr) auto;}
+        .param-row.ticket-status{grid-template-columns:56px minmax(170px,1fr) auto;}
+        .param-row .form-control,.param-row .form-select{min-height:38px;font-size:.78rem;}
+        .param-remove{width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;color:#a34c45;background:#fff;border:1px solid #ead4d1;border-radius:9px;}
+        .param-add{min-height:38px;padding:7px 11px;color:var(--adv-blue);background:#fff;border:1px dashed var(--border-strong);border-radius:9px;font-size:.76rem;font-weight:750;}
+        .param-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+        .param-color{width:48px!important;height:38px!important;padding:3px!important;border-radius:9px!important;cursor:pointer;}
+        .ticket-status-legend{display:inline-flex;align-items:center;gap:9px;flex-wrap:wrap;}
+        .ticket-status-legend-item{display:inline-flex;align-items:center;gap:5px;color:var(--text-muted);font-size:.66rem;font-weight:680;}
+        .ticket-status-legend-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;}
+        .ticket-internal-status{min-width:145px;max-width:190px;height:34px;padding:5px 27px 5px 10px;border-radius:999px;font-size:.70rem;font-weight:760;background-color:#fff;}
+        .ticket-internal-status:disabled{opacity:.6;}
+        #crm-lead-dialog::backdrop{background:rgba(17,22,30,.56)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
+        #crm-lead-dialog{contain:layout paint;}
+        #crm-lead-dialog .crm-dialog-body{overscroll-behavior:contain;scrollbar-gutter:stable;scroll-behavior:auto;will-change:scroll-position;}
+        #crm-lead-dialog .crm-form-section{contain:layout style;}
+        .chat-emoji-picker{display:block!important;overflow:hidden!important;padding:0!important;max-height:320px!important;}
+        .chat-emoji-categories{display:flex;gap:2px;padding:7px 7px 5px;overflow-x:auto;border-bottom:1px solid #e5eaed;background:#f7f9fa;scrollbar-width:thin;}
+        .chat-emoji-category{width:34px;height:31px;flex:0 0 34px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:7px;background:transparent;font-size:1rem;cursor:pointer;}
+        .chat-emoji-category.active,.chat-emoji-category:hover{background:#e5eaed;}
+        .chat-emoji-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;padding:8px;max-height:250px;overflow-y:auto;}
+        html[data-theme="dark"] .param-admin-card{background:#20252d;border-color:#343a45;}
+        html[data-theme="dark"] .param-admin-title{color:#eef1f5;}
+        html[data-theme="dark"] .param-admin-help{color:#9ba5b0;}
+        html[data-theme="dark"] .param-row{background:#252b34;border-color:#3a424e;}
+        html[data-theme="dark"] .param-remove,html[data-theme="dark"] .param-add{background:#252b34;border-color:#46505e;color:#dce2e8;}
+        html[data-theme="dark"] .ticket-internal-status{background-color:#252b34;color:#e3e7ec;border-color:#46505e;}
+        html[data-theme="dark"] #ticket-chat-dialog .chat-emoji-categories{background:#1b252b;border-color:#344149;}
+        html[data-theme="dark"] #ticket-chat-dialog .chat-emoji-category.active,html[data-theme="dark"] #ticket-chat-dialog .chat-emoji-category:hover{background:#314049;}
+        @media(max-width:767.98px){.param-admin-grid{grid-template-columns:1fr}.param-row{grid-template-columns:1fr}.param-row.simple{grid-template-columns:1fr auto}.param-row.ticket-status{grid-template-columns:48px minmax(0,1fr) auto}.ticket-internal-status{min-width:125px}.chat-emoji-grid{grid-template-columns:repeat(7,1fr)}}
     </style>
 
 </head>
@@ -3528,6 +3567,12 @@
                         </div>
                         <div class="nav-link nav-sub-link" data-permission="menu" onclick="switchTab('tab-opcoes', this)">
                             <span class="nav-sub-dot"></span><span>Opções de atendimento</span>
+                        </div>
+                        <div class="nav-link nav-sub-link" data-permission="crm_params" onclick="switchTab('tab-parametros-crm', this)">
+                            <span class="nav-sub-dot"></span><span>Parâmetros CRM</span>
+                        </div>
+                        <div class="nav-link nav-sub-link" data-permission="ticket_params" onclick="switchTab('tab-parametros-tickets', this)">
+                            <span class="nav-sub-dot"></span><span>Parâmetros de tickets</span>
                         </div>
                         <div class="nav-link nav-sub-link" data-permission="users" onclick="switchTab('tab-usuarios', this)">
                             <span class="nav-sub-dot"></span><span>Usuários</span>
@@ -3795,6 +3840,7 @@
                             <span><i class="ticket-legend-dot unread"></i> Mensagem não lida</span>
                             <span><i class="ticket-legend-line mine"></i> Seu atendimento</span>
                             <span><i class="ticket-legend-line assigned"></i> Atribuído a outro usuário</span>
+                            <span id="ticket-status-legend" class="ticket-status-legend"></span>
                         </div>
                         <div id="tickets-status" class="menu-save-status text-muted"></div>
                     </div>
@@ -3806,6 +3852,7 @@
                                     <th>Ticket</th>
                                     <th>Cliente</th>
                                     <th>Área</th>
+                                    <th>Status</th>
                                     <th>Responsável</th>
                                     <th>Última atividade</th>
                                     <th>Aberto há</th>
@@ -3813,7 +3860,7 @@
                                 </tr>
                             </thead>
                             <tbody id="tickets-table-body">
-                                <tr><td colspan="7" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
+                                <tr><td colspan="8" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -3964,6 +4011,30 @@
 
                 <div class="form-text mt-3">Os contatos não cadastrados são identificados pelos tickets ativos e pelo histórico recente do WhatsApp. Nome, CPF e dados complementares são opcionais; o número é o vínculo principal do cadastro manual.</div>
             </div>
+        </div>
+
+
+        <div id="tab-parametros-crm" class="content-section hidden" data-permission="crm_params">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                <div><h4 class="mb-1" style="color:var(--adv-blue);font-weight:700;">Parâmetros CRM</h4><p class="text-muted mb-0">Cadastre e edite as opções utilizadas no Controle CRM sem alterar o código do sistema.</p></div>
+                <button type="button" class="btn btn-outline-secondary" onclick="carregarParametrosCRM(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
+            </div>
+            <div id="crm-params-status" class="menu-save-status text-muted mb-3"></div>
+            <div class="param-admin-grid">
+                <section class="param-admin-card"><div class="param-admin-head"><div><div class="param-admin-title">Status do lead</div><div class="param-admin-help">O comportamento define como o CRM trata follow-up, conversão e perda.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('status')"><i class="bi bi-plus-lg"></i> Novo</button></div><div id="crm-params-status-list" class="param-admin-list"></div></section>
+                <section class="param-admin-card"><div class="param-admin-head"><div><div class="param-admin-title">Modelos de cobrança</div><div class="param-admin-help">O tipo de cálculo preserva a lógica da previsão de receita mesmo que o nome seja alterado.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('modelosCobranca')"><i class="bi bi-plus-lg"></i> Novo</button></div><div id="crm-params-modelosCobranca-list" class="param-admin-list"></div></section>
+                <section class="param-admin-card"><div class="param-admin-head"><div><div class="param-admin-title">Motivos de perda</div><div class="param-admin-help">Opções exibidas quando o lead é classificado como perdido.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('motivosPerda')"><i class="bi bi-plus-lg"></i> Novo</button></div><div id="crm-params-motivosPerda-list" class="param-admin-list"></div></section>
+                <section class="param-admin-card"><div class="param-admin-head"><div><div class="param-admin-title">Origens de anúncio</div><div class="param-admin-help">Fontes de mídia paga aceitas para os leads do CRM.</div></div><button class="param-add" type="button" onclick="adicionarParametroCRM('origensAnuncio')"><i class="bi bi-plus-lg"></i> Novo</button></div><div id="crm-params-origensAnuncio-list" class="param-admin-list"></div></section>
+            </div>
+            <div class="param-actions"><button type="button" class="btn text-white" style="background:var(--adv-blue)" onclick="salvarParametrosCRM()"><i class="bi bi-check2 me-1"></i> Salvar parâmetros</button></div>
+        </div>
+
+        <div id="tab-parametros-tickets" class="content-section hidden" data-permission="ticket_params">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                <div><h4 class="mb-1" style="color:var(--adv-blue);font-weight:700;">Parâmetros de tickets</h4><p class="text-muted mb-0">Crie status internos para organização da equipe. Eles não alteram o fluxo automático do chatbot.</p></div>
+                <button type="button" class="btn btn-outline-secondary" onclick="carregarParametrosTickets(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
+            </div>
+            <div class="param-admin-card" style="max-width:900px"><div class="param-admin-head"><div><div class="param-admin-title">Status internos</div><div class="param-admin-help">Defina o nome e a cor. A legenda da tela Tickets ativos é criada automaticamente.</div></div><button class="param-add" type="button" onclick="adicionarParametroTicket()"><i class="bi bi-plus-lg"></i> Novo status</button></div><div id="ticket-params-status" class="menu-save-status text-muted mb-2"></div><div id="ticket-params-status-list" class="param-admin-list"></div><div class="param-actions"><button type="button" class="btn text-white" style="background:var(--adv-blue)" onclick="salvarParametrosTickets()"><i class="bi bi-check2 me-1"></i> Salvar status</button></div></div>
         </div>
 
         <div id="tab-usuarios" class="content-section hidden" data-permission="users">
@@ -4432,7 +4503,7 @@
 
         const PERMISSION_LABELS = {
             tickets:'Tickets ativos', clients:'Clientes', chat:'Chat', crm:'CRM', whatsapp:'Conexão WhatsApp',
-            ia:'Gestão da IA', menu:'Opções de atendimento', business_hours:'Horário de funcionamento', users:'Usuários'
+            ia:'Gestão da IA', menu:'Opções de atendimento', crm_params:'Parâmetros CRM', ticket_params:'Parâmetros de tickets', business_hours:'Horário de funcionamento', users:'Usuários'
         };
         window.panelSessionUser = null;
 
@@ -4459,7 +4530,7 @@
             if (!abaVisivel || (abaVisivel.dataset.permission && !temPermissaoPainel(abaVisivel.dataset.permission)) || (abaVisivel.id === 'tab-chatbot' && !temPermissaoPainel('whatsapp'))) {
                 const ordem = [
                     ['tickets','tab-tickets','nav-tickets-link'], ['clients','tab-clientes',null], ['whatsapp','tab-chatbot',null],
-                    ['ia','tab-ia',null], ['menu','tab-opcoes',null], ['business_hours','tab-horario',null], ['users','tab-usuarios',null]
+                    ['ia','tab-ia',null], ['menu','tab-opcoes',null], ['crm_params','tab-parametros-crm',null], ['ticket_params','tab-parametros-tickets',null], ['business_hours','tab-horario',null], ['users','tab-usuarios',null]
                 ];
                 for (const [perm, tabId, navId] of ordem) {
                     if (!temPermissaoPainel(perm)) continue;
@@ -4960,7 +5031,7 @@
         function atualizarMenuAdministracao() {
             const group=document.getElementById('nav-admin-group');
             if(!group)return;
-            const permissoes=['whatsapp','ia','menu','users','business_hours'];
+            const permissoes=['whatsapp','ia','menu','crm_params','ticket_params','users','business_hours'];
             const visivel=permissoes.some(perm=>temPermissaoPainel(perm));
 
             // O agrupador "Administração" não possui data-permission próprio.
@@ -5005,6 +5076,8 @@
             if (window.innerWidth < 992) toggleSidebar(false);
             if(tabId === 'tab-ia') carregarConhecimento();
             if(tabId === 'tab-opcoes') carregarOpcoesAtendimento();
+            if(tabId === 'tab-parametros-crm') carregarParametrosCRM();
+            if(tabId === 'tab-parametros-tickets') carregarParametrosTickets();
             if(tabId === 'tab-tickets') {
                 marcarNotificacoesTicketsComoVistas();
                 switchTicketsSubtab(window.ticketsCurrentSubtab || 'active');
@@ -5049,6 +5122,11 @@
                 }
             }
         });
+
+
+        socket.on('ticket_internal_status_updated', payload=>{const t=(window.activeTicketsData||[]).find(x=>String(x.ticketNumber)===String(payload?.ticketNumber));if(t){t.internalStatusId=payload.internalStatusId||null;t.internalStatus=payload.internalStatus||null;filtrarTicketsAtivos()}if(String(window.activeChatTicketNumber||'')===String(payload?.ticketNumber||'')){window.activeChatTicketData={...(window.activeChatTicketData||{}),internalStatusId:payload.internalStatusId||null,internalStatus:payload.internalStatus||null}}});
+        socket.on('ticket_parameters_updated', payload=>{window.ticketStatusOptions=Array.isArray(payload?.status)?payload.status:[];renderizarLegendaStatusTickets();if(window.activeTicketsData?.length)filtrarTicketsAtivos();if(window.ticketParametrosAdmin)carregarParametrosTickets(true)});
+        socket.on('crm_parameters_updated', ()=>{window.crmLoaded=false;window.crmOptions=null;if(window.crmParametrosAdmin)carregarParametrosCRM(true)});
 
         socket.on('panel_user', user => {
             if (user) { window.panelSessionUser = user; aplicarPermissoesPainel(); }
@@ -6412,6 +6490,11 @@ function renderizarLista(itens) {
             return td;
         }
 
+
+        function renderizarLegendaStatusTickets(){const box=document.getElementById('ticket-status-legend');if(!box)return;box.replaceChildren();(window.ticketStatusOptions||[]).forEach(item=>{const span=document.createElement('span');span.className='ticket-status-legend-item';const dot=document.createElement('i');dot.className='ticket-status-legend-dot';dot.style.backgroundColor=item.cor||'#667085';const txt=document.createElement('span');txt.textContent=item.nome;span.append(dot,txt);box.appendChild(span)})}
+        function aplicarVisualStatusTicketSelect(select,statusId){const item=(window.ticketStatusOptions||[]).find(x=>String(x.id)===String(statusId||''));select.style.color=item?.cor||'';select.style.borderColor=item?.cor||'';select.style.boxShadow=item?`inset 3px 0 0 ${item.cor}`:'';}
+        async function atualizarStatusInternoTicket(ticketNumber,statusId,select){const anterior=(window.activeTicketsData||[]).find(t=>String(t.ticketNumber)===String(ticketNumber))?.internalStatusId||'';if(select)select.disabled=true;try{const r=await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/internal-status`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({statusId:statusId||null})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Não foi possível atualizar o status.');const t=(window.activeTicketsData||[]).find(x=>String(x.ticketNumber)===String(ticketNumber));if(t){t.internalStatusId=d.internalStatusId||null;t.internalStatus=d.internalStatus||null}if(select)aplicarVisualStatusTicketSelect(select,d.internalStatusId)}catch(e){if(select)select.value=anterior;alert(e.message||'Não foi possível atualizar o status interno.')}finally{if(select)select.disabled=false}}
+
         function renderizarTicketsAtivos(tickets = []) {
             const tbody = document.getElementById('tickets-table-body');
             if (!tbody) return;
@@ -6419,7 +6502,7 @@ function renderizarLista(itens) {
             if (!tickets.length) {
                 const tr = document.createElement('tr');
                 const td = document.createElement('td');
-                td.colSpan = 7;
+                td.colSpan = 8;
                 td.className = 'tickets-empty';
                 td.textContent = 'Nenhum ticket corresponde aos filtros selecionados.';
                 tr.appendChild(td);
@@ -6469,6 +6552,14 @@ function renderizarLista(itens) {
                 clienteTd.append(nome, telefone);
 
                 const areaTd = criarTextoCelulaTicket(ticket.area || ticket.menuOptionTitle || 'Ainda não definida', 'ticket-area');
+
+                const statusInternoTd=document.createElement('td');
+                const statusSelect=document.createElement('select'); statusSelect.className='form-select ticket-internal-status';
+                const sem=document.createElement('option'); sem.value=''; sem.textContent='Sem status'; statusSelect.appendChild(sem);
+                (window.ticketStatusOptions||[]).forEach(item=>{const op=document.createElement('option');op.value=item.id;op.textContent=item.nome;statusSelect.appendChild(op)});
+                statusSelect.value=ticket.internalStatusId||''; aplicarVisualStatusTicketSelect(statusSelect,statusSelect.value);
+                statusSelect.onchange=()=>{aplicarVisualStatusTicketSelect(statusSelect,statusSelect.value);atualizarStatusInternoTicket(ticket.ticketNumber,statusSelect.value,statusSelect)};
+                statusInternoTd.appendChild(statusSelect);
 
                 const responsavelTd = document.createElement('td');
                 responsavelTd.className = 'ticket-responsavel-cell';
@@ -6530,7 +6621,7 @@ function renderizarLista(itens) {
                 actionsWrap.appendChild(closeBtn);
 
                 acaoTd.appendChild(actionsWrap);
-                tr.append(numeroTd, clienteTd, areaTd, responsavelTd, ultimaTd, abertoTd, acaoTd);
+                tr.append(numeroTd, clienteTd, areaTd, statusInternoTd, responsavelTd, ultimaTd, abertoTd, acaoTd);
                 fragment.appendChild(tr);
             });
 
@@ -6590,7 +6681,8 @@ function renderizarLista(itens) {
                     ticket.area,
                     ticket.menuOptionTitle,
                     ticket.origem,
-                    ticket.advogadoResponsavelNome
+                    ticket.advogadoResponsavelNome,
+                    ticket.internalStatus?.nome
                 ].map(normalizarBuscaTicket);
 
                 const numeros = [ticket.cpf, ticket.whatsapp]
@@ -6636,6 +6728,8 @@ function renderizarLista(itens) {
                 if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar os tickets ativos.');
 
                 window.activeTicketsData = Array.isArray(data.tickets) ? data.tickets : [];
+                window.ticketStatusOptions = Array.isArray(data.ticketStatusOptions) ? data.ticketStatusOptions : (window.ticketStatusOptions||[]);
+                renderizarLegendaStatusTickets();
                 window.activeTicketsLoaded = true;
                 window.activeTicketsLastUpdate = Number(data.generatedAt || Date.now());
 
@@ -7088,6 +7182,24 @@ function renderizarLista(itens) {
 
         inicializarAtualizacaoTickets();
 
+
+        // ---------------------------------------------------------------------
+        // PARÂMETROS ADMINISTRATIVOS
+        // ---------------------------------------------------------------------
+        window.crmParametrosAdmin=null; window.ticketParametrosAdmin=null;
+        const CRM_TIPOS_STATUS=[['aberto','Aberto / em acompanhamento'],['proposta','Proposta / negociação'],['ganho','Ganho / contratado'],['perdido','Perdido / encerrado']];
+        const CRM_TIPOS_CALCULO=[['consulta','Consulta (entrada)'],['fixo','Fixo (valor potencial)'],['parcelado','Parcelado'],['exito','Êxito'],['misto','Misto'],['nenhum','Sem cálculo automático']];
+        function idParametroLocal(nome='item'){return `${String(nome||'item').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)||'item'}-${Math.random().toString(36).slice(2,8)}`;}
+        function criarSelectParametro(opcoes,valor){const sel=document.createElement('select');sel.className='form-select';opcoes.forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o)});sel.value=valor||opcoes[0]?.[0]||'';return sel;}
+        function renderizarParametrosCRM(){const p=window.crmParametrosAdmin||{};['status','modelosCobranca','motivosPerda','origensAnuncio'].forEach(chave=>{const box=document.getElementById(`crm-params-${chave}-list`);if(!box)return;box.replaceChildren();(p[chave]||[]).forEach((item,index)=>{const row=document.createElement('div');row.className=`param-row ${['motivosPerda','origensAnuncio'].includes(chave)?'simple':''}`;row.dataset.index=index;const input=document.createElement('input');input.className='form-control';input.value=item.nome||'';input.placeholder='Nome do parâmetro';input.oninput=()=>item.nome=input.value;row.appendChild(input);if(chave==='status'){const sel=criarSelectParametro(CRM_TIPOS_STATUS,item.tipo);sel.onchange=()=>item.tipo=sel.value;row.appendChild(sel)}else if(chave==='modelosCobranca'){const sel=criarSelectParametro(CRM_TIPOS_CALCULO,item.calculo);sel.onchange=()=>item.calculo=sel.value;row.appendChild(sel)}const rem=document.createElement('button');rem.type='button';rem.className='param-remove';rem.title='Remover';rem.innerHTML='<i class="bi bi-trash"></i>';rem.onclick=()=>{p[chave].splice(index,1);renderizarParametrosCRM()};row.appendChild(rem);box.appendChild(row)});if(!(p[chave]||[]).length){const e=document.createElement('div');e.className='text-muted small';e.textContent='Nenhum item cadastrado.';box.appendChild(e)}})}
+        function adicionarParametroCRM(chave){if(!window.crmParametrosAdmin)window.crmParametrosAdmin={status:[],modelosCobranca:[],motivosPerda:[],origensAnuncio:[]};const item={id:idParametroLocal(chave),nome:''};if(chave==='status')item.tipo='aberto';if(chave==='modelosCobranca')item.calculo='nenhum';window.crmParametrosAdmin[chave]=window.crmParametrosAdmin[chave]||[];window.crmParametrosAdmin[chave].push(item);renderizarParametrosCRM();setTimeout(()=>document.querySelector(`#crm-params-${chave}-list .param-row:last-child input`)?.focus(),0)}
+        async function carregarParametrosCRM(forcar=false){if(window.crmParametrosAdmin&&!forcar){renderizarParametrosCRM();return}const st=document.getElementById('crm-params-status');if(st)st.textContent='Carregando parâmetros...';try{const r=await fetch('/api/admin/crm-params',{cache:'no-store'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Erro ao carregar parâmetros.');window.crmParametrosAdmin=d.parametros||{};renderizarParametrosCRM();if(st)st.textContent=''}catch(e){if(st){st.className='menu-save-status text-danger mb-3';st.textContent=e.message}}}
+        async function salvarParametrosCRM(){const st=document.getElementById('crm-params-status');for(const chave of ['status','modelosCobranca','motivosPerda','origensAnuncio']){if((window.crmParametrosAdmin?.[chave]||[]).some(x=>!String(x.nome||'').trim())){alert('Preencha o nome de todos os parâmetros antes de salvar.');return}}if(st){st.className='menu-save-status text-muted mb-3';st.textContent='Salvando...'}try{const r=await fetch('/api/admin/crm-params',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(window.crmParametrosAdmin||{})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Erro ao salvar parâmetros.');window.crmParametrosAdmin=d.parametros;window.crmLoaded=false;if(st){st.className='menu-save-status text-success mb-3';st.textContent='Parâmetros salvos.'}renderizarParametrosCRM()}catch(e){if(st){st.className='menu-save-status text-danger mb-3';st.textContent=e.message}}}
+        function renderizarParametrosTickets(){const box=document.getElementById('ticket-params-status-list');if(!box)return;box.replaceChildren();const lista=window.ticketParametrosAdmin?.status||[];lista.forEach((item,index)=>{const row=document.createElement('div');row.className='param-row ticket-status';const cor=document.createElement('input');cor.type='color';cor.className='form-control form-control-color param-color';cor.value=/^#[0-9a-f]{6}$/i.test(item.cor||'')?item.cor:'#667085';cor.oninput=()=>item.cor=cor.value;const nome=document.createElement('input');nome.className='form-control';nome.value=item.nome||'';nome.placeholder='Ex: Aguardando documentação';nome.oninput=()=>item.nome=nome.value;const rem=document.createElement('button');rem.type='button';rem.className='param-remove';rem.innerHTML='<i class="bi bi-trash"></i>';rem.onclick=()=>{lista.splice(index,1);renderizarParametrosTickets()};row.append(cor,nome,rem);box.appendChild(row)});if(!lista.length){const e=document.createElement('div');e.className='text-muted small';e.textContent='Nenhum status interno cadastrado. Clique em “Novo status” para começar.';box.appendChild(e)}}
+        function adicionarParametroTicket(){if(!window.ticketParametrosAdmin)window.ticketParametrosAdmin={status:[]};window.ticketParametrosAdmin.status=window.ticketParametrosAdmin.status||[];window.ticketParametrosAdmin.status.push({id:idParametroLocal('status'),nome:'',cor:'#667085'});renderizarParametrosTickets();setTimeout(()=>document.querySelector('#ticket-params-status-list .param-row:last-child input[type="text"]')?.focus(),0)}
+        async function carregarParametrosTickets(forcar=false){if(window.ticketParametrosAdmin&&!forcar){renderizarParametrosTickets();return}const st=document.getElementById('ticket-params-status');if(st)st.textContent='Carregando...';try{const r=await fetch('/api/admin/ticket-params',{cache:'no-store'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Erro ao carregar parâmetros.');window.ticketParametrosAdmin=d.parametros||{status:[]};renderizarParametrosTickets();if(st)st.textContent=''}catch(e){if(st){st.className='menu-save-status text-danger mb-2';st.textContent=e.message}}}
+        async function salvarParametrosTickets(){const st=document.getElementById('ticket-params-status');if((window.ticketParametrosAdmin?.status||[]).some(x=>!String(x.nome||'').trim())){alert('Preencha o nome de todos os status.');return}if(st){st.className='menu-save-status text-muted mb-2';st.textContent='Salvando...'}try{const r=await fetch('/api/admin/ticket-params',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(window.ticketParametrosAdmin||{status:[]})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Erro ao salvar status.');window.ticketParametrosAdmin=d.parametros||{status:[]};window.ticketStatusOptions=(d.parametros?.status||[]).filter(x=>x.ativo!==false);renderizarParametrosTickets();renderizarLegendaStatusTickets();window.activeTicketsLoaded=false;if(st){st.className='menu-save-status text-success mb-2';st.textContent='Status salvos.'}}catch(e){if(st){st.className='menu-save-status text-danger mb-2';st.textContent=e.message}}}
+
         // ---------------------------------------------------------------------
         // CRM de leads
         // ---------------------------------------------------------------------
@@ -7095,8 +7207,6 @@ function renderizarLista(itens) {
         const CRM_MODELOS_FALLBACK = ['Consulta','Fixo','Parcelado','Êxito','Misto'];
         const CRM_MOTIVOS_FALLBACK = ['Sem resposta','Sem orçamento','Fechou com outro','Não é o perfil do caso','Outro'];
         const CRM_ORIGENS_ANUNCIO_FALLBACK = ['Meta Ads','Instagram Ads','Facebook Ads','Google Ads','TikTok Ads','YouTube Ads','LinkedIn Ads','Outro anúncio'];
-        const CRM_STATUS_ENCERRADOS_JS = new Set(['Encerrado - ganho','Encerrado - perdido']);
-        const CRM_STATUS_GANHOS_JS = new Set(['Contrato assinado','Em andamento','Encerrado - ganho']);
         const CRM_PAGE_SIZE = 50;
         window.crmCurrentPage = 1;
         window.crmFilteredData = [];
@@ -7132,12 +7242,20 @@ function renderizarLista(itens) {
             return String(valor || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
         }
 
+        function infoStatusCRMJS(status='') {
+            return (window.crmOptions?.statusMeta || []).find(item => item.nome === String(status||'')) || null;
+        }
+        function statusFechadoCRMJS(status='') { return ['ganho','perdido'].includes(infoStatusCRMJS(status)?.tipo); }
+        function statusPerdidoCRMJS(status='') { return infoStatusCRMJS(status)?.tipo === 'perdido'; }
+        function statusGanhoCRMJS(status='') { return infoStatusCRMJS(status)?.tipo === 'ganho'; }
         function statusClassCRM(status = '') {
-            if (CRM_STATUS_GANHOS_JS.has(status)) return 'won';
-            if (status === 'Encerrado - perdido') return 'lost';
-            if (['Proposta enviada','Negociando','Reunião agendada'].includes(status)) return 'hot';
+            const tipo=infoStatusCRMJS(status)?.tipo;
+            if (tipo==='ganho') return 'won';
+            if (tipo==='perdido') return 'lost';
+            if (tipo==='proposta') return 'hot';
             return '';
         }
+        function calculoModeloCRMJS(nome='') { return (window.crmOptions?.modelosCobrancaMeta||[]).find(item=>item.nome===nome)?.calculo || ({Consulta:'consulta',Fixo:'fixo',Parcelado:'parcelado','Êxito':'exito',Misto:'misto'}[nome]||'nenhum'); }
 
         function preencherSelectCRM(select, valores = [], placeholder = '', valorAtual = '') {
             if (!select) return;
@@ -7233,7 +7351,7 @@ function renderizarLista(itens) {
                 next.className = 'crm-next-action';
                 next.textContent = lead.proximaAcao || 'Sem próxima ação definida';
                 const nextDate = document.createElement('div');
-                const encerrado = CRM_STATUS_GANHOS_JS.has(lead.status) || lead.status === 'Encerrado - perdido';
+                const encerrado = statusFechadoCRMJS(lead.status);
                 const atrasado = !encerrado && lead.dataProximaAcao && lead.dataProximaAcao < hoje;
                 const hojeAcao = !encerrado && lead.dataProximaAcao === hoje;
                 nextDate.className = `crm-next-date${atrasado ? ' overdue' : (hojeAcao ? ' today' : '')}`;
@@ -7298,7 +7416,7 @@ function renderizarLista(itens) {
                 if (status && lead.status !== status) return false;
                 if (responsavel && lead.responsavel !== responsavel) return false;
                 if (area && lead.area !== area) return false;
-                const encerrado = CRM_STATUS_GANHOS_JS.has(lead.status) || lead.status === 'Encerrado - perdido';
+                const encerrado = statusFechadoCRMJS(lead.status);
                 if (acao === 'atrasado' && (encerrado || !lead.dataProximaAcao || lead.dataProximaAcao >= hoje)) return false;
                 if (acao === 'hoje' && (encerrado || lead.dataProximaAcao !== hoje)) return false;
                 if (acao === '7dias' && (encerrado || !lead.dataProximaAcao || lead.dataProximaAcao <= hoje || lead.dataProximaAcao > limite7)) return false;
@@ -7309,8 +7427,8 @@ function renderizarLista(itens) {
             });
 
             filtrados.sort((a,b) => {
-                const aClosed = (CRM_STATUS_GANHOS_JS.has(a.status) || a.status === 'Encerrado - perdido') ? 1 : 0;
-                const bClosed = (CRM_STATUS_GANHOS_JS.has(b.status) || b.status === 'Encerrado - perdido') ? 1 : 0;
+                const aClosed = statusFechadoCRMJS(a.status) ? 1 : 0;
+                const bClosed = statusFechadoCRMJS(b.status) ? 1 : 0;
                 if (aClosed !== bClosed) return aClosed - bClosed;
                 const da = a.dataProximaAcao || '9999-12-31';
                 const db = b.dataProximaAcao || '9999-12-31';
@@ -7459,16 +7577,17 @@ function renderizarLista(itens) {
             const valorParcela = valorInputNumero('crm-valor-parcela') || 0;
             const percentual = (valorInputNumero('crm-percentual-exito') || 0) / 100;
             let contrato = null, exito = null;
-            if (modelo === 'Consulta') contrato = entrada;
-            else if (modelo === 'Fixo') contrato = potencial;
-            else if (modelo === 'Parcelado' || modelo === 'Misto') contrato = entrada + (parcelas * valorParcela);
-            if (modelo === 'Êxito' || modelo === 'Misto') exito = potencial * percentual;
+            const tipoCalculo=calculoModeloCRMJS(modelo);
+            if (tipoCalculo === 'consulta') contrato = entrada;
+            else if (tipoCalculo === 'fixo') contrato = potencial;
+            else if (tipoCalculo === 'parcelado' || tipoCalculo === 'misto') contrato = entrada + (parcelas * valorParcela);
+            if (tipoCalculo === 'exito' || tipoCalculo === 'misto') exito = potencial * percentual;
             const total = [contrato,exito].filter(v => v != null).reduce((s,v)=>s+v,0);
             document.getElementById('crm-preview-receita').textContent = moedaCRM(total);
         }
 
         function atualizarCamposCondicionaisCRM() {
-            const perdido = document.getElementById('crm-status-lead')?.value === 'Encerrado - perdido';
+            const perdido = statusPerdidoCRMJS(document.getElementById('crm-status-lead')?.value);
             document.getElementById('crm-motivo-perda-wrap')?.classList.toggle('hidden', !perdido);
         }
 
@@ -7486,10 +7605,10 @@ function renderizarLista(itens) {
             const modelos = window.crmOptions?.modelosCobranca || CRM_MODELOS_FALLBACK;
             const motivos = window.crmOptions?.motivosPerda || CRM_MOTIVOS_FALLBACK;
             const origensAnuncio = window.crmOptions?.origensAnuncio || CRM_ORIGENS_ANUNCIO_FALLBACK;
-            preencherSelectCRM(document.getElementById('crm-status-lead'), statusOptions, null, lead?.status || 'Novo lead');
+            preencherSelectCRM(document.getElementById('crm-status-lead'), statusOptions, null, lead?.status || (statusOptions[0] || 'Novo lead'));
             preencherSelectCRM(document.getElementById('crm-modelo-cobranca'), modelos, 'Selecione...', lead?.modeloCobranca || '');
             preencherSelectCRM(document.getElementById('crm-motivo-perda'), motivos, 'Selecione...', lead?.motivoPerda || '');
-            preencherSelectCRM(document.getElementById('crm-origem'), origensAnuncio, 'Selecione a mídia paga...', lead?.origem || 'Meta Ads');
+            preencherSelectCRM(document.getElementById('crm-origem'), origensAnuncio, 'Selecione a mídia paga...', lead?.origem || (origensAnuncio[0] || 'Meta Ads'));
 
             setValorCRM('crm-lead-id', lead?.id || '');
             setValorCRM('crm-data-entrada', lead?.dataEntrada || hojeCRMJS());
@@ -7519,10 +7638,12 @@ function renderizarLista(itens) {
             atualizarCamposCondicionaisCRM();
             atualizarPreviewReceitaCRM();
 
+            const bodyDialog=dialog.querySelector('.crm-dialog-body');
+            if (bodyDialog) bodyDialog.scrollTop=0;
             if (!dialog.open) {
                 if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open','');
             }
-            setTimeout(() => document.getElementById('crm-cliente')?.focus(), 30);
+            requestAnimationFrame(()=>{ if(bodyDialog) bodyDialog.scrollTop=0; try{document.getElementById('crm-cliente')?.focus({preventScroll:true});}catch(_){document.getElementById('crm-cliente')?.focus();} });
         }
 
         function fecharLeadCRM() {
@@ -7566,17 +7687,17 @@ function renderizarLista(itens) {
             const status = document.getElementById('crm-form-status');
             const btn = document.getElementById('crm-btn-save');
             if (!dados.cliente) { status.className='crm-form-status text-danger'; status.textContent='Informe o nome do cliente/lead.'; return; }
-            if (!CRM_ORIGENS_ANUNCIO_FALLBACK.includes(dados.origem)) {
+            if (!(window.crmOptions?.origensAnuncio || CRM_ORIGENS_ANUNCIO_FALLBACK).includes(dados.origem)) {
                 status.className='crm-form-status text-danger';
                 status.textContent='Selecione a origem do anúncio/mídia paga.';
                 return;
             }
-            if (dados.status === 'Encerrado - perdido' && !dados.motivoPerda) {
+            if (statusPerdidoCRMJS(dados.status) && !dados.motivoPerda) {
                 status.className='crm-form-status text-danger';
                 status.textContent='Selecione o motivo da perda antes de encerrar o lead.';
                 return;
             }
-            const convertidoOuEncerrado = CRM_STATUS_GANHOS_JS.has(dados.status) || dados.status === 'Encerrado - perdido';
+            const convertidoOuEncerrado = statusFechadoCRMJS(dados.status);
             if (!convertidoOuEncerrado && (!dados.proximaAcao || !dados.dataProximaAcao)) {
                 const continuar = confirm('Este lead ficará aberto sem próxima ação e/ou sem data. Deseja salvar mesmo assim?');
                 if (!continuar) return;
@@ -8466,24 +8587,30 @@ function renderizarLista(itens) {
             if(preserveScroll) history.scrollTop=Math.max(0, oldTop + (history.scrollHeight-oldHeight));
             else history.scrollTop=history.scrollHeight;
         }
-        const CHAT_EMOJIS = [
-            '😀','😃','😄','😁','😊','🙂','😉','😍','🥰','😎','🤓','🤔','😅','😂','🤣','😢',
-            '😭','😕','😮','😱','😡','😤','🙏','👍','👎','👏','🤝','👌','✌️','💪','👀','❤️',
-            '💙','💚','💛','🧡','💜','🤍','✨','⭐','✅','❌','⚠️','📌','📎','📄','📁','📝',
-            '📞','📱','💬','📧','📅','⏰','💰','💳','🏠','🏢','⚖️','🔎','🔐','🚗','👨‍⚖️','👩‍⚖️'
-        ];
-
+        const CHAT_EMOJI_GROUPS = {
+            recentes:{icone:'🕘',label:'Recentes',emojis:[]},
+            rostos:{icone:'😀',label:'Rostos e emoções',emojis:['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥸','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🫣','🤭','🫢','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴']},
+            gestos:{icone:'👋',label:'Gestos',emojis:['👋','🤚','🖐️','✋','🖖','👌','🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉','👆','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','🫶','👐','🤲','🤝','🙏','✍️','💪','👀','👂']},
+            coracoes:{icone:'❤️',label:'Corações e símbolos',emojis:['❤️','🩷','🧡','💛','💚','💙','🩵','💜','🤎','🖤','🩶','🤍','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','✨','⭐','🌟','💫','🔥','💯','✅','☑️','❌','⚠️','❗','❓','‼️','⁉️']},
+            trabalho:{icone:'💼',label:'Trabalho e jurídico',emojis:['💼','📁','📂','📄','📃','📑','📝','✏️','🖊️','📌','📎','🖇️','📚','📖','🔎','🔍','🔐','🔒','🔑','⚖️','🏛️','👨‍⚖️','👩‍⚖️','📅','🗓️','⏰','⌛','📞','☎️','📱','💬','📧','✉️','📨','📤','📥','💰','💳','🧾','🏠','🏢','🚗']},
+            diversos:{icone:'🎉',label:'Diversos',emojis:['🎉','🎊','🎁','🏆','🥇','🚀','🌎','☀️','🌤️','🌧️','☕','🍵','🍽️','🚙','✈️','📍','🗺️','🔔','🔕','📣','📢','💡','🧠','🛡️','🧩','🔗','➡️','⬅️','⬆️','⬇️']}
+        };
+        function emojisRecentesChat(){try{return JSON.parse(localStorage.getItem('aj_chat_recent_emojis_v1')||'[]').filter(Boolean).slice(0,32)}catch(_){return[]}}
+        function registrarEmojiRecente(emoji){try{const atuais=emojisRecentesChat().filter(x=>x!==emoji);localStorage.setItem('aj_chat_recent_emojis_v1',JSON.stringify([emoji,...atuais].slice(0,32)))}catch(_){}}
+        function renderizarGrupoEmojiChat(chave='rostos'){
+            const picker=document.getElementById('ticket-chat-emoji-picker');if(!picker)return;
+            picker.dataset.group=chave;
+            const grid=picker.querySelector('.chat-emoji-grid');if(!grid)return;grid.replaceChildren();
+            let emojis=chave==='recentes'?emojisRecentesChat():(CHAT_EMOJI_GROUPS[chave]?.emojis||[]);if(chave==='recentes'&&!emojis.length)emojis=CHAT_EMOJI_GROUPS.rostos.emojis.slice(0,24);
+            const frag=document.createDocumentFragment();emojis.forEach(emoji=>{const b=document.createElement('button');b.type='button';b.className='chat-emoji-choice';b.textContent=emoji;b.title=emoji;b.onclick=(event)=>{event.stopPropagation();registrarEmojiRecente(emoji);inserirEmojiChat(emoji);};frag.appendChild(b)});grid.appendChild(frag);
+            picker.querySelectorAll('.chat-emoji-category').forEach(b=>b.classList.toggle('active',b.dataset.group===chave));
+        }
         function garantirEmojiPickerChat() {
             const picker=document.getElementById('ticket-chat-emoji-picker');
             if(!picker || picker.dataset.ready==='1') return picker;
-            const frag=document.createDocumentFragment();
-            CHAT_EMOJIS.forEach(emoji=>{
-                const b=document.createElement('button'); b.type='button'; b.className='chat-emoji-choice';
-                b.textContent=emoji; b.title=emoji; b.onclick=(event)=>{event.stopPropagation();inserirEmojiChat(emoji);};
-                frag.appendChild(b);
-            });
-            picker.appendChild(frag); picker.dataset.ready='1';
-            return picker;
+            const cats=document.createElement('div');cats.className='chat-emoji-categories';
+            Object.entries(CHAT_EMOJI_GROUPS).forEach(([chave,grupo])=>{const b=document.createElement('button');b.type='button';b.className='chat-emoji-category';b.dataset.group=chave;b.title=grupo.label;b.textContent=grupo.icone;b.onclick=e=>{e.stopPropagation();renderizarGrupoEmojiChat(chave)};cats.appendChild(b)});
+            const grid=document.createElement('div');grid.className='chat-emoji-grid';picker.append(cats,grid);picker.dataset.ready='1';renderizarGrupoEmojiChat(emojisRecentesChat().length?'recentes':'rostos');return picker;
         }
 
         function toggleEmojiPickerChat(event) {
@@ -9051,7 +9178,7 @@ function renderizarLista(itens) {
         // GESTÃO DE USUÁRIOS
         // ---------------------------------------------------------------------
         window.panelUsersData=[];
-        const PERMISSIONS_ORDER=['tickets','clients','chat','crm','whatsapp','ia','menu','business_hours','users'];
+        const PERMISSIONS_ORDER=['tickets','clients','chat','crm','crm_params','ticket_params','whatsapp','ia','menu','business_hours','users'];
         function renderizarPermissoesFormularioUsuario(selected=['tickets','clients','chat']) {
             const grid=document.getElementById('user-permissions-grid'); if(!grid)return; const set=new Set(selected); grid.innerHTML='';
             PERMISSIONS_ORDER.forEach(p=>{const label=document.createElement('label');label.className='permission-item';label.innerHTML=`<input type="checkbox" class="form-check-input user-permission-check" value="${p}"> <span>${PERMISSION_LABELS[p]||p}</span>`;label.querySelector('input').checked=set.has(p);grid.appendChild(label);}); atualizarPermissoesFormularioUsuario();

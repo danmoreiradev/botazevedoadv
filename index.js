@@ -1009,7 +1009,7 @@ let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHist
 // USUÁRIOS, PERMISSÕES E CHAT DO PAINEL
 // -----------------------------------------------------------------------------
 const PERMISSOES_PAINEL = [
-    'tickets', 'clients', 'chat', 'crm', 'whatsapp', 'ia', 'menu', 'business_hours', 'users'
+    'tickets', 'clients', 'chat', 'crm', 'crm_params', 'ticket_params', 'whatsapp', 'ia', 'menu', 'business_hours', 'users'
 ];
 const PERMISSOES_ADVOGADO_PADRAO = ['tickets', 'clients', 'chat'];
 
@@ -4660,6 +4660,7 @@ async function startBotInterno() {
         // Cria as opções atuais e o horário padrão somente se ainda não existirem.
         await garantirMenuPadrao();
         await garantirHorarioFuncionamentoPadrao();
+        await garantirParametrosAdministrativos();
 
         // Início persistente do recurso de mensagens não lidas. Mantém a mesma data
         // entre reinicializações e evita marcar todo o histórico antigo como novo.
@@ -6296,6 +6297,8 @@ app.get('/api/chat/users', exigirPermissao('chat'), async (req, res) => {
 
 // Proteção por módulo. O administrador ignora a lista de permissões; advogados
 // comuns recebem por padrão apenas tickets, clientes e chat.
+app.use('/api/admin/crm-params', exigirPermissao('crm_params'));
+app.use('/api/admin/ticket-params', exigirPermissao('ticket_params'));
 app.use('/api/business-hours', exigirPermissao('business_hours'));
 app.use('/api/triage', exigirPermissao('menu'));
 app.use('/api/menu-options', exigirPermissao('menu'));
@@ -6966,28 +6969,94 @@ async function resolverWhatsAppCliente(cliente) {
 // Baseado na planilha CRM_Azevedo_Juvencio.xlsx. O MongoDB é a fonte de verdade;
 // os valores de receita são calculados no backend para manter o painel consistente.
 // -----------------------------------------------------------------------------
-const CRM_STATUS = [
-    'Novo lead',
-    'Contato feito',
-    'Reunião agendada',
-    'Reunião realizada',
-    'Proposta enviada',
-    'Negociando',
-    'Contrato assinado',
-    'Em andamento',
-    'Aguardando cliente',
-    'Encerrado - ganho',
-    'Encerrado - perdido'
-];
+const CRM_PARAMETROS_PADRAO = {
+    status: [
+        { id:'novo-lead', nome:'Novo lead', tipo:'aberto' },
+        { id:'contato-feito', nome:'Contato feito', tipo:'aberto' },
+        { id:'reuniao-agendada', nome:'Reunião agendada', tipo:'aberto' },
+        { id:'reuniao-realizada', nome:'Reunião realizada', tipo:'aberto' },
+        { id:'proposta-enviada', nome:'Proposta enviada', tipo:'proposta' },
+        { id:'negociando', nome:'Negociando', tipo:'proposta' },
+        { id:'contrato-assinado', nome:'Contrato assinado', tipo:'ganho' },
+        { id:'em-andamento', nome:'Em andamento', tipo:'ganho' },
+        { id:'aguardando-cliente', nome:'Aguardando cliente', tipo:'aberto' },
+        { id:'encerrado-ganho', nome:'Encerrado - ganho', tipo:'ganho' },
+        { id:'encerrado-perdido', nome:'Encerrado - perdido', tipo:'perdido' }
+    ],
+    modelosCobranca: [
+        { id:'consulta', nome:'Consulta', calculo:'consulta' },
+        { id:'fixo', nome:'Fixo', calculo:'fixo' },
+        { id:'parcelado', nome:'Parcelado', calculo:'parcelado' },
+        { id:'exito', nome:'Êxito', calculo:'exito' },
+        { id:'misto', nome:'Misto', calculo:'misto' }
+    ],
+    motivosPerda: [
+        { id:'sem-resposta', nome:'Sem resposta' },
+        { id:'sem-orcamento', nome:'Sem orçamento' },
+        { id:'fechou-com-outro', nome:'Fechou com outro' },
+        { id:'nao-perfil', nome:'Não é o perfil do caso' },
+        { id:'outro', nome:'Outro' }
+    ],
+    origensAnuncio: [
+        { id:'meta-ads', nome:'Meta Ads' }, { id:'instagram-ads', nome:'Instagram Ads' },
+        { id:'facebook-ads', nome:'Facebook Ads' }, { id:'google-ads', nome:'Google Ads' },
+        { id:'tiktok-ads', nome:'TikTok Ads' }, { id:'youtube-ads', nome:'YouTube Ads' },
+        { id:'linkedin-ads', nome:'LinkedIn Ads' }, { id:'outro-anuncio', nome:'Outro anúncio' }
+    ]
+};
+const TICKET_PARAMETROS_PADRAO = { status: [] };
+let crmParametrosCache = JSON.parse(JSON.stringify(CRM_PARAMETROS_PADRAO));
+let ticketParametrosCache = JSON.parse(JSON.stringify(TICKET_PARAMETROS_PADRAO));
 
-const CRM_MODELOS_COBRANCA = ['Consulta', 'Fixo', 'Parcelado', 'Êxito', 'Misto'];
-const CRM_MOTIVOS_PERDA = ['Sem resposta', 'Sem orçamento', 'Fechou com outro', 'Não é o perfil do caso', 'Outro'];
-const CRM_ORIGENS_ANUNCIO = ['Meta Ads', 'Instagram Ads', 'Facebook Ads', 'Google Ads', 'TikTok Ads', 'YouTube Ads', 'LinkedIn Ads', 'Outro anúncio'];
-const CRM_STATUS_ENCERRADOS = new Set(['Encerrado - ganho', 'Encerrado - perdido']);
-const CRM_STATUS_GANHOS = new Set(['Contrato assinado', 'Em andamento', 'Encerrado - ganho']);
+function slugParametro(valor='item') {
+    const base=String(valor||'item').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,54)||'item';
+    return `${base}-${crypto.randomBytes(3).toString('hex')}`;
+}
+function limparCorHex(valor, fallback='#667085') { const v=String(valor||'').trim(); return /^#[0-9a-f]{6}$/i.test(v)?v:fallback; }
+function normalizarListaParametros(lista=[], tipo='simples') {
+    const vistos=new Set();
+    return (Array.isArray(lista)?lista:[]).map((item,indice)=>{
+        const nome=String(item?.nome||item?.label||'').trim().slice(0,120); if(!nome)return null;
+        let id=String(item?.id||'').trim().slice(0,80)||slugParametro(nome); if(vistos.has(id))id=slugParametro(nome); vistos.add(id);
+        const base={id,nome,ordem:Number.isFinite(Number(item?.ordem))?Number(item.ordem):indice,ativo:item?.ativo!==false};
+        if(tipo==='status-crm') base.tipo=['aberto','proposta','ganho','perdido'].includes(item?.tipo)?item.tipo:'aberto';
+        if(tipo==='modelo') base.calculo=['consulta','fixo','parcelado','exito','misto','nenhum'].includes(item?.calculo)?item.calculo:'nenhum';
+        if(tipo==='status-ticket') base.cor=limparCorHex(item?.cor,'#667085');
+        return base;
+    }).filter(Boolean).sort((a,b)=>a.ordem-b.ordem).map((x,i)=>({...x,ordem:i}));
+}
+function normalizarParametrosCRM(doc={}) { return {
+    status:normalizarListaParametros(doc.status||CRM_PARAMETROS_PADRAO.status,'status-crm'),
+    modelosCobranca:normalizarListaParametros(doc.modelosCobranca||CRM_PARAMETROS_PADRAO.modelosCobranca,'modelo'),
+    motivosPerda:normalizarListaParametros(doc.motivosPerda||CRM_PARAMETROS_PADRAO.motivosPerda),
+    origensAnuncio:normalizarListaParametros(doc.origensAnuncio||CRM_PARAMETROS_PADRAO.origensAnuncio)
+}; }
+function normalizarParametrosTickets(doc={}) { return { status:normalizarListaParametros(doc.status||[],'status-ticket') }; }
+async function garantirParametrosAdministrativos() {
+    if(!settingsColl)return;
+    const agora=Date.now();
+    await Promise.all([
+        settingsColl.updateOne({_id:'crm_parameters'},{$setOnInsert:{...CRM_PARAMETROS_PADRAO,createdAt:agora},$set:{updatedAt:agora}},{upsert:true}),
+        settingsColl.updateOne({_id:'ticket_parameters'},{$setOnInsert:{...TICKET_PARAMETROS_PADRAO,createdAt:agora},$set:{updatedAt:agora}},{upsert:true})
+    ]);
+    const [crm,tickets]=await Promise.all([settingsColl.findOne({_id:'crm_parameters'}),settingsColl.findOne({_id:'ticket_parameters'})]);
+    crmParametrosCache=normalizarParametrosCRM(crm||{}); ticketParametrosCache=normalizarParametrosTickets(tickets||{});
+}
+function nomesCRM(chave){return (crmParametrosCache?.[chave]||[]).filter(x=>x.ativo!==false).map(x=>x.nome);}
+function infoStatusCRM(nome){return (crmParametrosCache.status||[]).find(x=>x.nome===String(nome||''))||null;}
+function statusCRMGanho(nome){return infoStatusCRM(nome)?.tipo==='ganho';}
+function statusCRMPerdido(nome){return infoStatusCRM(nome)?.tipo==='perdido';}
+function statusCRMFechado(nome){return ['ganho','perdido'].includes(infoStatusCRM(nome)?.tipo);}
+function statusCRMProposta(nome){return infoStatusCRM(nome)?.tipo==='proposta';}
+function nomeStatusCRMInicial(){return crmParametrosCache.status.find(x=>x.id==='novo-lead'&&x.ativo!==false)?.nome || nomesCRM('status')[0] || 'Novo lead';}
+function origemPadraoCRM(){return crmParametrosCache.origensAnuncio.find(x=>x.id==='meta-ads'&&x.ativo!==false)?.nome || nomesCRM('origensAnuncio')[0] || 'Meta Ads';}
+function calculoModeloCRM(nome){return (crmParametrosCache.modelosCobranca||[]).find(x=>x.nome===String(nome||''))?.calculo||'nenhum';}
+function statusTicketPorId(id){return (ticketParametrosCache.status||[]).find(x=>x.id===String(id||'')&&x.ativo!==false)||null;}
+function statusTicketsAtivos(){return (ticketParametrosCache.status||[]).filter(x=>x.ativo!==false).map(({id,nome,cor,ordem})=>({id,nome,cor,ordem}));}
+
 
 function origemCRMDeAnuncioValida(origem = '') {
-    return CRM_ORIGENS_ANUNCIO.includes(String(origem || '').trim());
+    return nomesCRM('origensAnuncio').includes(String(origem || '').trim());
 }
 
 function leadCRMDeAnuncio(lead = {}) {
@@ -7058,14 +7127,15 @@ function calcularReceitaCRM(dados = {}) {
     const valorParcela = Number(dados.valorParcela || 0);
     const percentualExito = Number(dados.percentualExito || 0);
     const modelo = dados.modeloCobranca || '';
+    const tipoCalculo = calculoModeloCRM(modelo);
 
     let receitaContratoPrevista = null;
-    if (modelo === 'Consulta') receitaContratoPrevista = entrada;
-    else if (modelo === 'Fixo') receitaContratoPrevista = valorPotencial;
-    else if (modelo === 'Parcelado' || modelo === 'Misto') receitaContratoPrevista = entrada + (parcelasQtd * valorParcela);
+    if (tipoCalculo === 'consulta') receitaContratoPrevista = entrada;
+    else if (tipoCalculo === 'fixo') receitaContratoPrevista = valorPotencial;
+    else if (tipoCalculo === 'parcelado' || tipoCalculo === 'misto') receitaContratoPrevista = entrada + (parcelasQtd * valorParcela);
 
     let exitoPrevisto = null;
-    if (modelo === 'Êxito' || modelo === 'Misto') exitoPrevisto = valorPotencial * percentualExito;
+    if (tipoCalculo === 'exito' || tipoCalculo === 'misto') exitoPrevisto = valorPotencial * percentualExito;
 
     const componentes = [receitaContratoPrevista, exitoPrevisto].filter(v => v !== null && Number.isFinite(v));
     const receitaTotalPrevista = componentes.length ? componentes.reduce((soma, valor) => soma + valor, 0) : null;
@@ -7078,10 +7148,11 @@ function calcularReceitaCRM(dados = {}) {
 }
 
 function normalizarLeadCRM(body = {}, existente = {}) {
-    const statusRecebido = textoCRM(body.status ?? existente.status ?? 'Novo lead', 80);
-    const status = CRM_STATUS.includes(statusRecebido) ? statusRecebido : 'Novo lead';
+    const statusInicial=nomeStatusCRMInicial();
+    const statusRecebido = textoCRM(body.status ?? existente.status ?? statusInicial, 80);
+    const status = nomesCRM('status').includes(statusRecebido) ? statusRecebido : statusInicial;
     const modeloRecebido = textoCRM(body.modeloCobranca ?? existente.modeloCobranca ?? '', 80);
-    const modeloCobranca = CRM_MODELOS_COBRANCA.includes(modeloRecebido) ? modeloRecebido : '';
+    const modeloCobranca = nomesCRM('modelosCobranca').includes(modeloRecebido) ? modeloRecebido : '';
     const percentualExito = Object.prototype.hasOwnProperty.call(body || {}, 'percentualExito')
         ? percentualExitoFormularioCRM(body.percentualExito)
         : (existente.percentualExito ?? null);
@@ -7113,8 +7184,8 @@ function normalizarLeadCRM(body = {}, existente = {}) {
         motivoPerda: textoCRM(body.motivoPerda ?? existente.motivoPerda ?? '', 240)
     };
 
-    if (status !== 'Encerrado - perdido') dados.motivoPerda = '';
-    if ((CRM_STATUS_GANHOS.has(status) || CRM_STATUS_ENCERRADOS.has(status)) && !dados.dataFechamento) {
+    if (!statusCRMPerdido(status)) dados.motivoPerda = '';
+    if (statusCRMFechado(status) && !dados.dataFechamento) {
         dados.dataFechamento = dataHojeCRM();
     }
 
@@ -7177,19 +7248,19 @@ function resumoCRM(leads = []) {
     const seteDiasStr = `${seteDias.getFullYear()}-${String(seteDias.getMonth() + 1).padStart(2, '0')}-${String(seteDias.getDate()).padStart(2, '0')}`;
     const prefixoMes = hoje.slice(0, 7);
 
-    const ganhos = leads.filter(lead => CRM_STATUS_GANHOS.has(lead.status));
+    const ganhos = leads.filter(lead => statusCRMGanho(lead.status));
     // Depois de contrato assinado o registro continua consultável no CRM, mas sai da
     // fila comercial de follow-up. Isso evita tratar cliente já convertido como lead atrasado.
-    const abertos = leads.filter(lead => !CRM_STATUS_GANHOS.has(lead.status) && lead.status !== 'Encerrado - perdido');
+    const abertos = leads.filter(lead => !statusCRMFechado(lead.status));
     const followupsAtrasados = abertos.filter(lead => lead.dataProximaAcao && lead.dataProximaAcao < hoje).length;
     const acoesHoje = abertos.filter(lead => lead.dataProximaAcao === hoje).length;
     const proximos7Dias = abertos.filter(lead => lead.dataProximaAcao && lead.dataProximaAcao > hoje && lead.dataProximaAcao <= seteDiasStr).length;
     const semProximaAcao = abertos.filter(lead => !lead.dataProximaAcao || !lead.proximaAcao).length;
-    const propostasAbertas = abertos.filter(lead => ['Proposta enviada', 'Negociando'].includes(lead.status)).length;
+    const propostasAbertas = abertos.filter(lead => statusCRMProposta(lead.status)).length;
     const contratosMes = ganhos.filter(lead => String(lead.dataFechamento || '').startsWith(prefixoMes)).length;
     const receitaFechada = ganhos.reduce((soma, lead) => soma + Number(lead.receitaTotalPrevista || 0), 0);
     const receitaAberta = leads
-        .filter(lead => !CRM_STATUS_GANHOS.has(lead.status) && lead.status !== 'Encerrado - perdido')
+        .filter(lead => !statusCRMFechado(lead.status))
         .reduce((soma, lead) => soma + Number(lead.receitaTotalPrevista || 0), 0);
 
     return {
@@ -7309,12 +7380,12 @@ async function sincronizarLeadCRMDoTicket(ticketOuNumero, { emitirEvento = true 
         dataEntrada: dataTimestampParaCRM(ticket.createdAt),
         // O detector atual identifica mensagens provenientes de campanhas Meta/Facebook/Instagram.
         // O campo continua editável no CRM caso o advogado queira especificar a plataforma.
-        origem: 'Meta Ads',
+        origem: origemPadraoCRM(),
         cliente: clienteTicket || `Lead ${ticketNumber}`,
         telefone: telefoneTicket,
         area: areaTicket,
         assuntoResumo: resumoTicket,
-        status: 'Novo lead',
+        status: nomeStatusCRMInicial(),
         proximaAcao: 'Realizar primeiro contato / avaliar contratação',
         dataProximaAcao: dataHojeCRM(),
         observacoes: `Criado automaticamente a partir do ticket ${ticketNumber}. Origem técnica: lead_anuncio.`
@@ -7716,7 +7787,9 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
                     triagem,
                     advogadoResponsavelId: ticket.advogadoResponsavelId || null,
                     advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
-                    atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null
+                    atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null,
+                internalStatusId: ticket.internalStatusId || null,
+                internalStatus: statusTicketPorId(ticket.internalStatusId)
                 };
             })(),
             messages: docs.map(item => {
@@ -8327,6 +8400,7 @@ app.get('/api/tickets/active', async (req, res) => {
                     advogadoResponsavelId: 1,
                     advogadoResponsavelNome: 1,
                     atendimentoAssumidoEm: 1,
+                    internalStatusId: 1,
                     lastInboundChatAt: 1,
                     chatLeituras: 1
                 }
@@ -8455,6 +8529,8 @@ app.get('/api/tickets/active', async (req, res) => {
                 advogadoResponsavelId: ticket.advogadoResponsavelId || null,
                 advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
                 atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null,
+                internalStatusId: ticket.internalStatusId || null,
+                internalStatus: statusTicketPorId(ticket.internalStatusId),
                 ultimaMensagemClienteEm,
                 chatLidoEm: chatLidoEm || null,
                 temMensagemNaoLida,
@@ -8485,6 +8561,7 @@ app.get('/api/tickets/active', async (req, res) => {
         res.json({
             generatedAt: agora,
             resumo,
+            ticketStatusOptions: statusTicketsAtivos(),
             tickets: itens
         });
     } catch (err) {
@@ -8588,7 +8665,9 @@ app.get('/api/tickets/:ticketNumber/detail', async (req, res) => {
                 documentosResumo: resumoDocumentosIATicket(documentosIA),
                 advogadoResponsavelId: ticket.advogadoResponsavelId || null,
                 advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
-                atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null
+                atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null,
+                internalStatusId: ticket.internalStatusId || null,
+                internalStatus: statusTicketPorId(ticket.internalStatusId)
             }
         });
     } catch (err) {
@@ -8699,6 +8778,79 @@ app.post('/api/tickets/:ticketNumber/documents/:messageId/retry', async (req, re
     }
 });
 
+
+// -----------------------------------------------------------------------------
+// PARÂMETROS ADMINISTRATIVOS - CRM E TICKETS
+// -----------------------------------------------------------------------------
+function serializarParametrosCRM() { return JSON.parse(JSON.stringify(crmParametrosCache)); }
+function serializarParametrosTickets() { return JSON.parse(JSON.stringify(ticketParametrosCache)); }
+
+app.get('/api/admin/crm-params', async (req,res)=>{
+    try { res.json({ parametros:serializarParametrosCRM() }); }
+    catch(err){ console.error('[CRM Params] Erro:',err); res.status(500).json({erro:'Não foi possível carregar os parâmetros do CRM.'}); }
+});
+app.put('/api/admin/crm-params', async (req,res)=>{
+    try {
+        if(!settingsColl)return res.status(503).json({erro:'Configurações ainda não estão disponíveis.'});
+        const anterior=serializarParametrosCRM();
+        const novo=normalizarParametrosCRM(req.body||{});
+        for (const chave of ['status','modelosCobranca','motivosPerda','origensAnuncio']) {
+            const nomes=(novo[chave]||[]).map(x=>x.nome.toLocaleLowerCase('pt-BR'));
+            if(new Set(nomes).size!==nomes.length)return res.status(400).json({erro:'Não é permitido cadastrar nomes duplicados no mesmo grupo de parâmetros.'});
+        }
+        if(!novo.status.length)return res.status(400).json({erro:'Mantenha ao menos um status do CRM.'});
+        if(!novo.origensAnuncio.length)return res.status(400).json({erro:'Mantenha ao menos uma origem de anúncio.'});
+        // Renomes preservam os registros já existentes, usando o ID estável do parâmetro.
+        const migracoes=[];
+        for(const chave of ['status','modelosCobranca','motivosPerda','origensAnuncio']){
+            const campo={status:'status',modelosCobranca:'modeloCobranca',motivosPerda:'motivoPerda',origensAnuncio:'origem'}[chave];
+            const antigos=new Map((anterior[chave]||[]).map(x=>[x.id,x.nome]));
+            for(const item of novo[chave]||[]){ const old=antigos.get(item.id); if(old&&old!==item.nome)migracoes.push(crmLeadsColl.updateMany({[campo]:old},{$set:{[campo]:item.nome,updatedAt:Date.now()}})); }
+        }
+        await Promise.all(migracoes);
+        await settingsColl.updateOne({_id:'crm_parameters'},{$set:{...novo,updatedAt:Date.now()}},{upsert:true});
+        crmParametrosCache=novo;
+        io.emit('crm_parameters_updated',{updatedAt:Date.now()});
+        res.json({ok:true,parametros:serializarParametrosCRM()});
+    } catch(err){ console.error('[CRM Params] Erro ao salvar:',err); res.status(500).json({erro:'Não foi possível salvar os parâmetros do CRM.'}); }
+});
+
+app.get('/api/admin/ticket-params', async (req,res)=>{
+    try { res.json({ parametros:serializarParametrosTickets() }); }
+    catch(err){ console.error('[Ticket Params] Erro:',err); res.status(500).json({erro:'Não foi possível carregar os parâmetros de tickets.'}); }
+});
+app.put('/api/admin/ticket-params', async (req,res)=>{
+    try {
+        if(!settingsColl)return res.status(503).json({erro:'Configurações ainda não estão disponíveis.'});
+        const anterior=serializarParametrosTickets();
+        const novo=normalizarParametrosTickets(req.body||{});
+        const nomes=novo.status.map(x=>x.nome.toLocaleLowerCase('pt-BR'));
+        if(new Set(nomes).size!==nomes.length)return res.status(400).json({erro:'Não é permitido cadastrar status com nomes duplicados.'});
+        const idsNovos=new Set(novo.status.map(x=>x.id));
+        const removidos=(anterior.status||[]).map(x=>x.id).filter(id=>!idsNovos.has(id));
+        if(removidos.length && ticketsColl) await ticketsColl.updateMany({internalStatusId:{$in:removidos}},{$unset:{internalStatusId:''},$set:{updatedAt:Date.now()}});
+        await settingsColl.updateOne({_id:'ticket_parameters'},{$set:{...novo,updatedAt:Date.now()}},{upsert:true});
+        ticketParametrosCache=novo;
+        io.emit('ticket_parameters_updated',{status:statusTicketsAtivos(),updatedAt:Date.now()});
+        res.json({ok:true,parametros:serializarParametrosTickets()});
+    } catch(err){ console.error('[Ticket Params] Erro ao salvar:',err); res.status(500).json({erro:'Não foi possível salvar os parâmetros de tickets.'}); }
+});
+
+app.put('/api/tickets/:ticketNumber/internal-status', async (req,res)=>{
+    try {
+        const ticketNumber=String(req.params.ticketNumber||'').trim();
+        const solicitado=String(req.body?.statusId||'').trim();
+        if(solicitado && !statusTicketPorId(solicitado))return res.status(400).json({erro:'Status interno inválido ou inativo.'});
+        const update=solicitado?{$set:{internalStatusId:solicitado,updatedAt:Date.now()}}:{$unset:{internalStatusId:''},$set:{updatedAt:Date.now()}};
+        const result=await ticketsColl.findOneAndUpdate({ticketNumber},update,{returnDocument:'after'});
+        const ticket=result?.value||result;
+        if(!ticket)return res.status(404).json({erro:'Ticket ativo não encontrado.'});
+        const payload={ticketNumber,internalStatusId:ticket.internalStatusId||null,internalStatus:statusTicketPorId(ticket.internalStatusId)};
+        io.emit('ticket_internal_status_updated',payload);
+        res.json({ok:true,...payload});
+    } catch(err){console.error('[Tickets] Erro status interno:',err);res.status(500).json({erro:'Não foi possível atualizar o status interno.'});}
+});
+
 // CRM - lista, indicadores e opções de preenchimento.
 app.get('/api/crm/leads', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
@@ -8718,7 +8870,7 @@ app.get('/api/crm/leads', async (req, res) => {
             $or: [
                 { origemTipo: 'anuncio' },
                 { origemTecnica: 'lead_anuncio' },
-                { origem: { $in: CRM_ORIGENS_ANUNCIO } }
+                { origem: { $in: nomesCRM('origensAnuncio') } }
             ]
         };
         const leads = await crmLeadsColl
@@ -8730,10 +8882,12 @@ app.get('/api/crm/leads', async (req, res) => {
             generatedAt: Date.now(),
             resumo: resumoCRM(leads),
             options: {
-                status: CRM_STATUS,
-                modelosCobranca: CRM_MODELOS_COBRANCA,
-                motivosPerda: CRM_MOTIVOS_PERDA,
-                origensAnuncio: CRM_ORIGENS_ANUNCIO
+                status: nomesCRM('status'),
+                statusMeta: (crmParametrosCache.status||[]).filter(x=>x.ativo!==false).map(({id,nome,tipo,ordem})=>({id,nome,tipo,ordem})),
+                modelosCobranca: nomesCRM('modelosCobranca'),
+                modelosCobrancaMeta: (crmParametrosCache.modelosCobranca||[]).filter(x=>x.ativo!==false).map(({id,nome,calculo,ordem})=>({id,nome,calculo,ordem})),
+                motivosPerda: nomesCRM('motivosPerda'),
+                origensAnuncio: nomesCRM('origensAnuncio')
             },
             leads: leads.map(serializarLeadCRM)
         });
