@@ -3441,8 +3441,9 @@
 
     <style id="ticket-triage-unread-v14">
         .nav-ticket-badges{margin-left:auto;display:inline-flex;align-items:center;gap:5px;min-width:0;}
-        #nav-tickets-link .nav-notification-badge{position:static;margin-left:0;border-color:var(--adv-blue-strong);}
-        .nav-ticket-unread-badge{display:inline-flex;align-items:center;justify-content:center;min-height:21px;padding:3px 7px;color:#fff;background:#d92d20;border:1px solid rgba(255,255,255,.18);border-radius:999px;font-size:.62rem;font-weight:800;line-height:1;white-space:nowrap;box-shadow:0 0 0 3px rgba(217,45,32,.10);}
+        #nav-tickets-link .nav-notification-badge{position:static;margin-left:0;min-width:24px;height:21px;padding:0 6px;color:#1b202a;background:var(--adv-gold);border:1px solid rgba(197,160,89,.85);box-shadow:0 0 0 3px rgba(197,160,89,.10);font-weight:850;}
+        .nav-ticket-unread-badge{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:30px;height:21px;padding:0 6px;color:#fff;background:#d92d20;border:1px solid rgba(255,255,255,.18);border-radius:999px;font-size:.62rem;font-weight:800;line-height:1;white-space:nowrap;box-shadow:0 0 0 3px rgba(217,45,32,.10);flex:0 0 auto;}
+        .nav-ticket-unread-badge i{font-size:.66rem;line-height:1;}
         .nav-ticket-unread-badge.hidden{display:none!important;}
         .chat-op-pill-action{font-family:inherit;cursor:pointer;appearance:none;outline:none;transition:background .16s ease,border-color .16s ease,box-shadow .16s ease;}
         .chat-op-pill-action:hover{background:#edf3f0;border-color:#c8d4ce;}
@@ -3470,7 +3471,8 @@
         html[data-theme="dark"] .chat-triage-meta{color:#89959c!important;}
         html[data-theme="dark"] .chat-triage-empty{color:#9ba7ad!important;background:#20272d!important;border-color:#3a444c!important;}
         @media(max-width:767.98px){
-            .nav-ticket-unread-badge{font-size:.58rem;padding:3px 6px;}
+            .nav-ticket-unread-badge{min-width:29px;height:20px;padding:0 5px;gap:3px;font-size:.58rem;}
+            #nav-tickets-link .nav-notification-badge{min-width:23px;height:20px;padding:0 5px;font-size:.58rem;}
             .chat-triage-panel{padding:10px;}
             .chat-triage-body{max-height:210px;}
         }
@@ -3490,8 +3492,8 @@
                     <span class="nav-icon"><i class="bi bi-inboxes"></i></span>
                     <span>Tickets ativos</span>
                     <span class="nav-ticket-badges" aria-live="polite">
-                        <span id="nav-ticket-unread-badge" class="nav-ticket-unread-badge hidden" aria-label="Mensagens não lidas nos tickets">msg não lida</span>
-                        <span id="nav-notification-badge" class="nav-notification-badge hidden" aria-label="Notificações não lidas">0</span>
+                        <span id="nav-ticket-unread-badge" class="nav-ticket-unread-badge hidden" aria-label="Mensagens não lidas nos tickets" title="Mensagens não lidas"><i class="bi bi-chat-dots-fill" aria-hidden="true"></i><span id="nav-ticket-unread-count">0</span></span>
+                        <span id="nav-notification-badge" class="nav-notification-badge hidden" aria-label="Novos tickets e notificações" title="Novo ticket/notificação">+0</span>
                     </span>
                 </div>
                 <div class="nav-link" data-permission="clients" onclick="switchTab('tab-clientes', this)">
@@ -4766,11 +4768,17 @@
         function atualizarIndicadoresNotificacao() {
             const total = contadorNotificacoesNaoLidas();
             const texto = total > 99 ? '99+' : String(total);
-            [document.getElementById('notification-badge'), document.getElementById('nav-notification-badge')].forEach(el => {
-                if (!el) return;
-                el.textContent = texto;
-                el.classList.toggle('hidden', total === 0);
-            });
+            const topBadge = document.getElementById('notification-badge');
+            if (topBadge) {
+                topBadge.textContent = texto;
+                topBadge.classList.toggle('hidden', total === 0);
+            }
+            const navBadge = document.getElementById('nav-notification-badge');
+            if (navBadge) {
+                navBadge.textContent = total > 99 ? '+99' : `+${total}`;
+                navBadge.classList.toggle('hidden', total === 0);
+                navBadge.setAttribute('aria-label', total === 1 ? '1 novo ticket ou notificação' : `${total} novos tickets ou notificações`);
+            }
             document.getElementById('notification-bell')?.classList.toggle('has-unread', total > 0);
             document.title = total > 0 ? `(${total}) ${PANEL_ORIGINAL_TITLE}` : PANEL_ORIGINAL_TITLE;
         }
@@ -6181,11 +6189,13 @@ function renderizarLista(itens) {
 
         function atualizarBadgeMensagensNaoLidasTickets(totalNaoLidas = 0) {
             const badge = document.getElementById('nav-ticket-unread-badge');
+            const count = document.getElementById('nav-ticket-unread-count');
             if (!badge) return;
             const total = Math.max(0, Number(totalNaoLidas || 0));
             badge.classList.toggle('hidden', total <= 0);
-            badge.textContent = total === 1 ? '1 msg não lida' : `${total} msgs não lidas`;
+            if (count) count.textContent = total > 99 ? '99+' : String(total);
             badge.setAttribute('aria-label', total === 1 ? '1 mensagem não lida nos tickets' : `${total} mensagens não lidas nos tickets`);
+            badge.title = total === 1 ? '1 mensagem não lida' : `${total} mensagens não lidas`;
         }
 
         function atualizarResumoTickets(resumo = {}) {
