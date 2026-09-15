@@ -1024,6 +1024,7 @@ const CHAT_MAX_MESSAGES_PER_TICKET = null;
 const CHAT_LIST_LIMIT_DEFAULT = 60;
 const CHAT_LIST_LIMIT_MAX = 100;
 const CHAT_MAX_TEXT_CHARS = 12000;
+const CHAT_EDIT_WINDOW_MS = 15 * 60 * 1000;
 const CHAT_MAX_CAPTION_CHARS = 2000;
 const CHAT_MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const CHAT_MEDIA_REF_MAX_CHARS = 150_000;
@@ -1599,7 +1600,9 @@ function serializarMensagemChat(doc = {}) {
         senderId: doc.senderId || null,
         senderName: doc.senderName || null,
         replyTo: normalizarReplyToChat(doc.replyTo || null),
-        createdAt: doc.createdAt instanceof Date ? doc.createdAt.getTime() : Number(doc.createdAt || Date.now())
+        createdAt: doc.createdAt instanceof Date ? doc.createdAt.getTime() : Number(doc.createdAt || Date.now()),
+        editedAt: doc.editedAt instanceof Date ? doc.editedAt.getTime() : (Number(doc.editedAt || 0) || null),
+        editCount: Number(doc.editCount || 0) || 0
     };
 }
 
@@ -8235,6 +8238,77 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
     } catch (err) {
         console.error('[Chat] Erro ao enviar mensagem:', err);
         res.status(Number(err?.statusCode || 500)).json({ erro: err?.message || 'Não foi possível enviar a mensagem.' });
+    }
+});
+
+app.put('/api/tickets/:ticketNumber/chat/messages/:messageId', async (req, res) => {
+    if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
+    if (!sock?.user) return res.status(503).json({ erro: 'O WhatsApp do escritório não está conectado.' });
+    if (!ticketMessagesColl) return res.status(503).json({ erro: 'Histórico do chat ainda não está disponível.' });
+
+    try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        const messageId = String(req.params.messageId || '').trim();
+        const texto = limitarTextoChat(req.body?.text || '', CHAT_MAX_TEXT_CHARS);
+        if (!ticketNumber || !messageId) return res.status(400).json({ erro: 'Mensagem inválida para edição.' });
+        if (!texto) return res.status(400).json({ erro: 'A mensagem editada não pode ficar vazia.' });
+
+        const advogado = identidadeAdvogadoSessao(req);
+        const acessoTicket = await garantirTicketDoAdvogado(ticketNumber, advogado);
+        if (!acessoTicket.ok) {
+            return res.status(acessoTicket.status || 409).json({
+                erro: acessoTicket.erro || 'Este ticket está sendo atendido por outro advogado.',
+                codigo: acessoTicket.codigo || null,
+                responsavel: acessoTicket.responsavel || null
+            });
+        }
+
+        const original = await ticketMessagesColl.findOne({ ticketNumber, messageId });
+        if (!original) return res.status(404).json({ erro: 'Mensagem original não encontrada no histórico.' });
+        if (original.direction !== 'out' || original.source !== 'painel' || original.tipo !== 'text') {
+            return res.status(409).json({ erro: 'Somente mensagens de texto enviadas pelo painel podem ser editadas.' });
+        }
+
+        if (original.senderId && advogado.id && String(original.senderId) !== String(advogado.id)) {
+            return res.status(403).json({ erro: 'Somente o advogado que enviou a mensagem pode editá-la.' });
+        }
+
+        const criadaEm = original.createdAt instanceof Date ? original.createdAt.getTime() : Number(original.createdAt || 0);
+        if (!criadaEm || Date.now() - criadaEm > CHAT_EDIT_WINDOW_MS) {
+            return res.status(409).json({ erro: 'O prazo de 15 minutos para editar esta mensagem já terminou.' });
+        }
+        if (String(original.texto || '') === texto) {
+            return res.json({ ok: true, message: serializarMensagemChat(original) });
+        }
+
+        const ticket = acessoTicket.ticket;
+        const jid = await destinoWhatsAppTicket(ticket);
+        if (!jid) return res.status(409).json({ erro: 'Não foi possível identificar o WhatsApp deste ticket.' });
+
+        const textoWhatsApp = `${assinaturaNegritoWhatsApp(advogado)}: ${texto}`;
+        const editKey = { remoteJid: jid, id: messageId, fromMe: true };
+        await enviarMensagemBaileys(jid, { text: textoWhatsApp, edit: editKey });
+
+        const agora = new Date();
+        await ticketMessagesColl.updateOne(
+            { _id: original._id },
+            {
+                $set: {
+                    texto,
+                    editedAt: agora,
+                    editedById: advogado.id ? String(advogado.id).slice(0, 120) : null,
+                    editedByName: limitarTextoChat(advogado.assinatura || advogado.nome || '', 180)
+                },
+                $inc: { editCount: 1 }
+            }
+        );
+        const atualizado = await ticketMessagesColl.findOne({ _id: original._id });
+        const serializada = serializarMensagemChat(atualizado || { ...original, texto, editedAt: agora, editCount: Number(original.editCount || 0) + 1 });
+        io.emit('ticket_chat_message_edited', { ticketNumber, message: serializada });
+        return res.json({ ok: true, message: serializada });
+    } catch (err) {
+        console.error('[Chat] Erro ao editar mensagem:', err);
+        return res.status(Number(err?.statusCode || 500)).json({ erro: err?.message || 'Não foi possível editar a mensagem.' });
     }
 });
 

@@ -457,6 +457,16 @@
         .excel-filter-action{min-height:34px;border:1px solid #dce2e8;border-radius:8px;background:#f8f9fb;color:#46505e;font-size:.70rem;font-weight:700;}
         .excel-filter-action:hover,.excel-filter-action.selected{background:#edf1f5;border-color:#bcc7d2;color:#202733;}
         .excel-filter-input{min-height:38px;font-size:.78rem!important;}
+        .excel-filter-section-label{margin:9px 0 5px;color:#7a8490;font-size:.62rem;font-weight:800;letter-spacing:.045em;text-transform:uppercase;}
+        .excel-filter-values-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:5px 0;}
+        .excel-filter-values-toolbar button{padding:2px 5px;color:#5d6875;background:transparent;border:0;font-size:.65rem;font-weight:700;}
+        .excel-filter-values{max-height:190px;overflow:auto;border:1px solid #e2e7ec;border-radius:8px;background:#fafbfc;}
+        .excel-filter-value{display:flex;align-items:center;gap:7px;min-height:31px;padding:5px 8px;margin:0;border-bottom:1px solid #edf0f3;color:#3e4753;font-size:.72rem;cursor:pointer;}
+        .excel-filter-value:last-child{border-bottom:0;}
+        .excel-filter-value:hover{background:#f0f3f6;}
+        .excel-filter-value input{width:14px;height:14px;margin:0;accent-color:#292d38;}
+        .excel-filter-value span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .excel-filter-values-empty{padding:12px;color:#8a949f;font-size:.7rem;text-align:center;}
         .excel-filter-footer{display:flex;justify-content:flex-end;gap:6px;margin-top:9px;}
         .excel-filter-footer button{min-height:32px;padding:5px 9px;border-radius:7px;font-size:.69rem;font-weight:700;}
         html[data-theme="dark"] .excel-filter-btn:hover,html[data-theme="dark"] .excel-filter-btn.active{background:#343c46;color:#f2f4f7;}
@@ -464,6 +474,12 @@
         html[data-theme="dark"] .excel-filter-action{background:#272e37;border-color:#3e4752;color:#cbd2d9;}
         html[data-theme="dark"] .excel-filter-action:hover,html[data-theme="dark"] .excel-filter-action.selected{background:#343d48;border-color:#596675;color:#fff;}
         html[data-theme="dark"] .excel-filter-input{background:#171c22!important;border-color:#3b4550!important;color:#edf2f6!important;}
+        html[data-theme="dark"] .excel-filter-section-label{color:#9aa6af;}
+        html[data-theme="dark"] .excel-filter-values-toolbar button{color:#aeb9c1;}
+        html[data-theme="dark"] .excel-filter-values{background:#171c22;border-color:#3b4550;}
+        html[data-theme="dark"] .excel-filter-value{color:#dbe2e7;border-bottom-color:#2c343d;}
+        html[data-theme="dark"] .excel-filter-value:hover{background:#273039;}
+        html[data-theme="dark"] .excel-filter-value input{accent-color:#c5a059;}
         .knowledge-strict-badge{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:999px;background:#eef8f2;color:#2b7655;border:1px solid #cfe6d8;font-size:.72rem;font-weight:800;}
         .knowledge-item{display:flex!important;align-items:flex-start;gap:10px;}
         .knowledge-item-copy{min-width:0;flex:1;}
@@ -2855,6 +2871,15 @@
         .chat-message-row.out .chat-reply-action { left:-38px; }
         .chat-message-row:hover .chat-reply-action, .chat-reply-action:focus-visible { opacity:1; transform:scale(1); }
         .chat-reply-action:hover { color:#00a884; background:#fff; }
+        .chat-edit-action {
+            position:absolute; top:4px; left:-74px; width:30px; height:30px; z-index:4;
+            display:inline-flex; align-items:center; justify-content:center; color:#687780; background:rgba(255,255,255,.92);
+            border:1px solid rgba(120,135,145,.20); border-radius:50%; box-shadow:0 2px 8px rgba(20,27,38,.08); opacity:0; transform:scale(.92);
+            transition:opacity .12s ease, transform .12s ease, background .12s ease;
+        }
+        .chat-message-row:hover .chat-edit-action,.chat-edit-action:focus-visible{opacity:1;transform:scale(1);}
+        .chat-edit-action:hover{color:#00a884;background:#fff;}
+        .chat-edited-mark{margin-left:4px;color:inherit;font-size:.63rem;opacity:.78;}
         .chat-quoted {
             margin:0 0 6px; padding:7px 9px; min-width:150px; max-width:100%; overflow:hidden;
             color:#59656d; background:rgba(255,255,255,.60); border-left:3px solid #00a884; border-radius:7px;
@@ -2887,14 +2912,16 @@
         .chat-recording-cancel { color:#bd3f49; background:transparent; border:0; font-size:.74rem; font-weight:750; }
         .chat-recording-send { width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center; color:#fff; background:#00a884; border:0; border-radius:50%; }
         @media (hover:none) {
-            .chat-reply-action { opacity:.72; transform:scale(.94); }
+            .chat-reply-action,.chat-edit-action { opacity:.72; transform:scale(.94); }
             .chat-message-row.in .chat-reply-action { right:-32px; }
             .chat-message-row.out .chat-reply-action { left:-32px; }
+            .chat-message-row.out .chat-edit-action { left:-64px; }
         }
         @media (max-width:767.98px) {
-            .chat-reply-action { width:27px; height:27px; font-size:.82rem; }
+            .chat-reply-action,.chat-edit-action { width:27px; height:27px; font-size:.82rem; }
             .chat-message-row.in .chat-reply-action { right:-28px; }
             .chat-message-row.out .chat-reply-action { left:-28px; }
+            .chat-message-row.out .chat-edit-action { left:-57px; }
             .chat-recording-label { display:none; }
         }
     </style>
@@ -3250,6 +3277,8 @@
         /* Responder mensagem / áudio */
         html[data-theme="dark"] #ticket-chat-dialog .chat-reply-action { color:#b7c2c8!important; background:#26343b!important; border-color:#405058!important; }
         html[data-theme="dark"] #ticket-chat-dialog .chat-reply-action:hover { color:#73e0c6!important; background:#303f46!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-edit-action { color:#b7c2c8!important; background:#26343b!important; border-color:#405058!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-edit-action:hover { color:#73e0c6!important; background:#303f46!important; }
         html[data-theme="dark"] #ticket-chat-dialog .chat-quoted,
         html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.in .chat-quoted,
         html[data-theme="dark"] #ticket-chat-dialog .chat-reply-compose {
@@ -4347,6 +4376,11 @@
                     <div class="chat-reply-compose-copy"><div class="chat-reply-compose-name" id="ticket-chat-reply-name">Respondendo</div><div class="chat-reply-compose-text" id="ticket-chat-reply-text"></div></div>
                     <button type="button" class="chat-reply-compose-close" onclick="cancelarRespostaChat()" title="Cancelar resposta"><i class="bi bi-x-lg"></i></button>
                 </div>
+                <div id="ticket-chat-edit-preview" class="chat-reply-compose hidden">
+                    <i class="bi bi-pencil-square"></i>
+                    <div class="chat-reply-compose-copy"><div class="chat-reply-compose-name">Editando mensagem</div><div class="chat-reply-compose-text" id="ticket-chat-edit-text"></div></div>
+                    <button type="button" class="chat-reply-compose-close" onclick="cancelarEdicaoChat()" title="Cancelar edição"><i class="bi bi-x-lg"></i></button>
+                </div>
                 <div class="chat-compose-tools">
                     <button type="button" class="chat-emoji-btn" id="ticket-chat-emoji" onclick="toggleEmojiPickerChat(event)" title="Emojis" aria-label="Inserir emoji"><i class="bi bi-emoji-smile"></i></button>
                     <button type="button" class="chat-attach-btn" id="ticket-chat-attach" onclick="document.getElementById('ticket-chat-file').click()" title="Enviar arquivo (máx. 15 MB)"><i class="bi bi-paperclip"></i></button>
@@ -5225,6 +5259,11 @@
                     window.activeTicketsLoaded=false;
                 }
             }
+        });
+
+        socket.on('ticket_chat_message_edited', ({ ticketNumber, message } = {}) => {
+            if(!ticketNumber||!message)return;
+            if(String(window.activeChatTicketNumber||'')===String(ticketNumber)) substituirMensagemChatEditada(message);
         });
 
         socket.on('ticket_triage_updated', (payload = {}) => {
@@ -7207,33 +7246,83 @@
             }
             if(tabela==='users'){
                 const perms=(item.permissions||[]).map(p=>PERMISSION_LABELS?.[p]||p).join(', ');
-                const mapa={nome:[item.nome,item.user,item.oab].filter(Boolean).join(' '),assinatura:item.assinatura||'',celular:item.celular||'',role:item.roleLabel||item.role||'',permissions:item.role==='admin'?'Acesso completo':perms,ativo:item.ativo===false?'Inativo':'Ativo',updatedAt:Number(item.updatedAt||item.createdAt||0),acoes:'Editar'};return mapa[chave]??'';
+                const mapa={nome:item.nome||item.user||'',assinatura:item.assinatura||'',celular:item.celular||'',role:item.roleLabel||item.role||'',permissions:item.role==='admin'?'Acesso completo':perms,ativo:item.ativo===false?'Inativo':'Ativo',updatedAt:Number(item.updatedAt||item.createdAt||0),acoes:'Editar'};return mapa[chave]??'';
             }
             return item?.[chave]??'';
         }
         function textoVisivelColunaExcel(tabela,item,chave){const v=valorColunaExcel(tabela,item,chave);if(['lastActivity','createdAt','updatedAt','lastSeenAt'].includes(chave)&&Number(v))return new Date(Number(v)).toLocaleString('pt-BR');return String(v??'');}
+        function dadosFonteTabelaExcel(tabela){
+            if(tabela==='tickets')return Array.isArray(window.activeTicketsData)?window.activeTicketsData:[];
+            if(tabela==='crm')return Array.isArray(window.crmLeadsData)?window.crmLeadsData:[];
+            if(tabela==='clients')return [...(Array.isArray(window.clientsData)?window.clientsData:[]),...(Array.isArray(window.unregisteredClientsData)?window.unregisteredClientsData:[])];
+            if(tabela==='users')return Array.isArray(window.panelUsersData)?window.panelUsersData:[];
+            return [];
+        }
+        function configFiltroExcel(filtro){
+            if(!filtro)return {text:'',values:[]};
+            if(typeof filtro==='string')return {text:filtro,values:[]};
+            return {text:String(filtro.text||''),values:Array.isArray(filtro.values)?filtro.values.map(v=>String(v)):[]};
+        }
+        function filtroExcelAtivo(filtro){const c=configFiltroExcel(filtro);return !!c.text.trim()||c.values.length>0;}
+        function valoresDisponiveisFiltroExcel(tabela,chave){
+            const mapa=new Map();
+            dadosFonteTabelaExcel(tabela).forEach(item=>{
+                const visivel=textoVisivelColunaExcel(tabela,item,chave).trim()||'—';
+                const norm=textoFiltroExcel(visivel);
+                if(!mapa.has(norm))mapa.set(norm,visivel);
+            });
+            return [...mapa.values()].sort((a,b)=>String(a).localeCompare(String(b),'pt-BR',{numeric:true,sensitivity:'base'}));
+        }
         function aplicarEstadoExcel(tabela,itens=[]){
             const estado=window.excelTableState?.[tabela]||{filters:{}};let saida=[...itens];
             const filtros=estado.filters||{};
-            Object.entries(filtros).forEach(([chave,termo])=>{const busca=textoFiltroExcel(termo);if(!busca)return;saida=saida.filter(item=>textoFiltroExcel(textoVisivelColunaExcel(tabela,item,chave)).includes(busca));});
+            Object.entries(filtros).forEach(([chave,filtro])=>{
+                const cfg=configFiltroExcel(filtro);const busca=textoFiltroExcel(cfg.text);
+                const valores=new Set(cfg.values.map(textoFiltroExcel));
+                if(!busca&&!valores.size)return;
+                saida=saida.filter(item=>{
+                    const visivel=textoVisivelColunaExcel(tabela,item,chave);const normal=textoFiltroExcel(visivel.trim()||'—');
+                    if(busca&&!normal.includes(busca))return false;
+                    if(valores.size&&!valores.has(normal))return false;
+                    return true;
+                });
+            });
             const chave=estado.sortKey;const dir=estado.sortDir==='asc'?1:-1;
             if(chave)saida.sort((a,b)=>{const va=valorColunaExcel(tabela,a,chave),vb=valorColunaExcel(tabela,b,chave);if(typeof va==='number'&&typeof vb==='number')return (va-vb)*dir;return String(va??'').localeCompare(String(vb??''),'pt-BR',{numeric:true,sensitivity:'base'})*dir;});
             return saida;
         }
-        function atualizarIndicadoresFiltrosExcel(){document.querySelectorAll('.excel-filter-btn[data-excel-table]').forEach(btn=>{const t=btn.dataset.excelTable,k=btn.dataset.excelKey,s=window.excelTableState?.[t]||{};const ativo=!!s.filters?.[k]||s.sortKey===k;btn.classList.toggle('active',ativo);btn.setAttribute('aria-label',`Filtrar ou ordenar ${btn.dataset.excelLabel||k}${ativo?' (ativo)':''}`);});}
+        function atualizarIndicadoresFiltrosExcel(){document.querySelectorAll('.excel-filter-btn[data-excel-table]').forEach(btn=>{const t=btn.dataset.excelTable,k=btn.dataset.excelKey,s=window.excelTableState?.[t]||{};const ativo=filtroExcelAtivo(s.filters?.[k])||s.sortKey===k;btn.classList.toggle('active',ativo);btn.setAttribute('aria-label',`Filtrar ou ordenar ${btn.dataset.excelLabel||k}${ativo?' (ativo)':''}`);});}
         function reaplicarTabelaExcel(tabela,resetPage=true){if(tabela==='tickets')filtrarTicketsAtivos(resetPage);else if(tabela==='crm')filtrarCRM(resetPage);else if(tabela==='clients')filtrarClientes();else if(tabela==='users')filtrarUsuarios();atualizarIndicadoresFiltrosExcel();}
         function fecharFiltroExcel(){document.getElementById('excel-filter-popover')?.remove();}
         function abrirFiltroExcel(btn){
             fecharFiltroExcel();const tabela=btn.dataset.excelTable,chave=btn.dataset.excelKey,label=btn.dataset.excelLabel||chave,estado=window.excelTableState[tabela]||(window.excelTableState[tabela]={filters:{}});
+            const atual=configFiltroExcel(estado.filters?.[chave]);const selecionados=new Set(atual.values.map(String));const disponiveis=valoresDisponiveisFiltroExcel(tabela,chave);
             const pop=document.createElement('div');pop.id='excel-filter-popover';pop.className='excel-filter-popover';
             const titulo=document.createElement('div');titulo.className='excel-filter-title';titulo.textContent=label;
             const actions=document.createElement('div');actions.className='excel-filter-actions';
             const asc=document.createElement('button');asc.type='button';asc.className='excel-filter-action'+(estado.sortKey===chave&&estado.sortDir==='asc'?' selected':'');asc.innerHTML='<i class="bi bi-sort-alpha-down me-1"></i> Crescente';
             const desc=document.createElement('button');desc.type='button';desc.className='excel-filter-action'+(estado.sortKey===chave&&estado.sortDir==='desc'?' selected':'');desc.innerHTML='<i class="bi bi-sort-alpha-up me-1"></i> Decrescente';
             asc.onclick=()=>{estado.sortKey=chave;estado.sortDir='asc';reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();};desc.onclick=()=>{estado.sortKey=chave;estado.sortDir='desc';reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();};actions.append(asc,desc);
-            const input=document.createElement('input');input.className='form-control excel-filter-input';input.placeholder='Filtrar nesta coluna...';input.value=estado.filters?.[chave]||'';input.onkeydown=e=>{if(e.key==='Enter'){estado.filters=estado.filters||{};estado.filters[chave]=input.value.trim();reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();}if(e.key==='Escape')fecharFiltroExcel();};
-            const footer=document.createElement('div');footer.className='excel-filter-footer';const limpar=document.createElement('button');limpar.type='button';limpar.className='btn btn-outline-secondary';limpar.textContent='Limpar';limpar.onclick=()=>{estado.filters=estado.filters||{};delete estado.filters[chave];if(estado.sortKey===chave){const defaults={tickets:['lastActivity','desc'],crm:['updatedAt','desc'],clients:['lastSeenAt','desc'],users:['updatedAt','desc']}[tabela]||[null,'desc'];estado.sortKey=defaults[0];estado.sortDir=defaults[1];}reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();};const aplicar=document.createElement('button');aplicar.type='button';aplicar.className='btn btn-dark';aplicar.textContent='Aplicar';aplicar.onclick=()=>{estado.filters=estado.filters||{};if(input.value.trim())estado.filters[chave]=input.value.trim();else delete estado.filters[chave];reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();};footer.append(limpar,aplicar);
-            pop.append(titulo,actions,input,footer);document.body.appendChild(pop);const r=btn.getBoundingClientRect(),w=260;let left=Math.min(window.innerWidth-w-10,Math.max(10,r.right-w));let top=Math.min(window.innerHeight-pop.offsetHeight-10,r.bottom+6);pop.style.left=`${left}px`;pop.style.top=`${Math.max(10,top)}px`;setTimeout(()=>input.focus({preventScroll:true}),0);
+            const labelTexto=document.createElement('div');labelTexto.className='excel-filter-section-label';labelTexto.textContent='Contém texto';
+            const input=document.createElement('input');input.className='form-control excel-filter-input';input.placeholder='Digite para filtrar...';input.value=atual.text||'';
+            const labelValores=document.createElement('div');labelValores.className='excel-filter-section-label';labelValores.textContent='Valores existentes';
+            const buscaValores=document.createElement('input');buscaValores.className='form-control excel-filter-input';buscaValores.placeholder='Buscar valor nesta coluna...';
+            const toolbar=document.createElement('div');toolbar.className='excel-filter-values-toolbar';
+            const contador=document.createElement('span');contador.className='text-muted';contador.style.fontSize='.64rem';
+            const controles=document.createElement('div');const todosBtn=document.createElement('button');todosBtn.type='button';todosBtn.textContent='Todos';const nenhumBtn=document.createElement('button');nenhumBtn.type='button';nenhumBtn.textContent='Nenhum';controles.append(todosBtn,nenhumBtn);toolbar.append(contador,controles);
+            const valoresBox=document.createElement('div');valoresBox.className='excel-filter-values';
+            function renderValores(){
+                valoresBox.replaceChildren();const q=textoFiltroExcel(buscaValores.value);const lista=disponiveis.filter(v=>!q||textoFiltroExcel(v).includes(q));contador.textContent=`${selecionados.size} selecionado${selecionados.size===1?'':'s'} · ${disponiveis.length} valor${disponiveis.length===1?'':'es'}`;
+                if(!lista.length){const e=document.createElement('div');e.className='excel-filter-values-empty';e.textContent='Nenhum valor encontrado.';valoresBox.appendChild(e);return;}
+                lista.slice(0,250).forEach(valor=>{const lab=document.createElement('label');lab.className='excel-filter-value';const cb=document.createElement('input');cb.type='checkbox';cb.checked=selecionados.has(valor);cb.onchange=()=>{if(cb.checked)selecionados.add(valor);else selecionados.delete(valor);contador.textContent=`${selecionados.size} selecionado${selecionados.size===1?'':'s'} · ${disponiveis.length} valor${disponiveis.length===1?'':'es'}`;};const span=document.createElement('span');span.textContent=valor;lab.append(cb,span);valoresBox.appendChild(lab);});
+                if(lista.length>250){const more=document.createElement('div');more.className='excel-filter-values-empty';more.textContent=`Mostrando 250 de ${lista.length}. Refine a busca acima.`;valoresBox.appendChild(more);}
+            }
+            buscaValores.oninput=renderValores;renderValores();
+            todosBtn.onclick=()=>{const q=textoFiltroExcel(buscaValores.value);disponiveis.filter(v=>!q||textoFiltroExcel(v).includes(q)).forEach(v=>selecionados.add(v));renderValores();};
+            nenhumBtn.onclick=()=>{const q=textoFiltroExcel(buscaValores.value);if(q)disponiveis.filter(v=>textoFiltroExcel(v).includes(q)).forEach(v=>selecionados.delete(v));else selecionados.clear();renderValores();};
+            const footer=document.createElement('div');footer.className='excel-filter-footer';const limpar=document.createElement('button');limpar.type='button';limpar.className='btn btn-outline-secondary';limpar.textContent='Limpar';limpar.onclick=()=>{estado.filters=estado.filters||{};delete estado.filters[chave];if(estado.sortKey===chave){const defaults={tickets:['lastActivity','desc'],crm:['updatedAt','desc'],clients:['lastSeenAt','desc'],users:['updatedAt','desc']}[tabela]||[null,'desc'];estado.sortKey=defaults[0];estado.sortDir=defaults[1];}reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();};const aplicar=document.createElement('button');aplicar.type='button';aplicar.className='btn btn-dark';aplicar.textContent='Aplicar';aplicar.onclick=()=>{estado.filters=estado.filters||{};const cfg={text:input.value.trim(),values:[...selecionados]};if(cfg.text||cfg.values.length)estado.filters[chave]=cfg;else delete estado.filters[chave];reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();};footer.append(limpar,aplicar);
+            input.onkeydown=e=>{if(e.key==='Escape')fecharFiltroExcel();};buscaValores.onkeydown=e=>{if(e.key==='Escape')fecharFiltroExcel();};
+            pop.append(titulo,actions,labelTexto,input,labelValores,buscaValores,toolbar,valoresBox,footer);document.body.appendChild(pop);const r=btn.getBoundingClientRect(),w=300;pop.style.width=`${w}px`;let left=Math.min(window.innerWidth-w-10,Math.max(10,r.right-w));let top=Math.min(window.innerHeight-pop.offsetHeight-10,r.bottom+6);pop.style.left=`${left}px`;pop.style.top=`${Math.max(10,top)}px`;setTimeout(()=>input.focus({preventScroll:true}),0);
         }
         function inicializarFiltrosExcelTabelas(){document.querySelectorAll('th[data-excel-table][data-excel-key]').forEach(th=>{if(th.querySelector('.excel-filter-btn'))return;const label=th.textContent.trim();const btn=document.createElement('button');btn.type='button';btn.className='excel-filter-btn';btn.dataset.excelTable=th.dataset.excelTable;btn.dataset.excelKey=th.dataset.excelKey;btn.dataset.excelLabel=label;btn.innerHTML='<i class="bi bi-funnel"></i>';btn.onclick=e=>{e.preventDefault();e.stopPropagation();abrirFiltroExcel(btn);};th.appendChild(btn);});atualizarIndicadoresFiltrosExcel();}
         document.addEventListener('click',e=>{if(!e.target.closest('#excel-filter-popover')&&!e.target.closest('.excel-filter-btn'))fecharFiltroExcel();});
@@ -7478,7 +7567,7 @@
             const limite7 = dataMaisDiasCRM(hoje, 7);
             const leads = Array.isArray(window.crmLeadsData) ? window.crmLeadsData : [];
 
-            const filtrados = leads.filter(lead => {
+            let filtrados = leads.filter(lead => {
                 if (status && lead.status !== status) return false;
                 if (responsavel && lead.responsavel !== responsavel) return false;
                 if (area && lead.area !== area) return false;
@@ -8578,11 +8667,15 @@
                 adicionarResumoIAMensagemChat(bubble, msg);
             }
             if (msg.texto) { const t=document.createElement('div'); t.className='chat-text'; t.textContent=msg.texto; bubble.appendChild(t); }
-            const time=document.createElement('div'); time.className='chat-time'; time.textContent=formatarHoraChat(msg.createdAt); bubble.appendChild(time);
+            const time=document.createElement('div'); time.className='chat-time'; time.textContent=formatarHoraChat(msg.createdAt); if(msg.editedAt){const edited=document.createElement('span');edited.className='chat-edited-mark';edited.textContent='· editada';edited.title=`Editada em ${formatarHoraChat(msg.editedAt)}`;time.appendChild(edited);} bubble.appendChild(time);
             if (msg.pending || msg.failed) { const p=document.createElement('div'); p.className='chat-pending-label'; p.textContent=msg.failed ? 'Falha no envio' : 'Enviando…'; bubble.appendChild(p); }
             if (!msg.pending && !msg.failed && (msg.messageId || msg.id)) {
                 const replyBtn=document.createElement('button'); replyBtn.type='button'; replyBtn.className='chat-reply-action'; replyBtn.title='Responder'; replyBtn.setAttribute('aria-label','Responder mensagem'); replyBtn.innerHTML='<i class="bi bi-reply-fill"></i>';
                 replyBtn.onclick=(event)=>{event.stopPropagation();selecionarRespostaChat(msg);}; bubble.appendChild(replyBtn);
+                if(mensagemPodeSerEditadaChat(msg)){
+                    const editBtn=document.createElement('button');editBtn.type='button';editBtn.className='chat-edit-action';editBtn.title='Editar mensagem';editBtn.setAttribute('aria-label','Editar mensagem');editBtn.innerHTML='<i class="bi bi-pencil"></i>';
+                    editBtn.onclick=(event)=>{event.stopPropagation();selecionarEdicaoChat(msg);};bubble.appendChild(editBtn);
+                }
                 row.addEventListener('contextmenu',event=>{ if(event.target.closest('a,button,audio,video')) return; event.preventDefault(); selecionarRespostaChat(msg); });
             }
             row.appendChild(bubble); return row;
@@ -8995,7 +9088,7 @@
             }
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
-        function fecharChatTicket() { const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; window.activeChatTriageDetails=null; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharTriagemChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
+        function fecharChatTicket() { cancelarEdicaoChat(false); const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; window.activeChatTriageDetails=null; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharTriagemChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
         async function carregarMensagensAnterioresChat() {
             if(!window.activeChatTicketNumber||!window.activeChatOldest) return;
             const history=document.getElementById('ticket-chat-history'); const beforeHeight=history?.scrollHeight||0;
@@ -9025,7 +9118,42 @@
             const nomes={image:'📷 Imagem',audio:'🎤 Áudio',video:'🎥 Vídeo',document:'📄 Documento',sticker:'Figurinha'};
             return msg.fileName || nomes[msg.tipo] || 'Mensagem';
         }
+        function mensagemPodeSerEditadaChat(msg = {}) {
+            if (!msg || msg.pending || msg.failed) return false;
+            if (msg.direction !== 'out' || msg.source !== 'painel' || msg.tipo !== 'text' || !msg.messageId) return false;
+            const meuId=String(window.panelSessionUser?.id||'');
+            if(msg.senderId && meuId && String(msg.senderId)!==meuId) return false;
+            const criado = Number(msg.createdAt || 0);
+            if (!criado || Date.now() - criado > 15 * 60 * 1000) return false;
+            return true;
+        }
+        function selecionarEdicaoChat(msg) {
+            if (!mensagemPodeSerEditadaChat(msg) || window.activeChatCanSend !== true) return;
+            cancelarRespostaChat();
+            window.activeChatEdit={messageId:String(msg.messageId),texto:String(msg.texto||''),createdAt:Number(msg.createdAt||0)};
+            const input=document.getElementById('ticket-chat-input');
+            const preview=document.getElementById('ticket-chat-edit-preview');
+            const text=document.getElementById('ticket-chat-edit-text');
+            if(text)text.textContent=String(msg.texto||'');
+            preview?.classList.remove('hidden');
+            if(input){input.value=String(msg.texto||'');input.focus();input.setSelectionRange(input.value.length,input.value.length);}
+        }
+        function cancelarEdicaoChat(limparTexto=true) {
+            const input=document.getElementById('ticket-chat-input');
+            if(limparTexto && input && window.activeChatEdit && input.value===window.activeChatEdit.texto) input.value='';
+            window.activeChatEdit=null;
+            document.getElementById('ticket-chat-edit-preview')?.classList.add('hidden');
+        }
+        function substituirMensagemChatEditada(message) {
+            if(!message)return;const id=String(message.messageId||message.id||'');
+            const idx=(window.activeChatMessages||[]).findIndex(m=>String(m.messageId||m.id||'')===id);
+            if(idx>=0)window.activeChatMessages[idx]={...window.activeChatMessages[idx],...message};
+            const history=document.getElementById('ticket-chat-history');const row=history?.querySelector(`[data-message-id="${CSS.escape(id)}"]`);
+            if(row){const novo=criarElementoMensagemChat(idx>=0?window.activeChatMessages[idx]:message);row.replaceWith(novo);}
+        }
+
         function selecionarRespostaChat(msg) {
+            cancelarEdicaoChat(false);
             if(!msg || msg.pending || msg.failed || !(msg.messageId||msg.id)) return;
             window.activeChatReply={
                 messageId:String(msg.messageId||msg.id), direction:msg.direction||'in', tipo:msg.tipo||'text',
@@ -9132,6 +9260,17 @@
             if(!ticket||!texto)return;
             if(window.activeChatCanSend!==true){
                 if(status){status.classList.add('access-lock');status.dataset.accessLock='1';status.textContent='Inicie ou assuma o atendimento antes de enviar mensagens.';}
+                return;
+            }
+            if(window.activeChatEdit?.messageId){
+                const editId=String(window.activeChatEdit.messageId);const novoTexto=texto;
+                if(novoTexto===String(window.activeChatEdit.texto||'')){cancelarEdicaoChat();return;}
+                if(status){status.classList.remove('access-lock');delete status.dataset.accessLock;status.textContent='Salvando edição…';}
+                try{
+                    const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/messages/${encodeURIComponent(editId)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:novoTexto})});
+                    const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível editar a mensagem.');
+                    substituirMensagemChatEditada(data.message);input.value='';cancelarEdicaoChat(false);if(status)status.textContent='';
+                }catch(err){if(status)status.textContent=err.message||'Não foi possível editar a mensagem.';}
                 return;
             }
 
