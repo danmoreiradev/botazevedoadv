@@ -3377,23 +3377,35 @@ function pontuarItemKnowledge(texto, item) {
     const mensagem = normalizarTexto(texto);
     const pergunta = normalizarTexto(item?.pergunta || '');
     const resposta = normalizarTexto(item?.resposta || '');
+    const palavrasChave = (Array.isArray(item?.palavrasChave) ? item.palavrasChave : [])
+        .map(normalizarTexto)
+        .filter(Boolean);
+    const prioridade = Math.max(1, Math.min(5, Number(item?.prioridade || 3)));
 
-    if (!mensagem || !pergunta) return 0;
-    if (mensagem === pergunta) return 100;
-    if (mensagem.includes(pergunta) || pergunta.includes(mensagem)) return 40;
-
-    const tokensMensagem = new Set(tokensRelevantes(mensagem));
-    if (!tokensMensagem.size) return 0;
-
-    const tokensPergunta = new Set(tokensRelevantes(pergunta));
-    const tokensResposta = new Set(tokensRelevantes(resposta));
+    if (!mensagem || !pergunta || item?.ativo === false) return 0;
+    if (mensagem === pergunta) return 120 + prioridade;
+    if (mensagem.includes(pergunta) || pergunta.includes(mensagem)) return 55 + prioridade;
 
     let score = 0;
+    for (const chave of palavrasChave) {
+        if (mensagem === chave) score += 30;
+        else if (mensagem.includes(chave)) score += 16;
+    }
+
+    const tokensMensagem = new Set(tokensRelevantes(mensagem));
+    if (!tokensMensagem.size) return score;
+    const tokensPergunta = new Set(tokensRelevantes(pergunta));
+    const tokensResposta = new Set(tokensRelevantes(resposta));
+    const tokensChave = new Set(palavrasChave.flatMap(tokensRelevantes));
+
     for (const token of tokensMensagem) {
-        if (tokensPergunta.has(token)) score += 4;
+        if (tokensChave.has(token)) score += 8;
+        else if (tokensPergunta.has(token)) score += 5;
         else if (tokensResposta.has(token)) score += 1;
     }
 
+    // A prioridade desempata itens igualmente aderentes; sozinha não torna um item candidato.
+    if (score > 0) score += prioridade * 0.35;
     return score;
 }
 
@@ -3407,10 +3419,10 @@ async function carregarKnowledgeBase() {
 
     const items = await knowledgeColl
         .find(
-            { pergunta: { $type: 'string' }, resposta: { $type: 'string' } },
-            { projection: { pergunta: 1, resposta: 1, updatedAt: 1 } }
+            { pergunta: { $type: 'string' }, resposta: { $type: 'string' }, ativo: { $ne: false } },
+            { projection: { pergunta: 1, resposta: 1, palavrasChave: 1, prioridade: 1, ativo: 1, updatedAt: 1 } }
         )
-        .sort({ updatedAt: -1 })
+        .sort({ prioridade: -1, updatedAt: -1 })
         .limit(KNOWLEDGE_MAX_ITEMS)
         .toArray();
 
@@ -3424,20 +3436,11 @@ async function obterCandidatosKnowledge(texto) {
         .map(item => ({ ...item, score: pontuarItemKnowledge(texto, item) }))
         .sort((a, b) => b.score - a.score);
 
-    const candidatosFortes = ranqueados
+    // Modo estrito: só enviamos ao roteador itens com aderência real à mensagem.
+    // Isso impede o modelo de escolher uma resposta recente, porém não relacionada.
+    return ranqueados
         .filter(item => item.score >= 4)
         .slice(0, KNOWLEDGE_MAX_CANDIDATES);
-
-    if (candidatosFortes.length) return candidatosFortes;
-
-    // Se a mensagem é claramente uma pergunta, permitimos uma pequena janela semântica
-    // com os itens mais recentes da base. O Gemini apenas seleciona um item existente;
-    // ele não recebe autorização para criar uma resposta fora da base.
-    if (possuiSinalDePergunta(texto)) {
-        return ranqueados.slice(0, KNOWLEDGE_SEMANTIC_FALLBACK_ITEMS);
-    }
-
-    return [];
 }
 
 function possuiSinalDeEncerramento(texto = '') {
@@ -3601,7 +3604,10 @@ async function analisarMensagemComIA(texto, ticket) {
 
     const baseContexto = candidatos.length
         ? candidatos.map((item, index) => (
-            `[${index + 1}] PERGUNTA: ${item.pergunta}\nRESPOSTA: ${item.resposta}`
+            `[${index + 1}] TÍTULO/PERGUNTA: ${item.pergunta}\n` +
+            `PALAVRAS-CHAVE: ${(item.palavrasChave || []).join(', ') || '(não cadastradas)'}\n` +
+            `PRIORIDADE: ${Number(item.prioridade || 3)}\n` +
+            `RESPOSTA APROVADA: ${item.resposta}`
         )).join('\n\n')
         : '(nenhum item relevante localizado na base)';
 
@@ -3623,9 +3629,10 @@ REGRAS OBRIGATÓRIAS:
 2. Se o estado for aguardando_cadastro, respostas que se limitem a recusar o cadastro opcional, como "não", "não quero" ou "agora não", NÃO encerram o atendimento. Porém, se o cliente disser claramente que não quer continuar o atendimento, aí use ENCERRAR.
 3. Use RESPONDER_BASE somente quando a mensagem for uma pergunta ou pedido de informação e UM dos itens da base responder diretamente ao que foi perguntado.
 4. Ao usar RESPONDER_BASE, informe em indiceBase o número do item escolhido, começando em 1. Não escreva uma resposta nova.
-5. Nunca invente, complete, combine itens ou dê orientação jurídica além da base.
-6. Se a mensagem apenas narrar o caso, enviar dados, nome, CPF, documento, opção de menu ou não puder ser respondida com segurança pela base, use NENHUMA e indiceBase null.
-7. Em caso de dúvida, prefira NENHUMA.`;
+5. MODO ESTRITO: nunca use seu conhecimento geral para responder. Nunca invente, complete, interprete juridicamente, combine itens ou acrescente qualquer informação além da RESPOSTA APROVADA escolhida.
+6. Escolha um item somente se ele responder diretamente à pergunta atual. Sem correspondência clara, use NENHUMA.
+7. Se a mensagem apenas narrar o caso, enviar dados, nome, CPF, documento, opção de menu ou não puder ser respondida com segurança pela base, use NENHUMA e indiceBase null.
+8. Em caso de dúvida, prefira NENHUMA.`;
 
     try {
         const result = await geminiModel.generateContent(prompt);
@@ -6419,7 +6426,7 @@ app.get('/api/users', async (req, res) => {
     try {
         const usuarios = await userLoginColl.find({}, {
             projection: { pass: 0, passwordHash: 0, passwordSalt: 0 }
-        }).sort({ ativo: -1, role: 1, nome: 1, user: 1 }).toArray();
+        }).sort({ updatedAt: -1, createdAt: -1, nome: 1, user: 1 }).toArray();
         res.json({
             usuarios: usuarios.map(item => ({ ...sessaoPublicaDaConta(item), ativo: item.ativo !== false, createdAt: item.createdAt || null, updatedAt: item.updatedAt || null })),
             permissionsAvailable: PERMISSOES_PAINEL,
@@ -9340,7 +9347,7 @@ app.get('/api/clients', async (req, res) => {
         const clientes = await clientsColl.find(
             { ativo: { $ne: false } },
             { projection: projecaoClientePainel() }
-        ).sort({ nomeCompleto: 1, nome: 1, createdAt: -1 }).toArray();
+        ).sort({ updatedAt: -1, lastSeenAt: -1, createdAt: -1 }).toArray();
 
         const clientesComWhatsApp = await Promise.all(
             clientes.map(async cliente => ({
@@ -9525,37 +9532,77 @@ app.delete('/api/clients/:id', async (req, res) => {
 });
 
 app.get('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    // Buscamos e ordenamos pelos mais recentes primeiro
-    const data = await knowledgeColl.find({}).sort({ updatedAt: -1 }).toArray();
-    res.json(data);
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    try {
+        const data = await knowledgeColl.find({}).sort({ updatedAt: -1, createdAt: -1 }).toArray();
+        res.json(data);
+    } catch (err) {
+        console.error('[IA] Erro ao listar base:', err);
+        res.status(500).json({ erro: 'Não foi possível carregar a base de conhecimento.' });
+    }
 });
 
+function normalizarPalavrasChaveKnowledge(valor) {
+    const lista = Array.isArray(valor) ? valor : String(valor || '').split(',');
+    return [...new Set(lista.map(item => String(item || '').trim()).filter(Boolean))].slice(0, 30);
+}
+function documentoKnowledgeDoBody(body = {}, existente = null) {
+    return {
+        pergunta: String(body.pergunta ?? existente?.pergunta ?? '').trim().slice(0, 500),
+        resposta: String(body.resposta ?? existente?.resposta ?? '').trim().slice(0, 5000),
+        palavrasChave: normalizarPalavrasChaveKnowledge(body.palavrasChave ?? existente?.palavrasChave ?? []),
+        prioridade: Math.max(1, Math.min(5, Number(body.prioridade ?? existente?.prioridade ?? 3) || 3)),
+        ativo: body.ativo !== undefined ? body.ativo !== false : existente?.ativo !== false
+    };
+}
+
 app.post('/api/knowledgeColl', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    const { pergunta, resposta } = req.body;
-    await knowledgeColl.updateOne({ pergunta }, { $set: { pergunta, resposta, updatedAt: Date.now() } }, { upsert: true });
-    invalidarCacheKnowledge();
-    res.sendStatus(200);
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    try {
+        const doc = documentoKnowledgeDoBody(req.body || {});
+        if (!doc.pergunta || !doc.resposta) return res.status(400).json({ erro: 'Informe título/pergunta e resposta.' });
+        const duplicado = await knowledgeColl.findOne({ pergunta: { $regex: `^${doc.pergunta.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
+        if (duplicado) return res.status(409).json({ erro: 'Já existe um conhecimento com este título/pergunta. Edite o item existente.' });
+        const agora = Date.now();
+        const result = await knowledgeColl.insertOne({ ...doc, createdAt: agora, updatedAt: agora });
+        invalidarCacheKnowledge();
+        res.status(201).json({ ok: true, id: String(result.insertedId) });
+    } catch (err) {
+        console.error('[IA] Erro ao criar conhecimento:', err);
+        res.status(500).json({ erro: 'Não foi possível salvar o conhecimento.' });
+    }
+});
+
+app.put('/api/knowledgeColl/:id', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    try {
+        const id = new ObjectId(String(req.params.id || ''));
+        const existente = await knowledgeColl.findOne({ _id: id });
+        if (!existente) return res.status(404).json({ erro: 'Conhecimento não encontrado.' });
+        const doc = documentoKnowledgeDoBody(req.body || {}, existente);
+        if (!doc.pergunta || !doc.resposta) return res.status(400).json({ erro: 'Informe título/pergunta e resposta.' });
+        const regexPergunta = new RegExp(`^${doc.pergunta.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+        const duplicado = await knowledgeColl.findOne({ _id: { $ne: id }, pergunta: regexPergunta });
+        if (duplicado) return res.status(409).json({ erro: 'Já existe outro conhecimento com este título/pergunta.' });
+        await knowledgeColl.updateOne({ _id: id }, { $set: { ...doc, updatedAt: Date.now() } });
+        invalidarCacheKnowledge();
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[IA] Erro ao editar conhecimento:', err);
+        res.status(400).json({ erro: 'Não foi possível editar o conhecimento.' });
+    }
 });
 
 app.delete('/api/knowledgeColl/:id', async (req, res) => {
-    if (!req.session.loggedIn) return res.status(401).send("Acesso negado");
-    
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
     try {
-        const { id } = req.params;
-        // O segredo está em converter a string recebida em ObjectId do MongoDB
-        const result = await knowledgeColl.deleteOne({ _id: new ObjectId(id) });
-        
-        if (result.deletedCount === 1) {
-            invalidarCacheKnowledge();
-            res.sendStatus(200);
-        } else {
-            res.status(404).send("Item não encontrado");
-        }
+        const result = await knowledgeColl.deleteOne({ _id: new ObjectId(String(req.params.id || '')) });
+        if (!result.deletedCount) return res.status(404).json({ erro: 'Conhecimento não encontrado.' });
+        invalidarCacheKnowledge();
+        res.json({ ok: true });
     } catch (err) {
-        console.error("Erro ao deletar:", err);
-        res.status(500).send("Erro interno");
+        console.error('[IA] Erro ao excluir conhecimento:', err);
+        res.status(400).json({ erro: 'Não foi possível excluir o conhecimento.' });
     }
 });
 

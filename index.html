@@ -446,6 +446,37 @@
             .main-content { padding: 25px 15px; }
             .mt-auto { margin-top: 0 !important; background: rgba(0,0,0,0.2) !important; }
         }
+    
+        /* Filtros por coluna estilo planilha */
+        th[data-excel-table]{position:relative;padding-right:34px!important;}
+        .excel-filter-btn{position:absolute;right:7px;top:50%;transform:translateY(-50%);width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:6px;background:transparent;color:#8a939f;font-size:.72rem;transition:background .15s ease,color .15s ease;}
+        .excel-filter-btn:hover,.excel-filter-btn.active{background:#e9edf2;color:#292d38;}
+        .excel-filter-popover{position:fixed;z-index:11000;width:260px;padding:12px;background:#fff;border:1px solid #dce2e8;border-radius:12px;box-shadow:0 18px 46px rgba(17,24,39,.18);color:#2d3440;}
+        .excel-filter-title{font-size:.76rem;font-weight:800;margin-bottom:8px;}
+        .excel-filter-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:9px;}
+        .excel-filter-action{min-height:34px;border:1px solid #dce2e8;border-radius:8px;background:#f8f9fb;color:#46505e;font-size:.70rem;font-weight:700;}
+        .excel-filter-action:hover,.excel-filter-action.selected{background:#edf1f5;border-color:#bcc7d2;color:#202733;}
+        .excel-filter-input{min-height:38px;font-size:.78rem!important;}
+        .excel-filter-footer{display:flex;justify-content:flex-end;gap:6px;margin-top:9px;}
+        .excel-filter-footer button{min-height:32px;padding:5px 9px;border-radius:7px;font-size:.69rem;font-weight:700;}
+        html[data-theme="dark"] .excel-filter-btn:hover,html[data-theme="dark"] .excel-filter-btn.active{background:#343c46;color:#f2f4f7;}
+        html[data-theme="dark"] .excel-filter-popover{background:#20262e;border-color:#3a424d;color:#eef2f5;box-shadow:0 18px 46px rgba(0,0,0,.38);}
+        html[data-theme="dark"] .excel-filter-action{background:#272e37;border-color:#3e4752;color:#cbd2d9;}
+        html[data-theme="dark"] .excel-filter-action:hover,html[data-theme="dark"] .excel-filter-action.selected{background:#343d48;border-color:#596675;color:#fff;}
+        html[data-theme="dark"] .excel-filter-input{background:#171c22!important;border-color:#3b4550!important;color:#edf2f6!important;}
+        .knowledge-strict-badge{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:999px;background:#eef8f2;color:#2b7655;border:1px solid #cfe6d8;font-size:.72rem;font-weight:800;}
+        .knowledge-item{display:flex!important;align-items:flex-start;gap:10px;}
+        .knowledge-item-copy{min-width:0;flex:1;}
+        .knowledge-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;}
+        .knowledge-chip{display:inline-flex;align-items:center;padding:3px 7px;border-radius:999px;background:#f1f3f6;color:#66707c;font-size:.62rem;font-weight:700;}
+        .knowledge-actions{display:flex;gap:5px;flex:0 0 auto;}
+        .knowledge-edit-btn,.knowledge-delete-btn{width:34px;height:34px;border-radius:8px;border:1px solid #dde2e7;background:#fff;color:#5c6673;display:inline-flex;align-items:center;justify-content:center;}
+        .knowledge-delete-btn{color:#ad4b43;border-color:#ead4d1;}
+        html[data-theme="dark"] .knowledge-strict-badge{background:#1c3329;color:#8edcb5;border-color:#315945;}
+        html[data-theme="dark"] .knowledge-chip{background:#303740;color:#bdc6ce;}
+        html[data-theme="dark"] .knowledge-edit-btn,html[data-theme="dark"] .knowledge-delete-btn{background:#252c34;border-color:#3c4651;color:#d3d9df;}
+        html[data-theme="dark"] .knowledge-delete-btn{color:#ffaaa2;border-color:#62423f;}
+
     </style>
 
     <style id="professional-redesign">
@@ -3692,34 +3723,28 @@
         </div>
 
         <div id="tab-ia" class="content-section hidden" data-permission="ia">
-            <h4 class="mb-4" style="color: var(--adv-blue); font-weight: 700;">Base de Conhecimento IA</h4>
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+                <div><h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Base de Conhecimento IA</h4><p class="text-muted mb-0">A IA seleciona somente conteúdo aprovado nesta base. Ela não deve complementar a resposta com conhecimento jurídico geral.</p></div>
+                <span class="knowledge-strict-badge"><i class="bi bi-shield-check"></i> Modo estrito</span>
+            </div>
             <div class="row g-4">
-                <div class="col-lg-5">
-                    <div class="card-custom text-start p-4">
-                        <h5 class="mb-4" style="color: var(--adv-blue)">Treinar Robô</h5>
-                        <div class="mb-3">
-                            <label class="form-label small fw-bold">Palavra ou Frase Gatilho</label>
-                            <input type="text" id="pergunta_ia" class="form-control" placeholder="Ex: Valor da consulta">
-                        </div>
-                        <div class="mb-4">
-                            <label class="form-label small fw-bold">Resposta Automática</label>
-                            <textarea id="resposta_ia" class="form-control" rows="6" placeholder="Escreva a resposta completa aqui..."></textarea>
-                        </div>
-                        <button class="btn w-100 text-white fw-bold py-3" style="background: var(--adv-blue)" onclick="salvarConhecimento()">ATUALIZAR CÉREBRO IA</button>
+                <div class="col-xl-5">
+                    <div class="card-custom text-start p-4 knowledge-editor-card">
+                        <div class="d-flex justify-content-between align-items-center mb-3"><h5 class="mb-0" style="color: var(--adv-blue)" id="knowledge-form-title">Novo conhecimento</h5><button type="button" class="btn btn-sm btn-outline-secondary hidden" id="knowledge-cancel-edit" onclick="cancelarEdicaoConhecimento()">Cancelar edição</button></div>
+                        <input type="hidden" id="knowledge_id">
+                        <div class="mb-3"><label class="form-label small fw-bold">Título / pergunta principal</label><input type="text" id="pergunta_ia" class="form-control" placeholder="Ex: Valor da consulta"></div>
+                        <div class="mb-3"><label class="form-label small fw-bold">Palavras-chave</label><input type="text" id="knowledge_keywords" class="form-control" placeholder="Ex: consulta, valor, preço, honorários"><div class="form-text">Separe por vírgulas. Elas aumentam a precisão da busca sem aparecer para o cliente.</div></div>
+                        <div class="row g-3 mb-3"><div class="col-sm-7"><label class="form-label small fw-bold">Prioridade</label><select id="knowledge_priority" class="form-select"><option value="1">1 · Normal</option><option value="2">2 · Relevante</option><option value="3" selected>3 · Importante</option><option value="4">4 · Alta</option><option value="5">5 · Máxima</option></select></div><div class="col-sm-5 d-flex align-items-end"><div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" id="knowledge_active" checked><label class="form-check-label small fw-bold" for="knowledge_active">Ativo</label></div></div></div>
+                        <div class="mb-4"><label class="form-label small fw-bold">Resposta aprovada</label><textarea id="resposta_ia" class="form-control" rows="7" placeholder="Escreva exatamente o conteúdo que a IA poderá enviar..."></textarea><div class="form-text">A IA pode escolher esta resposta, mas não está autorizada a criar fatos ou orientação fora dela.</div></div>
+                        <button class="btn w-100 text-white fw-bold py-3" style="background: var(--adv-blue)" onclick="salvarConhecimento()" id="knowledge-save-btn"><i class="bi bi-check2-circle me-1"></i> SALVAR CONHECIMENTO</button>
                     </div>
                 </div>
 
-                <div class="col-lg-7">
+                <div class="col-xl-7">
                     <div class="card-custom text-start p-4" style="min-height: 480px;">
-                        <h5 class="mb-4" style="color: var(--adv-blue)">Conhecimentos Ativos</h5>
-                        
-                        <div class="search-container">
-                            <span class="search-icon">🔍</span>
-                            <input type="text" id="input_busca" class="form-control search-input" placeholder="Pesquisar conhecimento..." onkeyup="filtrarConhecimento()">
-                        </div>
-
-                        <div id="lista_conhecimento" class="list-group list-group-flush overflow-auto" style="max-height: 400px;">
-                            </div>
+                        <div class="d-flex justify-content-between align-items-center gap-2 mb-3"><h5 class="mb-0" style="color: var(--adv-blue)">Conhecimentos cadastrados</h5><span class="text-muted small" id="knowledge-count">0 itens</span></div>
+                        <div class="search-container"><span class="search-icon">🔍</span><input type="text" id="input_busca" class="form-control search-input" placeholder="Pesquisar título, palavra-chave ou resposta..." onkeyup="filtrarConhecimento()"></div>
+                        <div id="lista_conhecimento" class="list-group list-group-flush overflow-auto" style="max-height: 520px;"></div>
                     </div>
                 </div>
             </div>
@@ -3837,12 +3862,12 @@
                     <div class="tickets-toolbar tickets-toolbar-clean">
                         <div class="tickets-search">
                             <span class="search-icon"><i class="bi bi-search"></i></span>
-                            <input type="text" id="tickets-search-input" class="form-control" placeholder="Buscar ticket, cliente, CPF, WhatsApp ou área..." oninput="filtrarTicketsAtivos()">
+                            <input type="text" id="tickets-search-input" class="form-control" placeholder="Buscar ticket, cliente, CPF, WhatsApp ou área..." oninput="filtrarTicketsAtivos(true)">
                         </div>
-                        <select id="tickets-filter-area" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar área">
+                        <select id="tickets-filter-area" class="form-select" onchange="filtrarTicketsAtivos(true)" aria-label="Filtrar área">
                             <option value="">Todas as áreas</option>
                         </select>
-                        <select id="tickets-filter-unread" class="form-select" onchange="filtrarTicketsAtivos()" aria-label="Filtrar mensagens não lidas">
+                        <select id="tickets-filter-unread" class="form-select" onchange="filtrarTicketsAtivos(true)" aria-label="Filtrar mensagens não lidas">
                             <option value="">Todas as mensagens</option>
                             <option value="unread">Somente não lidas</option>
                             <option value="read">Sem mensagens não lidas</option>
@@ -3864,20 +3889,28 @@
                         <table class="table tickets-table align-middle">
                             <thead>
                                 <tr>
-                                    <th>Ticket</th>
-                                    <th>Cliente</th>
-                                    <th>Área</th>
-                                    <th>Status</th>
-                                    <th>Responsável</th>
-                                    <th>Última atividade</th>
-                                    <th>Aberto há</th>
-                                    <th class="text-end">Ações</th>
+                                    <th data-excel-table="tickets" data-excel-key="ticketNumber">Ticket</th>
+                                    <th data-excel-table="tickets" data-excel-key="clienteNome">Cliente</th>
+                                    <th data-excel-table="tickets" data-excel-key="area">Área</th>
+                                    <th data-excel-table="tickets" data-excel-key="internalStatus">Status</th>
+                                    <th data-excel-table="tickets" data-excel-key="responsavel">Responsável</th>
+                                    <th data-excel-table="tickets" data-excel-key="lastActivity">Última atividade</th>
+                                    <th data-excel-table="tickets" data-excel-key="createdAt">Aberto há</th>
+                                    <th class="text-end" data-excel-table="tickets" data-excel-key="acoes">Ações</th>
                                 </tr>
                             </thead>
                             <tbody id="tickets-table-body">
                                 <tr><td colspan="8" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                    <div class="crm-table-footer" id="tickets-table-footer">
+                        <span id="tickets-page-info">0 tickets</span>
+                        <div class="crm-page-actions">
+                            <button type="button" class="crm-page-btn" id="tickets-page-prev" onclick="mudarPaginaTickets(-1)"><i class="bi bi-chevron-left"></i> Anterior</button>
+                            <span id="tickets-page-label">Página 1</span>
+                            <button type="button" class="crm-page-btn" id="tickets-page-next" onclick="mudarPaginaTickets(1)">Próxima <i class="bi bi-chevron-right"></i></button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3951,15 +3984,15 @@
                         <table class="table crm-table align-middle">
                             <thead>
                                 <tr>
-                                    <th>CRM</th>
-                                    <th>Cliente</th>
-                                    <th>Área</th>
-                                    <th>Status</th>
-                                    <th>Próxima ação</th>
-                                    <th>Responsável</th>
-                                    <th>Receita prevista</th>
-                                    <th>Atualizado</th>
-                                    <th class="text-end">Ações</th>
+                                    <th data-excel-table="crm" data-excel-key="crmNumber">CRM</th>
+                                    <th data-excel-table="crm" data-excel-key="cliente">Cliente</th>
+                                    <th data-excel-table="crm" data-excel-key="area">Área</th>
+                                    <th data-excel-table="crm" data-excel-key="status">Status</th>
+                                    <th data-excel-table="crm" data-excel-key="proximaAcao">Próxima ação</th>
+                                    <th data-excel-table="crm" data-excel-key="responsavel">Responsável</th>
+                                    <th data-excel-table="crm" data-excel-key="receitaTotalPrevista">Receita prevista</th>
+                                    <th data-excel-table="crm" data-excel-key="updatedAt">Atualizado</th>
+                                    <th class="text-end" data-excel-table="crm" data-excel-key="acoes">Ações</th>
                                 </tr>
                             </thead>
                             <tbody id="crm-table-body">
@@ -4017,7 +4050,7 @@
                     <table class="table clients-table align-middle">
                         <thead>
                             <tr>
-                                <th>Status</th><th>Nome</th><th>CPF</th><th>WhatsApp</th><th>Advogado responsável</th><th>Último contato</th><th class="text-end">Ações</th>
+                                <th data-excel-table="clients" data-excel-key="status">Status</th><th data-excel-table="clients" data-excel-key="nome">Nome</th><th data-excel-table="clients" data-excel-key="cpf">CPF</th><th data-excel-table="clients" data-excel-key="whatsapp">WhatsApp</th><th data-excel-table="clients" data-excel-key="responsavel">Advogado responsável</th><th data-excel-table="clients" data-excel-key="lastSeenAt">Último contato</th><th class="text-end" data-excel-table="clients" data-excel-key="acoes">Ações</th>
                             </tr>
                         </thead>
                         <tbody id="clients-table-body"><tr><td colspan="7" class="clients-empty">Carregando clientes e contatos...</td></tr></tbody>
@@ -4092,7 +4125,7 @@
                 <div id="users-status" class="menu-save-status text-muted mb-2"></div>
                 <div class="users-table-wrap">
                     <table class="table users-table align-middle">
-                        <thead><tr><th>Usuário</th><th>Identificação no chat</th><th>Celular</th><th>Perfil</th><th>Permissões</th><th>Status</th><th class="text-end">Ação</th></tr></thead>
+                        <thead><tr><th data-excel-table="users" data-excel-key="nome">Usuário</th><th data-excel-table="users" data-excel-key="assinatura">Identificação no chat</th><th data-excel-table="users" data-excel-key="celular">Celular</th><th data-excel-table="users" data-excel-key="role">Perfil</th><th data-excel-table="users" data-excel-key="permissions">Permissões</th><th data-excel-table="users" data-excel-key="ativo">Status</th><th class="text-end" data-excel-table="users" data-excel-key="acoes">Ação</th></tr></thead>
                         <tbody id="users-table-body"><tr><td colspan="7" class="clients-empty">Carregando usuários...</td></tr></tbody>
                     </table>
                 </div>
@@ -5422,104 +5455,36 @@
             }, 350);
         });
 
+        function limparFormularioConhecimento(){
+            const id=document.getElementById('knowledge_id');if(id)id.value='';
+            const pergunta=document.getElementById('pergunta_ia');if(pergunta)pergunta.value='';
+            const resposta=document.getElementById('resposta_ia');if(resposta)resposta.value='';
+            const kw=document.getElementById('knowledge_keywords');if(kw)kw.value='';
+            const pr=document.getElementById('knowledge_priority');if(pr)pr.value='3';
+            const at=document.getElementById('knowledge_active');if(at)at.checked=true;
+            const title=document.getElementById('knowledge-form-title');if(title)title.textContent='Novo conhecimento';
+            document.getElementById('knowledge-cancel-edit')?.classList.add('hidden');
+            const save=document.getElementById('knowledge-save-btn');if(save)save.innerHTML='<i class="bi bi-check2-circle me-1"></i> SALVAR CONHECIMENTO';
+        }
+        function cancelarEdicaoConhecimento(){limparFormularioConhecimento();document.getElementById('pergunta_ia')?.focus({preventScroll:true});}
+        function editarConhecimento(id){
+            const item=(window.todosConhecimentos||[]).find(x=>String(x?._id?.$oid||x?._id||'')===String(id));if(!item)return;
+            document.getElementById('knowledge_id').value=id;document.getElementById('pergunta_ia').value=item.pergunta||item.titulo||'';document.getElementById('resposta_ia').value=item.resposta||'';document.getElementById('knowledge_keywords').value=Array.isArray(item.palavrasChave)?item.palavrasChave.join(', '):String(item.palavrasChave||'');document.getElementById('knowledge_priority').value=String(item.prioridade||3);document.getElementById('knowledge_active').checked=item.ativo!==false;document.getElementById('knowledge-form-title').textContent='Editar conhecimento';document.getElementById('knowledge-cancel-edit').classList.remove('hidden');document.getElementById('knowledge-save-btn').innerHTML='<i class="bi bi-check2-circle me-1"></i> SALVAR ALTERAÇÕES';document.querySelector('.knowledge-editor-card')?.scrollIntoView({behavior:'smooth',block:'start'});setTimeout(()=>document.getElementById('pergunta_ia')?.focus({preventScroll:true}),260);
+        }
         async function salvarConhecimento() {
-            const pergunta = document.getElementById('pergunta_ia').value;
-            const resposta = document.getElementById('resposta_ia').value;
-            if(!pergunta || !resposta) return alert("Preencha todos os campos.");
-
-            const res = await fetch('/api/knowledgeColl', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ pergunta, resposta })
-            });
-
-            if(res.ok) {
-                document.getElementById('pergunta_ia').value = "";
-                document.getElementById('resposta_ia').value = "";
-                carregarConhecimento();
-            }
+            const id=document.getElementById('knowledge_id').value.trim();const pergunta=document.getElementById('pergunta_ia').value.trim();const resposta=document.getElementById('resposta_ia').value.trim();const palavrasChave=document.getElementById('knowledge_keywords').value.split(',').map(x=>x.trim()).filter(Boolean);const prioridade=Number(document.getElementById('knowledge_priority').value||3);const ativo=document.getElementById('knowledge_active').checked;
+            if(!pergunta||!resposta)return alert('Preencha o título/pergunta e a resposta aprovada.');
+            const btn=document.getElementById('knowledge-save-btn');if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span> Salvando...';}
+            try{const res=await fetch(id?`/api/knowledgeColl/${encodeURIComponent(id)}`:'/api/knowledgeColl',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pergunta,resposta,palavrasChave,prioridade,ativo})});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível salvar o conhecimento.');limparFormularioConhecimento();await carregarConhecimento();}catch(err){alert(err.message||'Não foi possível salvar o conhecimento.');}finally{if(btn){btn.disabled=false;btn.innerHTML=document.getElementById('knowledge_id').value?'<i class="bi bi-check2-circle me-1"></i> SALVAR ALTERAÇÕES':'<i class="bi bi-check2-circle me-1"></i> SALVAR CONHECIMENTO';}}
         }
-
-        // Função para carregar e exibir a lista com botão de lixo
-async function carregarConhecimento() {
-    const res = await fetch('/api/knowledgeColl');
-    const data = await res.json();
-    const container = document.getElementById('lista_conhecimento');
-    
-    // Guardamos os dados globalmente para a busca funcionar sem nova requisição
-    window.todosConhecimentos = data; 
-
-    renderizarLista(data);
-}
-
-// Função auxiliar para desenhar a lista na tela
-// Função auxiliar para desenhar a lista na tela
-function renderizarLista(itens) {
-    const container = document.getElementById('lista_conhecimento');
-    if (!container) return;
-    container.replaceChildren();
-
-    if (!itens || !itens.length) {
-        const vazio = document.createElement('p');
-        vazio.className = 'text-muted p-3';
-        vazio.textContent = 'Nenhum resultado encontrado.';
-        container.appendChild(vazio);
-        return;
-    }
-
-    const fragment = document.createDocumentFragment();
-    itens.forEach(item => {
-        const idString = item?._id?.$oid || item?._id || '';
-        const row = document.createElement('div');
-        row.className = 'list-group-item py-3 border-bottom knowledge-item';
-
-        const copy = document.createElement('div');
-        copy.style.flex = '1';
-        const pergunta = document.createElement('div');
-        pergunta.className = 'fw-bold mb-1';
-        pergunta.style.color = 'var(--adv-blue)';
-        pergunta.textContent = String(item?.pergunta || '');
-        const resposta = document.createElement('div');
-        resposta.className = 'text-muted small';
-        resposta.textContent = String(item?.resposta || '');
-        copy.append(pergunta, resposta);
-
-        const excluir = document.createElement('button');
-        excluir.type = 'button';
-        excluir.className = 'btn-delete';
-        excluir.title = 'Excluir';
-        excluir.setAttribute('aria-label', 'Excluir conhecimento');
-        excluir.textContent = '🗑️';
-        excluir.onclick = () => removerConhecimento(String(idString));
-
-        row.append(copy, excluir);
-        fragment.appendChild(row);
-    });
-    container.appendChild(fragment);
-}
-
-        function filtrarConhecimento() {
-            const termo = document.getElementById('input_busca').value.toLowerCase();
-            const filtrados = window.todosConhecimentos.filter(item => 
-                item.pergunta.toLowerCase().includes(termo) || 
-                item.resposta.toLowerCase().includes(termo)
-            );
-            renderizarLista(filtrados);
+        async function carregarConhecimento(){const res=await fetch('/api/knowledgeColl',{cache:'no-store'});const data=await res.json().catch(()=>[]);if(!res.ok)return;window.todosConhecimentos=Array.isArray(data)?data:[];renderizarLista(window.todosConhecimentos);}
+        function renderizarLista(itens){
+            const container=document.getElementById('lista_conhecimento');if(!container)return;container.replaceChildren();const count=document.getElementById('knowledge-count');if(count)count.textContent=`${itens?.length||0} ite${itens?.length===1?'m':'ns'}`;
+            if(!itens?.length){const vazio=document.createElement('p');vazio.className='text-muted p-3';vazio.textContent='Nenhum conhecimento encontrado.';container.appendChild(vazio);return;}
+            const fragment=document.createDocumentFragment();itens.forEach(item=>{const id=String(item?._id?.$oid||item?._id||'');const row=document.createElement('div');row.className='list-group-item py-3 border-bottom knowledge-item';const copy=document.createElement('div');copy.className='knowledge-item-copy';const pergunta=document.createElement('div');pergunta.className='fw-bold mb-1';pergunta.textContent=String(item?.pergunta||'');const resposta=document.createElement('div');resposta.className='text-muted small';resposta.textContent=String(item?.resposta||'');const meta=document.createElement('div');meta.className='knowledge-meta';const prioridade=document.createElement('span');prioridade.className='knowledge-chip';prioridade.textContent=`Prioridade ${Number(item?.prioridade||3)}`;const status=document.createElement('span');status.className='knowledge-chip';status.textContent=item?.ativo===false?'Inativo':'Ativo';meta.append(prioridade,status);(item?.palavrasChave||[]).slice(0,4).forEach(k=>{const c=document.createElement('span');c.className='knowledge-chip';c.textContent=k;meta.appendChild(c)});copy.append(pergunta,resposta,meta);const actions=document.createElement('div');actions.className='knowledge-actions';const editar=document.createElement('button');editar.type='button';editar.className='knowledge-edit-btn';editar.title='Editar';editar.innerHTML='<i class="bi bi-pencil"></i>';editar.onclick=()=>editarConhecimento(id);const excluir=document.createElement('button');excluir.type='button';excluir.className='knowledge-delete-btn';excluir.title='Excluir';excluir.innerHTML='<i class="bi bi-trash"></i>';excluir.onclick=()=>removerConhecimento(id);actions.append(editar,excluir);row.append(copy,actions);fragment.appendChild(row);});container.appendChild(fragment);
         }
-        async function removerConhecimento(id) {
-            if(!confirm("Tem certeza que deseja remover este conhecimento?")) return;
-
-            try {
-                const res = await fetch(`/api/knowledgeColl/${id}`, { method: 'DELETE' });
-                if(res.ok) {
-                    carregarConhecimento(); // Recarrega a lista
-                } else {
-                    alert("Erro ao remover o item.");
-                }
-            } catch (err) {
-                console.error("Erro:", err);
-            }
-        }
+        function filtrarConhecimento(){const termo=textoFiltroExcel(document.getElementById('input_busca').value);const filtrados=(window.todosConhecimentos||[]).filter(item=>[item.pergunta,item.resposta,...(item.palavrasChave||[])].map(textoFiltroExcel).some(x=>x.includes(termo)));renderizarLista(filtrados);}
+        async function removerConhecimento(id){if(!confirm('Tem certeza que deseja remover este conhecimento?'))return;try{const res=await fetch(`/api/knowledgeColl/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');if(document.getElementById('knowledge_id').value===String(id))limparFormularioConhecimento();await carregarConhecimento();}catch(err){alert(err.message||'Não foi possível excluir o conhecimento.');}}
 
         const EMOJIS_MENU = ['⚖️','📱','📄','🛒','🏠','👷','🏢','📝','📂','👨‍👩‍👧','🏦','🚗','💼','💰','🔐','📌','✅','❓','🤝','🏛️'];
 
@@ -6701,39 +6666,34 @@ function renderizarLista(itens) {
             }
         }
 
-        function filtrarTicketsAtivos() {
+        function filtrarTicketsAtivos(resetPage = false) {
             const termo = normalizarBuscaTicket(document.getElementById('tickets-search-input')?.value || '');
             const area = document.getElementById('tickets-filter-area')?.value || '';
             const unreadFilter = document.getElementById('tickets-filter-unread')?.value || '';
             const apenasNumeros = termo.replace(/\D/g, '');
             const tickets = Array.isArray(window.activeTicketsData) ? window.activeTicketsData : [];
 
-            const filtrados = tickets.filter(ticket => {
+            let filtrados = tickets.filter(ticket => {
                 if (area && String(ticket.area || '') !== area) return false;
                 if (unreadFilter === 'unread' && ticket.temMensagemNaoLida !== true) return false;
                 if (unreadFilter === 'read' && ticket.temMensagemNaoLida === true) return false;
                 if (!termo) return true;
-
-                const camposTexto = [
-                    ticket.ticketNumber,
-                    ticket.clienteNome,
-                    ticket.area,
-                    ticket.menuOptionTitle,
-                    ticket.origem,
-                    ticket.advogadoResponsavelNome,
-                    ticket.internalStatus?.nome
-                ].map(normalizarBuscaTicket);
-
-                const numeros = [ticket.cpf, ticket.whatsapp]
-                    .map(valor => String(valor || '').replace(/\D/g, ''))
-                    .filter(Boolean);
-
-                return camposTexto.some(campo => campo.includes(termo)) ||
-                    (!!apenasNumeros && numeros.some(numero => numero.includes(apenasNumeros)));
+                const camposTexto = [ticket.ticketNumber,ticket.clienteNome,ticket.area,ticket.menuOptionTitle,ticket.origem,ticket.advogadoResponsavelNome,ticket.internalStatus?.nome].map(normalizarBuscaTicket);
+                const numeros = [ticket.cpf, ticket.whatsapp].map(valor => String(valor || '').replace(/\D/g, '')).filter(Boolean);
+                return camposTexto.some(campo => campo.includes(termo)) || (!!apenasNumeros && numeros.some(numero => numero.includes(apenasNumeros)));
             });
-
-            renderizarTicketsAtivos(filtrados);
+            filtrados = aplicarEstadoExcel('tickets', filtrados);
+            window.activeTicketsFilteredData = filtrados;
+            if (resetPage) window.activeTicketsCurrentPage = 1;
+            renderizarPaginaTickets();
+            atualizarIndicadoresFiltrosExcel();
         }
+
+        function renderizarPaginaTickets(){
+            const tickets=Array.isArray(window.activeTicketsFilteredData)?window.activeTicketsFilteredData:[];const total=tickets.length;const totalPaginas=Math.max(1,Math.ceil(total/TICKETS_PAGE_SIZE));window.activeTicketsCurrentPage=Math.min(Math.max(1,Number(window.activeTicketsCurrentPage||1)),totalPaginas);const inicio=(window.activeTicketsCurrentPage-1)*TICKETS_PAGE_SIZE;const fim=Math.min(total,inicio+TICKETS_PAGE_SIZE);renderizarTicketsAtivos(tickets.slice(inicio,fim));
+            const info=document.getElementById('tickets-page-info'),label=document.getElementById('tickets-page-label'),prev=document.getElementById('tickets-page-prev'),next=document.getElementById('tickets-page-next');if(info)info.textContent=total?`Mostrando ${inicio+1}–${fim} de ${total} tickets`:'0 tickets';if(label)label.textContent=`Página ${window.activeTicketsCurrentPage} de ${totalPaginas}`;if(prev)prev.disabled=window.activeTicketsCurrentPage<=1;if(next)next.disabled=window.activeTicketsCurrentPage>=totalPaginas;
+        }
+        function mudarPaginaTickets(delta=0){const total=Array.isArray(window.activeTicketsFilteredData)?window.activeTicketsFilteredData.length:0;const paginas=Math.max(1,Math.ceil(total/TICKETS_PAGE_SIZE));window.activeTicketsCurrentPage=Math.min(paginas,Math.max(1,Number(window.activeTicketsCurrentPage||1)+Number(delta||0)));renderizarPaginaTickets();document.querySelector('.tickets-table-wrap')?.scrollIntoView({behavior:'smooth',block:'start'});}
 
         function limparFiltrosTickets() {
             const busca = document.getElementById('tickets-search-input');
@@ -6742,13 +6702,13 @@ function renderizarLista(itens) {
             if (busca) busca.value = '';
             if (area) area.value = '';
             if (unread) unread.value = '';
-            filtrarTicketsAtivos();
+            filtrarTicketsAtivos(true);
         }
 
         async function carregarTicketsAtivos(forcar = false) {
             if (window.activeTicketsLoading) return;
             if (window.activeTicketsLoaded && !forcar) {
-                filtrarTicketsAtivos();
+                filtrarTicketsAtivos(false);
                 return;
             }
 
@@ -6774,7 +6734,7 @@ function renderizarLista(itens) {
 
                 atualizarResumoTickets(data.resumo || {});
                 preencherFiltroAreasTickets(window.activeTicketsData);
-                filtrarTicketsAtivos();
+                filtrarTicketsAtivos(true);
 
                 if (status) status.textContent = '';
                 if (refresh) refresh.textContent = `Atualizado ${new Date(window.activeTicketsLastUpdate).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
@@ -7222,6 +7182,64 @@ function renderizarLista(itens) {
         inicializarAtualizacaoTickets();
 
 
+
+        // ---------------------------------------------------------------------
+        // FILTROS/ORDENAÇÃO POR COLUNA (ESTILO PLANILHA)
+        // ---------------------------------------------------------------------
+        window.excelTableState = window.excelTableState || {
+            tickets:{ sortKey:'lastActivity', sortDir:'desc', filters:{} },
+            crm:{ sortKey:'updatedAt', sortDir:'desc', filters:{} },
+            clients:{ sortKey:'lastSeenAt', sortDir:'desc', filters:{} },
+            users:{ sortKey:'updatedAt', sortDir:'desc', filters:{} }
+        };
+
+        function textoFiltroExcel(valor='') { return String(valor ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim(); }
+        function valorColunaExcel(tabela,item,chave){
+            if(tabela==='tickets'){
+                const mapa={ticketNumber:item.ticketNumber,clienteNome:item.clienteNome||'Cliente não cadastrado',area:item.area||item.menuOptionTitle||'',internalStatus:item.internalStatus?.nome||'Sem status',responsavel:item.advogadoResponsavelNome||'Não assumido',lastActivity:Number(item.lastActivity||0),createdAt:Number(item.createdAt||0),acoes:'Abrir chat Encerrar'};return mapa[chave]??'';
+            }
+            if(tabela==='crm'){
+                const mapa={crmNumber:item.crmNumber||'',cliente:item.cliente||'',area:item.area||'',status:item.status||'',proximaAcao:[item.proximaAcao,item.dataProximaAcao].filter(Boolean).join(' '),responsavel:item.responsavel||'',receitaTotalPrevista:Number(item.receitaTotalPrevista||0),updatedAt:Number(item.updatedAt||0),acoes:item.ticketNumber?'Abrir chat Editar':'Editar'};return mapa[chave]??'';
+            }
+            if(tabela==='clients'){
+                const w=item.whatsapp||item.numeroReal||item.whatsappNumbers?.[0]||'';
+                const mapa={status:item.cadastrado===false?'Não cadastrado':'Cadastrado',nome:nomeCompletoCliente(item),cpf:item.cpf||'',whatsapp:w,responsavel:item.advogadoResponsavel||'',lastSeenAt:Number(item.lastSeenAt||item.updatedAt||item.createdAt||0),acoes:item.cadastrado===false?'Cadastrar':'Editar Remover'};return mapa[chave]??'';
+            }
+            if(tabela==='users'){
+                const perms=(item.permissions||[]).map(p=>PERMISSION_LABELS?.[p]||p).join(', ');
+                const mapa={nome:[item.nome,item.user,item.oab].filter(Boolean).join(' '),assinatura:item.assinatura||'',celular:item.celular||'',role:item.roleLabel||item.role||'',permissions:item.role==='admin'?'Acesso completo':perms,ativo:item.ativo===false?'Inativo':'Ativo',updatedAt:Number(item.updatedAt||item.createdAt||0),acoes:'Editar'};return mapa[chave]??'';
+            }
+            return item?.[chave]??'';
+        }
+        function textoVisivelColunaExcel(tabela,item,chave){const v=valorColunaExcel(tabela,item,chave);if(['lastActivity','createdAt','updatedAt','lastSeenAt'].includes(chave)&&Number(v))return new Date(Number(v)).toLocaleString('pt-BR');return String(v??'');}
+        function aplicarEstadoExcel(tabela,itens=[]){
+            const estado=window.excelTableState?.[tabela]||{filters:{}};let saida=[...itens];
+            const filtros=estado.filters||{};
+            Object.entries(filtros).forEach(([chave,termo])=>{const busca=textoFiltroExcel(termo);if(!busca)return;saida=saida.filter(item=>textoFiltroExcel(textoVisivelColunaExcel(tabela,item,chave)).includes(busca));});
+            const chave=estado.sortKey;const dir=estado.sortDir==='asc'?1:-1;
+            if(chave)saida.sort((a,b)=>{const va=valorColunaExcel(tabela,a,chave),vb=valorColunaExcel(tabela,b,chave);if(typeof va==='number'&&typeof vb==='number')return (va-vb)*dir;return String(va??'').localeCompare(String(vb??''),'pt-BR',{numeric:true,sensitivity:'base'})*dir;});
+            return saida;
+        }
+        function atualizarIndicadoresFiltrosExcel(){document.querySelectorAll('.excel-filter-btn[data-excel-table]').forEach(btn=>{const t=btn.dataset.excelTable,k=btn.dataset.excelKey,s=window.excelTableState?.[t]||{};const ativo=!!s.filters?.[k]||s.sortKey===k;btn.classList.toggle('active',ativo);btn.setAttribute('aria-label',`Filtrar ou ordenar ${btn.dataset.excelLabel||k}${ativo?' (ativo)':''}`);});}
+        function reaplicarTabelaExcel(tabela,resetPage=true){if(tabela==='tickets')filtrarTicketsAtivos(resetPage);else if(tabela==='crm')filtrarCRM(resetPage);else if(tabela==='clients')filtrarClientes();else if(tabela==='users')filtrarUsuarios();atualizarIndicadoresFiltrosExcel();}
+        function fecharFiltroExcel(){document.getElementById('excel-filter-popover')?.remove();}
+        function abrirFiltroExcel(btn){
+            fecharFiltroExcel();const tabela=btn.dataset.excelTable,chave=btn.dataset.excelKey,label=btn.dataset.excelLabel||chave,estado=window.excelTableState[tabela]||(window.excelTableState[tabela]={filters:{}});
+            const pop=document.createElement('div');pop.id='excel-filter-popover';pop.className='excel-filter-popover';
+            const titulo=document.createElement('div');titulo.className='excel-filter-title';titulo.textContent=label;
+            const actions=document.createElement('div');actions.className='excel-filter-actions';
+            const asc=document.createElement('button');asc.type='button';asc.className='excel-filter-action'+(estado.sortKey===chave&&estado.sortDir==='asc'?' selected':'');asc.innerHTML='<i class="bi bi-sort-alpha-down me-1"></i> Crescente';
+            const desc=document.createElement('button');desc.type='button';desc.className='excel-filter-action'+(estado.sortKey===chave&&estado.sortDir==='desc'?' selected':'');desc.innerHTML='<i class="bi bi-sort-alpha-up me-1"></i> Decrescente';
+            asc.onclick=()=>{estado.sortKey=chave;estado.sortDir='asc';reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();};desc.onclick=()=>{estado.sortKey=chave;estado.sortDir='desc';reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();};actions.append(asc,desc);
+            const input=document.createElement('input');input.className='form-control excel-filter-input';input.placeholder='Filtrar nesta coluna...';input.value=estado.filters?.[chave]||'';input.onkeydown=e=>{if(e.key==='Enter'){estado.filters=estado.filters||{};estado.filters[chave]=input.value.trim();reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();}if(e.key==='Escape')fecharFiltroExcel();};
+            const footer=document.createElement('div');footer.className='excel-filter-footer';const limpar=document.createElement('button');limpar.type='button';limpar.className='btn btn-outline-secondary';limpar.textContent='Limpar';limpar.onclick=()=>{estado.filters=estado.filters||{};delete estado.filters[chave];if(estado.sortKey===chave){const defaults={tickets:['lastActivity','desc'],crm:['updatedAt','desc'],clients:['lastSeenAt','desc'],users:['updatedAt','desc']}[tabela]||[null,'desc'];estado.sortKey=defaults[0];estado.sortDir=defaults[1];}reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();};const aplicar=document.createElement('button');aplicar.type='button';aplicar.className='btn btn-dark';aplicar.textContent='Aplicar';aplicar.onclick=()=>{estado.filters=estado.filters||{};if(input.value.trim())estado.filters[chave]=input.value.trim();else delete estado.filters[chave];reaplicarTabelaExcel(tabela,true);fecharFiltroExcel();};footer.append(limpar,aplicar);
+            pop.append(titulo,actions,input,footer);document.body.appendChild(pop);const r=btn.getBoundingClientRect(),w=260;let left=Math.min(window.innerWidth-w-10,Math.max(10,r.right-w));let top=Math.min(window.innerHeight-pop.offsetHeight-10,r.bottom+6);pop.style.left=`${left}px`;pop.style.top=`${Math.max(10,top)}px`;setTimeout(()=>input.focus({preventScroll:true}),0);
+        }
+        function inicializarFiltrosExcelTabelas(){document.querySelectorAll('th[data-excel-table][data-excel-key]').forEach(th=>{if(th.querySelector('.excel-filter-btn'))return;const label=th.textContent.trim();const btn=document.createElement('button');btn.type='button';btn.className='excel-filter-btn';btn.dataset.excelTable=th.dataset.excelTable;btn.dataset.excelKey=th.dataset.excelKey;btn.dataset.excelLabel=label;btn.innerHTML='<i class="bi bi-funnel"></i>';btn.onclick=e=>{e.preventDefault();e.stopPropagation();abrirFiltroExcel(btn);};th.appendChild(btn);});atualizarIndicadoresFiltrosExcel();}
+        document.addEventListener('click',e=>{if(!e.target.closest('#excel-filter-popover')&&!e.target.closest('.excel-filter-btn'))fecharFiltroExcel();});
+        window.addEventListener('resize',fecharFiltroExcel,{passive:true});
+        setTimeout(inicializarFiltrosExcelTabelas,0);
+
         // ---------------------------------------------------------------------
         // PARÂMETROS ADMINISTRATIVOS
         // ---------------------------------------------------------------------
@@ -7253,6 +7271,9 @@ function renderizarLista(itens) {
         const CRM_MOTIVOS_FALLBACK = ['Sem resposta','Sem orçamento','Fechou com outro','Não é o perfil do caso','Outro'];
         const CRM_ORIGENS_ANUNCIO_FALLBACK = ['Meta Ads','Instagram Ads','Facebook Ads','Google Ads','TikTok Ads','YouTube Ads','LinkedIn Ads','Outro anúncio'];
         const CRM_PAGE_SIZE = 50;
+        const TICKETS_PAGE_SIZE = 50;
+        window.activeTicketsCurrentPage = window.activeTicketsCurrentPage || 1;
+        window.activeTicketsFilteredData = window.activeTicketsFilteredData || [];
         window.crmCurrentPage = 1;
         window.crmFilteredData = [];
 
@@ -7471,17 +7492,10 @@ function renderizarLista(itens) {
                     .map(normalizarBuscaCRM).some(campo => campo.includes(termo));
             });
 
-            filtrados.sort((a,b) => {
-                const aClosed = statusFechadoCRMJS(a.status) ? 1 : 0;
-                const bClosed = statusFechadoCRMJS(b.status) ? 1 : 0;
-                if (aClosed !== bClosed) return aClosed - bClosed;
-                const da = a.dataProximaAcao || '9999-12-31';
-                const db = b.dataProximaAcao || '9999-12-31';
-                if (da !== db) return da.localeCompare(db);
-                return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
-            });
+            filtrados = aplicarEstadoExcel('crm', filtrados);
 
             window.crmFilteredData = filtrados;
+            atualizarIndicadoresFiltrosExcel();
             if (arguments[0] === true) window.crmCurrentPage = 1;
             renderizarPaginaCRM();
         }
@@ -7551,7 +7565,7 @@ function renderizarLista(itens) {
             if (busca) busca.value = ticketNumber;
             if (area) area.value = '';
             if (unread) unread.value = '';
-            filtrarTicketsAtivos();
+            filtrarTicketsAtivos(true);
 
             requestAnimationFrame(() => {
                 const linha = [...document.querySelectorAll('#tickets-table-body tr[data-ticket-number]')]
@@ -8047,12 +8061,9 @@ function renderizarLista(itens) {
                 });
             }
 
-            todos.sort((a, b) => {
-                if ((a.cadastrado !== false) !== (b.cadastrado !== false)) return a.cadastrado === false ? 1 : -1;
-                if (a.cadastrado !== false) return nomeCompletoCliente(a).localeCompare(nomeCompletoCliente(b), 'pt-BR');
-                return Number(b.lastSeenAt || 0) - Number(a.lastSeenAt || 0);
-            });
+            todos = aplicarEstadoExcel('clients', todos);
             renderizarClientes(todos);
+            atualizarIndicadoresFiltrosExcel();
         }
 
         function limparFormularioCliente() {
@@ -9233,9 +9244,9 @@ function renderizarLista(itens) {
         document.getElementById('user-assinatura')?.addEventListener('input',e=>e.target.dataset.touched='1');
         function permissoesUsuarioSelecionadas(){return [...document.querySelectorAll('.user-permission-check:checked')].map(c=>c.value);}
         function formatarCelularUsuarioPainel(valor='') { const original=String(valor||'').trim(); let d=original.replace(/\D/g,''); if(!d)return ''; if(d.startsWith('55')&&(d.length===12||d.length===13))d=d.slice(2); if(d.length===11)return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`; if(d.length===10)return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`; return original; }
-        function renderizarUsuarios() {
+        function renderizarUsuarios(data = null) {
             const tbody=document.getElementById('users-table-body'); if(!tbody)return;
-            tbody.innerHTML=''; const data=window.panelUsersData||[];
+            tbody.innerHTML=''; data=Array.isArray(data)?data:(window.panelUsersData||[]);
             document.getElementById('users-count').textContent=`${data.length} usuário${data.length===1?'':'s'}`;
             if(!data.length){tbody.innerHTML='<tr><td colspan="7" class="clients-empty">Nenhum usuário cadastrado.</td></tr>';return;}
             data.forEach(u=>{
@@ -9252,7 +9263,8 @@ function renderizarLista(itens) {
                 const b=document.createElement('button'); b.type='button'; b.className='user-edit-btn'; b.innerHTML='<i class="bi bi-pencil me-1"></i> Editar'; b.onclick=()=>abrirFormularioUsuario(u.id); tr.children[6].appendChild(b); tbody.appendChild(tr);
             });
         }
-        async function carregarUsuarios(forcar=false){if(!temPermissaoPainel('users'))return;if(window.panelUsersLoaded&&!forcar){renderizarUsuarios();return;}const status=document.getElementById('users-status');try{if(status)status.textContent='Carregando usuários...';const res=await fetch('/api/users');const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível carregar usuários.');window.panelUsersData=Array.isArray(data.usuarios)?data.usuarios:[];window.panelUsersLoaded=true;renderizarUsuarios();if(status)status.textContent='';}catch(err){if(status){status.className='menu-save-status text-danger mb-2';status.textContent=err.message;}}}
+        function filtrarUsuarios(){const dados=aplicarEstadoExcel('users',window.panelUsersData||[]);renderizarUsuarios(dados);atualizarIndicadoresFiltrosExcel();}
+        async function carregarUsuarios(forcar=false){if(!temPermissaoPainel('users'))return;if(window.panelUsersLoaded&&!forcar){filtrarUsuarios();return;}const status=document.getElementById('users-status');try{if(status)status.textContent='Carregando usuários...';const res=await fetch('/api/users');const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível carregar usuários.');window.panelUsersData=Array.isArray(data.usuarios)?data.usuarios:[];window.panelUsersLoaded=true;filtrarUsuarios();if(status)status.textContent='';}catch(err){if(status){status.className='menu-save-status text-danger mb-2';status.textContent=err.message;}}}
         function abrirFormularioUsuario(id=null){const d=document.getElementById('user-form-dialog');const u=id?(window.panelUsersData||[]).find(x=>String(x.id)===String(id)):null;document.getElementById('user-form').reset();document.getElementById('user-form-id').value=u?.id||'';document.getElementById('user-login').value=u?.user||'';document.getElementById('user-nome').value=u?.nome||'';const ass=document.getElementById('user-assinatura');ass.value=u?.assinatura||'';ass.dataset.touched=u?'1':'';document.getElementById('user-email').value=u?.email||'';document.getElementById('user-celular').value=formatarCelularUsuarioPainel(u?.celular||'');document.getElementById('user-oab').value=u?.oab||'';document.getElementById('user-role').value=u?.role||'advogado';document.getElementById('user-active').checked=u?.ativo!==false;document.getElementById('user-password').value='';document.getElementById('user-password').required=!u;document.getElementById('user-password-help').textContent=u?'(opcional)':'*';document.getElementById('user-form-title').textContent=u?'Editar usuário':'Novo usuário';document.getElementById('user-delete-btn').classList.toggle('hidden',!u||String(u.id)===String(window.panelSessionUser?.id));document.getElementById('user-form-status').textContent='';renderizarPermissoesFormularioUsuario(u?.permissions||['tickets','clients','chat']);if(!d.open){if(typeof d.showModal==='function')d.showModal();else d.setAttribute('open','');}}
         function fecharFormularioUsuario(){const d=document.getElementById('user-form-dialog');if(!d)return;if(typeof d.close==='function')d.close();else d.removeAttribute('open');}
         async function salvarUsuario(event){event.preventDefault();const id=document.getElementById('user-form-id').value;const payload={user:document.getElementById('user-login').value.trim(),nome:document.getElementById('user-nome').value.trim(),assinatura:document.getElementById('user-assinatura').value.trim(),email:document.getElementById('user-email').value.trim(),celular:document.getElementById('user-celular').value.trim(),oab:document.getElementById('user-oab').value.trim(),role:document.getElementById('user-role').value,permissions:permissoesUsuarioSelecionadas(),ativo:document.getElementById('user-active').checked,password:document.getElementById('user-password').value};const status=document.getElementById('user-form-status');const btn=document.getElementById('user-save-btn');btn.disabled=true;status.textContent='Salvando...';try{const res=await fetch(id?`/api/users/${encodeURIComponent(id)}`:'/api/users',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível salvar.');if(data.user&&String(data.user.id||'')===String(window.panelSessionUser?.id||'')){window.panelSessionUser=data.user;aplicarPermissoesPainel();}window.panelUsersLoaded=false;await carregarUsuarios(true);carregarProfissionaisPainel();
