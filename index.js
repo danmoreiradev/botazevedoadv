@@ -1309,6 +1309,7 @@ function sessaoPublicaDaConta(conta = {}) {
         assinatura,
         email: String(conta.email || '').trim(),
         oab: String(conta.oab || '').trim(),
+        theme: String(conta.theme || '').toLowerCase() === 'dark' ? 'dark' : 'light',
         role,
         roleLabel: role === 'admin' ? 'Administrador' : 'Advogado',
         permissions: normalizarPermissoesUsuario(conta)
@@ -5750,6 +5751,70 @@ app.get('/logout-panel', (req, res) => {
 
 app.get('/api/me', exigirLogin, (req, res) => {
     res.json({ user: req.session.panelUser });
+});
+
+// Perfil pessoal: o próprio usuário pode atualizar somente seus dados de apresentação.
+// Função, permissões e status continuam exclusivos da gestão administrativa de usuários.
+app.put('/api/me/profile', exigirLogin, async (req, res) => {
+    try {
+        const filtro = filtroUsuarioSessao(req);
+        if (!filtro) return res.status(400).json({ erro: 'Usuário da sessão não identificado.' });
+        const existente = await userLoginColl.findOne(filtro);
+        if (!existente) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+
+        const nome = String(req.body?.nome ?? existente.nome ?? '').trim().slice(0, 180);
+        if (nome.length < 3) return res.status(400).json({ erro: 'Informe seu nome completo.' });
+        const assinaturaInformada = String(req.body?.assinatura ?? '').trim().slice(0, 180);
+        const assinatura = assinaturaInformada || assinaturaPadraoUsuario(nome);
+        const email = String(req.body?.email ?? '').trim().slice(0, 240);
+        const oab = String(req.body?.oab ?? '').trim().slice(0, 80);
+        const currentPassword = String(req.body?.currentPassword || '');
+        const newPassword = String(req.body?.newPassword || '');
+
+        const update = {
+            $set: { nome, assinatura, email, oab, updatedAt: Date.now() }
+        };
+
+        if (newPassword) {
+            if (newPassword.length < 6) return res.status(400).json({ erro: 'A nova senha deve possuir ao menos 6 caracteres.' });
+            if (!currentPassword) return res.status(400).json({ erro: 'Informe sua senha atual para definir uma nova senha.' });
+            if (!validarSenhaPainel(currentPassword, existente)) return res.status(403).json({ erro: 'A senha atual informada não confere.' });
+            const cred = hashSenhaPainel(newPassword);
+            update.$set.passwordHash = cred.hash;
+            update.$set.passwordSalt = cred.salt;
+            update.$unset = { pass: '' };
+        }
+
+        await userLoginColl.updateOne({ _id: existente._id }, update);
+        const salvo = await userLoginColl.findOne({ _id: existente._id }, { projection: { pass: 0, passwordHash: 0, passwordSalt: 0 } });
+        req.session.panelUser = sessaoPublicaDaConta(salvo);
+        io.emit('panel_users_updated', { action: 'profile_updated', id: String(existente._id) });
+        return res.json({ ok: true, user: req.session.panelUser });
+    } catch (err) {
+        console.error('[Meu perfil] Erro ao atualizar:', err);
+        return res.status(500).json({ erro: 'Não foi possível atualizar seu perfil.' });
+    }
+});
+
+app.put('/api/me/preferences', exigirLogin, async (req, res) => {
+    try {
+        const filtro = filtroUsuarioSessao(req);
+        if (!filtro) return res.status(400).json({ erro: 'Usuário da sessão não identificado.' });
+        const theme = String(req.body?.theme || '').toLowerCase();
+        if (!['light', 'dark'].includes(theme)) return res.status(400).json({ erro: 'Tema inválido.' });
+        const resultado = await userLoginColl.findOneAndUpdate(
+            filtro,
+            { $set: { theme, updatedAt: Date.now() } },
+            { returnDocument: 'after', projection: { pass: 0, passwordHash: 0, passwordSalt: 0 } }
+        );
+        const salvo = resultado?.value || resultado;
+        if (!salvo?._id) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+        req.session.panelUser = sessaoPublicaDaConta(salvo);
+        return res.json({ ok: true, user: req.session.panelUser });
+    } catch (err) {
+        console.error('[Preferências] Erro ao atualizar tema:', err);
+        return res.status(500).json({ erro: 'Não foi possível salvar a preferência visual.' });
+    }
 });
 
 // -----------------------------------------------------------------------------
