@@ -779,6 +779,12 @@ const KNOWLEDGE_MAX_CANDIDATES = 6;
 const KNOWLEDGE_SEMANTIC_FALLBACK_ITEMS = 20;
 let knowledgeCache = { items: [], loadedAt: 0 };
 
+// Conhecimento institucional dinâmico. Diferente da base jurídica/FAQ, estas
+// informações vêm do próprio sistema e podem ser respondidas sem o Gemini inventar fatos.
+// Ex.: "Dr. Pedro trabalha aqui?" consulta somente profissionais ativos cadastrados.
+const INTERNAL_TEAM_CACHE_TTL_MS = 30 * 1000;
+let internalTeamCache = { items: [], loadedAt: 0 };
+
 // Cache das opções de atendimento. O MongoDB passa a ser a fonte de verdade do menu.
 const MENU_CACHE_TTL_MS = 30 * 1000;
 let menuOptionsCache = { items: [], loadedAt: 0 };
@@ -3360,6 +3366,192 @@ function invalidarCacheKnowledge() {
     knowledgeCache = { items: [], loadedAt: 0 };
 }
 
+function invalidarCacheEquipeInterna() {
+    internalTeamCache = { items: [], loadedAt: 0 };
+}
+
+async function carregarEquipeInternaAtiva() {
+    if (!userLoginColl) return [];
+
+    const agora = Date.now();
+    if (internalTeamCache.loadedAt && (agora - internalTeamCache.loadedAt) < INTERNAL_TEAM_CACHE_TTL_MS) {
+        return internalTeamCache.items;
+    }
+
+    const itens = await userLoginColl.find(
+        { ativo: { $ne: false } },
+        { projection: { nome: 1, assinatura: 1, role: 1, oab: 1 } }
+    ).sort({ nome: 1 }).toArray();
+
+    const profissionais = itens
+        .map(item => ({
+            id: String(item._id || ''),
+            nome: String(item.nome || '').trim(),
+            assinatura: String(item.assinatura || assinaturaPadraoUsuario(item.nome || '')).trim(),
+            role: normalizarPapelUsuario(item.role),
+            oab: String(item.oab || '').trim()
+        }))
+        .filter(item => item.nome);
+
+    internalTeamCache = { items: profissionais, loadedAt: agora };
+    return profissionais;
+}
+
+const TERMOS_GENERICOS_EQUIPE = new Set([
+    'dr', 'dra', 'doutor', 'doutora', 'advogado', 'advogada', 'advogados', 'advogadas',
+    'trabalha', 'trabalham', 'aqui', 'ai', 'escritorio', 'equipe', 'time', 'faz', 'parte',
+    'atende', 'atendem', 'atua', 'atuam', 'especialista', 'especialistas', 'tem', 'existe',
+    'conhece', 'conhecem', 'contato', 'telefone', 'celular', 'email', 'whatsapp', 'pessoal',
+    'qual', 'quais', 'quem', 'onde', 'como', 'ele', 'ela', 'voces', 'vcs', 'daqui', 'dai'
+]);
+
+function tokensConsultaEquipe(texto = '') {
+    return normalizarTexto(texto)
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean);
+}
+
+function tipoConsultaEquipe(texto = '') {
+    const valor = ` ${normalizarTexto(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+    if (!valor.trim()) return null;
+
+    const falaDeProfissional = /\b(dr|dra|doutor|doutora|advogado|advogada|profissional)\b/.test(valor);
+    const falaDeEquipe = /\b(equipe|time|escritorio|advogados|advogadas)\b/.test(valor);
+    const contato = /\b(telefone|celular|whatsapp|email|e-mail|contato pessoal)\b/.test(valor) && (falaDeProfissional || falaDeEquipe);
+    if (contato) return 'contato';
+
+    const lista = /\b(quem (?:trabalha|faz parte)|quais (?:sao )?(?:os )?(?:advogados|profissionais)|quem (?:sao )?(?:os )?(?:advogados|profissionais)|equipe do escritorio|time do escritorio)\b/.test(valor);
+    if (lista) return 'lista';
+
+    const atuacao = /\b(atende|atendem|atua|atuam|especialista|especialidade|area de atuacao)\b/.test(valor) && (falaDeProfissional || /\b[a-z]{3,}\b/.test(valor));
+    if (atuacao) return 'atuacao';
+
+    const presenca = /\b(trabalha aqui|trabalha ai|trabalha com voces|trabalha com vcs|trabalha no escritorio|trabalha nesse escritorio|faz parte da equipe|faz parte do escritorio|e da equipe|e daqui|e do escritorio|tem o dr|tem a dra|tem doutor|tem doutora|conhece o dr|conhece a dra|quem e o dr|quem e a dra)\b/.test(valor)
+        || (falaDeProfissional && /\b(trabalha|faz parte|tem|existe|conhece)\b/.test(valor));
+    if (presenca) return 'presenca';
+
+    return null;
+}
+
+function pontuarProfissionalNaConsulta(texto = '', profissional = {}) {
+    const consultaTokens = tokensConsultaEquipe(texto);
+    const conjuntoConsulta = new Set(consultaTokens);
+    const nomeNormalizado = normalizarTexto(profissional.nome || '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const assinaturaNormalizada = normalizarTexto(profissional.assinatura || '').replace(/\b(?:dr|dra|doutor|doutora|dr\(a\))\.?\b/g, ' ').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const nomeTokens = [...new Set(`${nomeNormalizado} ${assinaturaNormalizada}`.split(/\s+/).filter(Boolean))];
+    if (!nomeTokens.length) return 0;
+
+    const consultaNormalizada = ` ${consultaTokens.join(' ')} `;
+    let score = 0;
+    if (nomeNormalizado && consultaNormalizada.includes(` ${nomeNormalizado} `)) score += 100;
+
+    nomeTokens.forEach((token, index) => {
+        if (token.length < 2) return;
+        if (conjuntoConsulta.has(token)) {
+            score += index === 0 ? 24 : 14;
+            return;
+        }
+        if (token.length >= 4) {
+            const achouFuzzy = consultaTokens.some(q => q.length >= 4 && distanciaEdicaoLimitada(q, token, 1) <= 1);
+            if (achouFuzzy) score += index === 0 ? 14 : 8;
+        }
+    });
+
+    if (/\b(?:dr|dra|doutor|doutora)\b/.test(normalizarTexto(texto)) && score > 0) score += 4;
+    return score;
+}
+
+function nomeExibicaoProfissional(profissional = {}) {
+    const assinatura = String(profissional.assinatura || '').trim();
+    if (assinatura && !/^dr\(a\)\.?\s*$/i.test(assinatura)) return assinatura;
+    return String(profissional.nome || 'Profissional').trim();
+}
+
+async function responderConsultaEquipeInterna(texto = '') {
+    const tipo = tipoConsultaEquipe(texto);
+    if (!tipo) return null;
+
+    let profissionais = [];
+    try {
+        profissionais = await carregarEquipeInternaAtiva();
+    } catch (err) {
+        console.warn('[IA interna] Falha ao consultar profissionais ativos:', err?.message || err);
+        return null;
+    }
+    if (!profissionais.length) return null;
+
+    if (tipo === 'lista') {
+        const nomes = profissionais.slice(0, 8).map(nomeExibicaoProfissional).filter(Boolean);
+        if (!nomes.length) return null;
+        const complemento = profissionais.length > nomes.length ? ` e mais ${profissionais.length - nomes.length} profissional(is)` : '';
+        return {
+            acao: 'RESPONDER_SISTEMA',
+            origem: 'equipe_interna',
+            resposta: `Nossa equipe cadastrada atualmente inclui ${nomes.join(', ')}${complemento}. Se quiser confirmar um profissional específico, pode me dizer o nome.`
+        };
+    }
+
+    const ranqueados = profissionais
+        .map(item => ({ item, score: pontuarProfissionalNaConsulta(texto, item) }))
+        .filter(item => item.score >= 12)
+        .sort((a, b) => b.score - a.score);
+
+    const melhorScore = ranqueados[0]?.score || 0;
+    const melhores = ranqueados.filter(item => item.score >= Math.max(12, melhorScore - 3));
+
+    if (tipo === 'contato') {
+        return {
+            acao: 'RESPONDER_SISTEMA',
+            origem: 'equipe_interna',
+            resposta: 'Por privacidade, não compartilho telefone, WhatsApp ou e-mail pessoal dos profissionais. Você pode deixar sua mensagem por aqui que ela fica registrada no atendimento.'
+        };
+    }
+
+    if (melhores.length > 1) {
+        return {
+            acao: 'RESPONDER_SISTEMA',
+            origem: 'equipe_interna',
+            resposta: 'Encontrei mais de um profissional com esse nome na nossa equipe. Se você me disser o sobrenome, eu confirmo para você.'
+        };
+    }
+
+    const profissional = melhores[0]?.item || null;
+    if (tipo === 'atuacao') {
+        if (profissional) {
+            return {
+                acao: 'RESPONDER_SISTEMA',
+                origem: 'equipe_interna',
+                resposta: `Posso confirmar que ${nomeExibicaoProfissional(profissional)} faz parte da nossa equipe, mas não tenho uma área de atuação individual cadastrada para responder essa parte com segurança.`
+            };
+        }
+        return {
+            acao: 'SEM_BASE',
+            origem: 'equipe_interna',
+            resposta: 'Não consegui identificar com segurança qual profissional você quis dizer. Se me informar o nome completo, eu tento confirmar para você.'
+        };
+    }
+
+    if (profissional) {
+        return {
+            acao: 'RESPONDER_SISTEMA',
+            origem: 'equipe_interna',
+            resposta: `Sim. ${nomeExibicaoProfissional(profissional)} faz parte da nossa equipe.`
+        };
+    }
+
+    const nomesPossiveis = tokensConsultaEquipe(texto).filter(token => token.length >= 3 && !TERMOS_GENERICOS_EQUIPE.has(token));
+    if (nomesPossiveis.length) {
+        return {
+            acao: 'RESPONDER_SISTEMA',
+            origem: 'equipe_interna',
+            resposta: 'Não encontrei esse nome entre os profissionais ativos cadastrados no escritório. Se quiser, posso deixar sua dúvida registrada para a equipe confirmar.'
+        };
+    }
+
+    return null;
+}
+
 const STOPWORDS_IA = new Set([
     'a', 'o', 'as', 'os', 'um', 'uma', 'uns', 'umas', 'de', 'da', 'do', 'das', 'dos',
     'e', 'ou', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'sem', 'que', 'se',
@@ -3460,7 +3652,13 @@ function possuiSinalDePergunta(texto = '') {
     if (!valor) return false;
     if (texto.includes('?')) return true;
 
-    return /^(como|qual|quais|quando|onde|por que|porque|posso|pode|preciso|existe|tem|quanto|gostaria de saber|queria saber|duvida|dúvida|saber)\b/.test(valor);
+    if (/^(como|qual|quais|quando|onde|por que|porque|posso|pode|preciso|existe|tem|quanto|gostaria de saber|queria saber|duvida|dúvida|saber)\b/.test(valor)) return true;
+
+    // No WhatsApp o cliente frequentemente pergunta sem usar interrogação.
+    // Reconhecemos alguns padrões naturais sem transformar qualquer narrativa em FAQ.
+    return /\b(?:voces|vcs)\s+(?:fazem|atendem|trabalham|tem|possuem)\b/.test(valor)
+        || /\b(?:trabalham com|atendem casos de|fazem atendimento de|tem advogado|possuem advogado)\b/.test(valor)
+        || /^(?:dr|dra|doutor|doutora)\b.*\b(?:trabalha|atende|atua|faz parte)\b/.test(valor);
 }
 
 function entradaEstruturadaDoFluxo(ticket, texto = '') {
@@ -3572,6 +3770,13 @@ async function analisarMensagemComIA(texto, ticket) {
         return { acao: 'CORTESIA', origem: 'regra', cortesia };
     }
 
+    // Conhecimento institucional dinâmico: perguntas objetivas sobre profissionais
+    // ativos são respondidas com dados do próprio sistema, sem depender da FAQ e sem invenção.
+    if (!atendimentoHumanoAtivo) {
+        const respostaSistema = await responderConsultaEquipeInterna(texto);
+        if (respostaSistema) return respostaSistema;
+    }
+
     // Respostas das perguntas sequenciais são dados do caso e não devem ser consumidas pela IA.
     if (entradaEstruturadaDoFluxo(ticket, texto)) return null;
 
@@ -3591,9 +3796,19 @@ async function analisarMensagemComIA(texto, ticket) {
     const sinalEncerramento = possuiSinalDeEncerramento(texto);
     const sinalPergunta = possuiSinalDePergunta(texto);
 
-    // Sem indício de encerramento e sem qualquer proximidade com a base, a IA nem é acionada.
-    // Isso reduz custo e evita enviar resumos de casos jurídicos desnecessariamente ao modelo.
-    if (!sinalEncerramento && !candidatos.length) return null;
+    // Perguntas reais nunca devem ficar sem qualquer retorno. Se não houver um item
+    // suficientemente aderente na base, usamos uma resposta segura que admite a limitação,
+    // sem recorrer ao conhecimento geral do modelo.
+    if (!sinalEncerramento && !candidatos.length) {
+        if (sinalPergunta) {
+            return {
+                acao: 'SEM_BASE',
+                origem: 'sem_base',
+                resposta: 'Essa informação ainda não está cadastrada na minha base com segurança. Posso deixar sua dúvida registrada para a equipe confirmar.'
+            };
+        }
+        return null;
+    }
 
     // Fallback resiliente: se o Gemini estiver indisponível, uma correspondência exata/forte
     // ainda pode ser respondida diretamente com o conteúdo já aprovado da base.
@@ -3601,6 +3816,13 @@ async function analisarMensagemComIA(texto, ticket) {
         const melhor = candidatos[0];
         if (sinalPergunta && melhor && melhor.score >= 40) {
             return { acao: 'RESPONDER_BASE', resposta: melhor.resposta, origem: 'fallback_base' };
+        }
+        if (sinalPergunta) {
+            return {
+                acao: 'SEM_BASE',
+                origem: 'sem_base',
+                resposta: 'Essa informação ainda não está cadastrada na minha base com segurança. Posso deixar sua dúvida registrada para a equipe confirmar.'
+            };
         }
         return null;
     }
@@ -3666,6 +3888,13 @@ REGRAS OBRIGATÓRIAS:
             return { acao: 'ENCERRAR', origem: 'gemini' };
         }
 
+        if (sinalPergunta) {
+            return {
+                acao: 'SEM_BASE',
+                origem: 'sem_base',
+                resposta: 'Essa informação ainda não está cadastrada na minha base com segurança. Posso deixar sua dúvida registrada para a equipe confirmar.'
+            };
+        }
         return null;
     } catch (err) {
         console.error('[IA] Erro ao analisar mensagem:', err?.message || err);
@@ -3673,6 +3902,13 @@ REGRAS OBRIGATÓRIAS:
         const melhor = candidatos[0];
         if (sinalPergunta && melhor && melhor.score >= 40) {
             return { acao: 'RESPONDER_BASE', resposta: melhor.resposta, origem: 'fallback_base' };
+        }
+        if (sinalPergunta) {
+            return {
+                acao: 'SEM_BASE',
+                origem: 'sem_base',
+                resposta: 'Essa informação ainda não está cadastrada na minha base com segurança. Posso deixar sua dúvida registrada para a equipe confirmar.'
+            };
         }
         return null;
     }
@@ -3789,6 +4025,28 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
             { $set: camposTicket }
         );
         await atualizarHistorico(ticket.ticketNumber, camposHistorico);
+        return true;
+    }
+
+    if (analiseIA.acao === 'RESPONDER_SISTEMA' || analiseIA.acao === 'SEM_BASE') {
+        const retomada = await mensagemRetomadaFluxo(ticket);
+        const cortesia = detectarCortesiaMensagem(mensagemCliente);
+        const prefixo = cortesia.saudacao ? `${cortesia.saudacao}!\n\n` : '';
+        const resposta = String(analiseIA.resposta || '').trim();
+        if (!resposta) return false;
+
+        await sendBotMsg(jid, { text: `${prefixo}${resposta}${retomada}` });
+
+        const agora = Date.now();
+        await Promise.allSettled([
+            ticketsColl.updateOne({ _id: ticket._id }, { $set: { lastActivity: agora } }),
+            atualizarHistorico(ticket.ticketNumber, {
+                ultimaRespostaIAEm: agora,
+                ultimaRespostaIAOrigem: analiseIA.origem || analiseIA.acao
+            })
+        ]);
+
+        console.log(`[Ticket ${ticket.ticketNumber}] IA respondeu com fonte ${analiseIA.origem || analiseIA.acao}.`);
         return true;
     }
 
@@ -5096,7 +5354,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             ? await analisarMensagemComIA(texto, ticket)
             : null;
 
-        if (['ENCERRAR', 'CORTESIA'].includes(analiseIAPrevia?.acao)) {
+        if (['ENCERRAR', 'CORTESIA', 'RESPONDER_SISTEMA', 'SEM_BASE'].includes(analiseIAPrevia?.acao)) {
             await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia, texto);
             return;
         }
@@ -6467,6 +6725,7 @@ app.post('/api/users', async (req, res) => {
         const salvo = { ...documento, _id: result.insertedId };
         delete salvo.passwordHash;
         delete salvo.passwordSalt;
+        invalidarCacheEquipeInterna();
         io.emit('panel_users_updated', { action: 'created', id: String(result.insertedId) });
 
         // O cadastro não depende do WhatsApp. A mensagem é uma cortesia pós-cadastro:
@@ -6522,6 +6781,7 @@ app.put('/api/users/:id', async (req, res) => {
         if (String(req.session.panelUser?.id || '') === String(existente._id)) {
             req.session.panelUser = sessaoPublicaDaConta(salvo);
         }
+        invalidarCacheEquipeInterna();
         io.emit('panel_users_updated', { action: 'updated', id: String(existente._id) });
         res.json({ ok: true, user: { ...sessaoPublicaDaConta(salvo), ativo: salvo.ativo !== false } });
     } catch (err) {
@@ -6544,6 +6804,7 @@ app.delete('/api/users/:id', async (req, res) => {
             if (adminsAtivos <= 1) return res.status(409).json({ erro: 'É necessário manter ao menos um administrador ativo.' });
         }
         await userLoginColl.deleteOne({ _id: existente._id });
+        invalidarCacheEquipeInterna();
         io.emit('panel_users_updated', { action: 'deleted', id: String(existente._id) });
         res.json({ ok: true });
     } catch (err) {
