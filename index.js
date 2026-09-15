@@ -7964,6 +7964,40 @@ app.post(
     }
 );
 
+
+// Resumo leve de mensagens não lidas para o menu lateral.
+// Não depende de o usuário abrir a tela de Tickets: o frontend consulta este
+// endpoint ao iniciar, ao reconectar o Socket.IO e quando chega nova mensagem.
+app.get('/api/tickets/unread-summary', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).json({ erro: 'Acesso negado' });
+    if (!usuarioPode(req, 'tickets')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para os tickets.' });
+    if (!ticketsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
+
+    try {
+        const chaveLeitura = chaveLeituraChatUsuario(req);
+        if (!chaveLeitura) return res.json({ ticketsNaoLidos: 0, generatedAt: Date.now() });
+
+        const inicioRastreamento = Number(chatUnreadTrackingStartedAt || 0);
+        const candidatos = await ticketsColl.find(
+            { lastInboundChatAt: { $gt: inicioRastreamento } },
+            { projection: { lastInboundChatAt: 1, chatLeituras: 1 } }
+        ).toArray();
+
+        let ticketsNaoLidos = 0;
+        for (const ticket of candidatos) {
+            const ultimaEntrada = Number(ticket.lastInboundChatAt || 0);
+            if (!ultimaEntrada) continue;
+            const lidoEm = timestampLeituraChatTicket(ticket, chaveLeitura);
+            if (ultimaEntrada > lidoEm) ticketsNaoLidos += 1;
+        }
+
+        return res.json({ ticketsNaoLidos, generatedAt: Date.now() });
+    } catch (err) {
+        console.error('[Tickets] Erro ao carregar resumo de não lidos:', err);
+        return res.status(500).json({ erro: 'Não foi possível consultar as mensagens não lidas.' });
+    }
+});
+
 app.get('/api/tickets/active', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
     if (!ticketsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });

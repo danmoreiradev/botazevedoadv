@@ -3493,7 +3493,7 @@
                     <span>Tickets ativos</span>
                     <span class="nav-ticket-badges" aria-live="polite">
                         <span id="nav-ticket-unread-badge" class="nav-ticket-unread-badge hidden" aria-label="Mensagens não lidas nos tickets" title="Mensagens não lidas"><i class="bi bi-chat-dots-fill" aria-hidden="true"></i><span id="nav-ticket-unread-count">0</span></span>
-                        <span id="nav-notification-badge" class="nav-notification-badge hidden" aria-label="Novos tickets e notificações" title="Novo ticket/notificação">+0</span>
+                        <span id="nav-notification-badge" class="nav-notification-badge hidden" aria-label="Novos tickets" title="Novos tickets">+0</span>
                     </span>
                 </div>
                 <div class="nav-link" data-permission="clients" onclick="switchTab('tab-clientes', this)">
@@ -4412,6 +4412,10 @@
     
     <script>
         const socket = io();
+        socket.on('connect', () => agendarAtualizacaoBadgeNaoLidosTickets(150));
+        setInterval(() => {
+            if (!document.hidden && temPermissaoPainel('tickets')) agendarAtualizacaoBadgeNaoLidosTickets(0);
+        }, 30000);
 
 
         const PERMISSION_LABELS = {
@@ -4727,6 +4731,7 @@
                 aplicarPermissoesPainel();
                 carregarProfissionaisPainel();
                 carregarTextosRapidos(false);
+                agendarAtualizacaoBadgeNaoLidosTickets(0);
             } catch (err) {
                 console.error('Erro ao carregar sessão:', err);
             } finally {
@@ -4764,9 +4769,12 @@
             if (segundos < 86400) return `há ${Math.floor(segundos / 3600)} h`;
             return `há ${Math.floor(segundos / 86400)} d`;
         }
-        function contadorNotificacoesNaoLidas() { return (window.panelNotifications || []).filter(item => !item.lida).length; }
+        function contadorNotificacoesNaoLidas(tipo = null) {
+            return (window.panelNotifications || []).filter(item => !item.lida && (!tipo || item.tipo === tipo)).length;
+        }
         function atualizarIndicadoresNotificacao() {
             const total = contadorNotificacoesNaoLidas();
+            const totalTickets = contadorNotificacoesNaoLidas('ticket');
             const texto = total > 99 ? '99+' : String(total);
             const topBadge = document.getElementById('notification-badge');
             if (topBadge) {
@@ -4775,9 +4783,10 @@
             }
             const navBadge = document.getElementById('nav-notification-badge');
             if (navBadge) {
-                navBadge.textContent = total > 99 ? '+99' : `+${total}`;
-                navBadge.classList.toggle('hidden', total === 0);
-                navBadge.setAttribute('aria-label', total === 1 ? '1 novo ticket ou notificação' : `${total} novos tickets ou notificações`);
+                navBadge.textContent = totalTickets > 99 ? '+99' : `+${totalTickets}`;
+                navBadge.classList.toggle('hidden', totalTickets === 0);
+                navBadge.setAttribute('aria-label', totalTickets === 1 ? '1 novo ticket' : `${totalTickets} novos tickets`);
+                navBadge.title = totalTickets === 1 ? '1 novo ticket' : `${totalTickets} novos tickets`;
             }
             document.getElementById('notification-bell')?.classList.toggle('has-unread', total > 0);
             document.title = total > 0 ? `(${total}) ${PANEL_ORIGINAL_TITLE}` : PANEL_ORIGINAL_TITLE;
@@ -4842,6 +4851,19 @@
             event?.stopPropagation();
             (window.panelNotifications || []).forEach(item => { item.lida = true; });
             salvarNotificacoesLocais(); atualizarIndicadoresNotificacao(); renderizarListaNotificacoes();
+        }
+        function marcarNotificacoesTicketsComoVistas() {
+            let alterou = false;
+            (window.panelNotifications || []).forEach(item => {
+                if (!item.lida && item.tipo === 'ticket') {
+                    item.lida = true;
+                    alterou = true;
+                }
+            });
+            if (!alterou) return;
+            salvarNotificacoesLocais();
+            atualizarIndicadoresNotificacao();
+            renderizarListaNotificacoes();
         }
         function toggleNotificationPopover(forceState) {
             const popover = document.getElementById('notification-popover');
@@ -4971,7 +4993,10 @@
             if (window.innerWidth < 992) toggleSidebar(false);
             if(tabId === 'tab-ia') carregarConhecimento();
             if(tabId === 'tab-opcoes') carregarOpcoesAtendimento();
-            if(tabId === 'tab-tickets') switchTicketsSubtab(window.ticketsCurrentSubtab || 'active');
+            if(tabId === 'tab-tickets') {
+                marcarNotificacoesTicketsComoVistas();
+                switchTicketsSubtab(window.ticketsCurrentSubtab || 'active');
+            }
             if(tabId === 'tab-clientes') carregarClientes();
             if(tabId === 'tab-horario') carregarHorarioFuncionamento();
             if(tabId === 'tab-usuarios') carregarUsuarios();
@@ -5019,6 +5044,7 @@
 
         socket.on('ticket_chat_message', ({ ticketNumber, message } = {}) => {
             if (!ticketNumber || !message) return;
+            if (message.direction === 'in') agendarAtualizacaoBadgeNaoLidosTickets(120);
             const numero=String(ticketNumber||'');
             const ticket=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber||'')===numero);
             const chatAberto=String(window.activeChatTicketNumber||'')===numero;
@@ -5066,6 +5092,7 @@
 
         socket.on('ticket_activity_updated', (payload = {}) => {
             const ticketNumber = String(payload.ticketNumber || '');
+            if (payload.direction === 'in' && payload.hasNewInbound) agendarAtualizacaoBadgeNaoLidosTickets(120);
             const ticket = (window.activeTicketsData || []).find(item => String(item.ticketNumber || '') === ticketNumber);
 
             if (!ticket) {
@@ -6185,6 +6212,33 @@ function renderizarLista(itens) {
             if (valor === 'lead_anuncio') return 'Lead de anúncio';
             if (valor === 'organico') return 'Orgânico';
             return origem || '—';
+        }
+
+        window.ticketUnreadSummaryLoading = false;
+        window.ticketUnreadSummaryTimer = null;
+
+        async function carregarResumoMensagensNaoLidasTickets() {
+            if (!temPermissaoPainel('tickets') || window.ticketUnreadSummaryLoading) return;
+            window.ticketUnreadSummaryLoading = true;
+            try {
+                const res = await fetch('/api/tickets/unread-summary', { cache:'no-store' });
+                if (res.status === 401) return;
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível consultar mensagens não lidas.');
+                const total = Math.max(0, Number(data.ticketsNaoLidos || 0));
+                atualizarBadgeMensagensNaoLidasTickets(total);
+                const metric = document.getElementById('tickets-metric-unread');
+                if (metric) metric.textContent = total;
+            } catch (err) {
+                console.warn('[Tickets] Falha ao atualizar badge de não lidos:', err?.message || err);
+            } finally {
+                window.ticketUnreadSummaryLoading = false;
+            }
+        }
+
+        function agendarAtualizacaoBadgeNaoLidosTickets(delay = 120) {
+            clearTimeout(window.ticketUnreadSummaryTimer);
+            window.ticketUnreadSummaryTimer = setTimeout(() => carregarResumoMensagensNaoLidasTickets(), Math.max(0, Number(delay || 0)));
         }
 
         function atualizarBadgeMensagensNaoLidasTickets(totalNaoLidas = 0) {
@@ -8868,8 +8922,11 @@ function renderizarLista(itens) {
             const local=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber)===numero);
             if(local){local.temMensagemNaoLida=false;local.chatLidoEm=Date.now();recalcularResumoTicketsLocal();filtrarTicketsAtivos();}
             clearTimeout(window.chatReadPersistTimer);
-            window.chatReadPersistTimer=setTimeout(()=>{
-                fetch(`/api/tickets/${encodeURIComponent(numero)}/chat/read`,{method:'POST',headers:{'Content-Type':'application/json'}}).catch(()=>{});
+            window.chatReadPersistTimer=setTimeout(async()=>{
+                try {
+                    await fetch(`/api/tickets/${encodeURIComponent(numero)}/chat/read`,{method:'POST',headers:{'Content-Type':'application/json'}});
+                } catch(_) {}
+                agendarAtualizacaoBadgeNaoLidosTickets(80);
             },180);
         }
 
