@@ -3149,32 +3149,39 @@ function respostaNegativa(texto = '') {
 }
 
 function clienteQuerEncerrar(texto = '') {
-    const valor = normalizarTexto(texto);
-    const frases = [
-        'pode encerrar',
-        'pode finalizar',
-        'quero encerrar',
-        'quero finalizar',
-        'era so isso',
-        'e so isso',
-        'nao preciso mais',
-        'atendimento finalizado',
-        'duvida resolvida',
-        'parar por aqui',
-        'podemos parar',
-        'deixa pra la',
-        'deixar pra depois',
-        'nao quero continuar',
-        'nao vou continuar',
-        'prefiro encerrar',
-        'vamos encerrar',
-        'pode fechar',
-        'nao tenho mais duvidas',
-        'sem mais duvidas',
-        'tchau',
-        'ate mais'
+    const valor = normalizarTexto(texto).replace(/\s+/g, ' ').trim();
+    if (!valor) return false;
+
+    // Evita falsos positivos quando o cliente explicitamente diz para NÃO encerrar.
+    const negacoesEncerramento = [
+        /\bnao\s+(?:pode|podem|quero|queremos|desejo|desejamos|vou|vamos)\s+(?:encerrar|finalizar|fechar)\b/,
+        /\b(?:nao|nunca)\s+(?:encerre|encerrem|finalize|finalizem|feche|fechem)\b/,
+        /\bainda\s+nao\s+(?:encerre|encerrem|finalize|finalizem|feche|fechem|encerrar|finalizar|fechar)\b/
     ];
-    return frases.some(frase => valor.includes(frase));
+    if (negacoesEncerramento.some(regex => regex.test(valor))) return false;
+
+    // Perguntas informativas sobre como/quando encerrar não são comandos de fechamento.
+    if (/^(?:como|quando|onde|por que|porque|qual|quais)\b.*\b(?:encerrar|finalizar|fechar)\b/.test(valor)) return false;
+
+    if (['encerrar', 'finalizar', 'fechar', 'encerrar atendimento', 'finalizar atendimento', 'fechar atendimento', 'encerrar ticket', 'finalizar ticket', 'fechar ticket'].includes(valor)) {
+        return true;
+    }
+
+    const padroesDiretos = [
+        /\b(?:pode|podem|poderia|poderiam|podemos)\s+(?:por favor\s+)?(?:encerrar|finalizar|fechar)\b/,
+        /\b(?:quero|queremos|desejo|desejamos|prefiro|gostaria de)\s+(?:encerrar|finalizar|fechar)\b/,
+        /\b(?:vamos)\s+(?:encerrar|finalizar|fechar)\b/,
+        /\b(?:encerrar|finalizar|fechar)\s+(?:o\s+|a\s+|esse\s+|essa\s+|este\s+|esta\s+|meu\s+|minha\s+)?(?:atendimento|ticket|chamado|conversa)\b/,
+        /\b(?:atendimento|ticket|chamado|conversa)\s+(?:ja\s+)?(?:pode\s+)?(?:ser\s+)?(?:encerrado|finalizado|fechado)\b/,
+        /\b(?:nao quero|nao vou|nao desejo)\s+(?:mais\s+)?continuar\b/,
+        /\b(?:nao preciso mais|nao tenho mais duvidas|sem mais duvidas)\b/,
+        /\b(?:era so isso|e so isso|duvida resolvida|problema resolvido|assunto resolvido)\b/,
+        /\b(?:parar por aqui|podemos parar|deixa pra la|deixar pra depois)\b/,
+        /\b(?:obrigado|obrigada|valeu)\s*[,!. ]*\s*(?:era so isso|e so isso|pode encerrar|pode finalizar|pode fechar)\b/,
+        /\b(?:tchau|ate mais)\b/
+    ];
+
+    return padroesDiretos.some(regex => regex.test(valor));
 }
 
 function invalidarCacheKnowledge() {
@@ -3493,24 +3500,47 @@ REGRAS OBRIGATÓRIAS:
 }
 
 async function encerrarTicketPorCliente(ticket, jid, mensagemCliente = '') {
-    if (!ticket) return;
+    if (!ticket) return false;
 
-    const mensagemFinal = await gerarRespostaHumanizadaIA({
-        tipo: 'encerramento_solicitado_cliente',
-        mensagemCliente,
-        ticket,
-        mensagemBase: `Certo. O ticket *${ticket.ticketNumber}* foi encerrado conforme solicitado. Agradecemos pelo contato e permanecemos à disposição quando precisar.`
-    });
+    const agora = Date.now();
+    const mensagemFinal = `Certo. O ticket *${ticket.ticketNumber}* foi encerrado conforme solicitado. Agradecemos pelo contato e permanecemos à disposição quando precisar.`;
 
-    await sendBotMsg(jid, { text: mensagemFinal });
+    // Encerramento é uma ação operacional simples: não depende do Gemini.
+    // Persistimos o fechamento e enviamos a confirmação em paralelo para reduzir a latência.
+    const [resultadoHistorico, resultadoEnvio] = await Promise.allSettled([
+        atualizarHistorico(ticket.ticketNumber, {
+            status: 'encerrado',
+            closedAt: agora,
+            archivedAt: agora,
+            encerradoPeloCliente: true,
+            mensagemEncerramentoCliente: String(mensagemCliente || '').slice(0, 1200)
+        }),
+        sendBotMsg(jid, { text: mensagemFinal })
+    ]);
 
-    await atualizarHistorico(ticket.ticketNumber, {
-        status: 'encerrado',
-        closedAt: Date.now(),
+    if (resultadoHistorico.status === 'rejected') {
+        console.warn(`[Ticket ${ticket.ticketNumber}] Falha ao registrar encerramento solicitado pelo cliente:`, resultadoHistorico.reason?.message || resultadoHistorico.reason);
+    }
+    if (resultadoEnvio.status === 'rejected') {
+        console.warn(`[Ticket ${ticket.ticketNumber}] Falha ao confirmar encerramento ao cliente:`, resultadoEnvio.reason?.message || resultadoEnvio.reason);
+    }
+
+    const removido = await ticketsColl.deleteOne({ _id: ticket._id, ticketNumber: ticket.ticketNumber });
+    if (!removido.deletedCount) {
+        console.warn(`[Ticket ${ticket.ticketNumber}] Ticket já havia sido removido ao processar encerramento do cliente.`);
+        return true;
+    }
+
+    // Remove o ticket da tela dos advogados imediatamente, sem aguardar atualização manual.
+    io.emit('ticket_archived', {
+        ticketNumber: ticket.ticketNumber,
+        archivedAt: agora,
+        archivedById: null,
+        archivedByName: 'Cliente',
         encerradoPeloCliente: true
     });
 
-    await ticketsColl.deleteOne({ _id: ticket._id });
+    return true;
 }
 
 async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = '') {
@@ -4728,6 +4758,26 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             await registrarMensagemManualWhatsAppChat(ticket, msg).catch(err => {
                 console.warn('[Chat] Falha ao registrar mensagem manual do WhatsApp:', err?.message || err);
             });
+            return;
+        }
+
+        // PRIORIDADE OPERACIONAL: pedidos claros de encerramento são tratados antes de
+        // horário de funcionamento, triagem, cadastro, pausa do bot e qualquer chamada ao Gemini.
+        // Isso evita que o cliente precise repetir "encerrar atendimento" várias vezes.
+        if (texto && clienteQuerEncerrar(texto)) {
+            if (ticket) {
+                // Registra a última mensagem do cliente antes de remover o ticket ativo.
+                await registrarMensagemClienteChat(ticket, msg).catch(err => {
+                    console.warn('[Chat] Falha ao registrar mensagem de encerramento:', err?.message || err);
+                });
+                await encerrarTicketPorCliente(ticket, rawJid, texto);
+            } else {
+                // Não cria um novo ticket apenas porque o cliente repetiu um pedido de encerramento
+                // depois de o atendimento anterior já ter sido fechado.
+                await sendBotMsg(rawJid, {
+                    text: 'Seu atendimento já está encerrado no momento. Se precisar de algo novo, é só enviar uma mensagem e iniciaremos um novo atendimento.'
+                }).catch(err => console.warn('[Bot] Falha ao confirmar ausência de ticket ativo:', err?.message || err));
+            }
             return;
         }
 
@@ -7222,6 +7272,19 @@ function progressoTriagemTicket(ticket = {}, respostas = []) {
     };
 }
 
+function dadosTriagemTicket(ticket = {}, historico = {}) {
+    const perguntas = Array.isArray(ticket?.perguntasFluxo) && ticket.perguntasFluxo.length
+        ? ticket.perguntasFluxo
+        : (Array.isArray(historico?.perguntasTriagem) ? historico.perguntasTriagem : []);
+    const respostas = Array.isArray(ticket?.respostasFluxo) && ticket.respostasFluxo.length
+        ? ticket.respostasFluxo
+        : (Array.isArray(historico?.respostasTriagem) ? historico.respostasTriagem : []);
+    return {
+        ticket: { ...ticket, perguntasFluxo: perguntas },
+        respostas
+    };
+}
+
 function whatsappDoTicket(ticket = {}) {
     return extrairNumeroWhatsAppDeFontes(
         ticket.numeroReal,
@@ -7379,7 +7442,7 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
         const historicoChat = ticketHistoryColl
             ? await ticketHistoryColl.findOne(
                 { _id: ticketNumber },
-                { projection: { documentosIA: 1 } }
+                { projection: { documentosIA: 1, respostasTriagem: 1, perguntasTriagem: 1, triagemConcluidaEm: 1 } }
             )
             : null;
         const documentosIAChat = mesclarDocumentosIATicket(ticket, historicoChat || {}, { detalhado: true });
@@ -7409,7 +7472,8 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
             readAt: lidoEm,
             ticket: (() => {
                 const classificacao = classificarPendenciaTicket(ticket);
-                const triagem = progressoTriagemTicket(ticket, Array.isArray(ticket.respostasFluxo) ? ticket.respostasFluxo : []);
+                const triagemBase = dadosTriagemTicket(ticket, historicoChat || {});
+                const triagem = progressoTriagemTicket(triagemBase.ticket, triagemBase.respostas);
                 return {
                     ticketNumber,
                     clienteNome: ticket.clienteNome || null,
@@ -7471,10 +7535,9 @@ app.get('/api/tickets/:ticketNumber/chat/triage', async (req, res) => {
 
         if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
 
-        const respostas = Array.isArray(ticket.respostasFluxo) && ticket.respostasFluxo.length
-            ? ticket.respostasFluxo
-            : (Array.isArray(historico?.respostasTriagem) ? historico.respostasTriagem : []);
-        const triagem = progressoTriagemTicket(ticket, respostas);
+        const triagemBase = dadosTriagemTicket(ticket, historico || {});
+        const respostas = triagemBase.respostas;
+        const triagem = progressoTriagemTicket(triagemBase.ticket, respostas);
 
         res.json({
             ticketNumber,
@@ -8112,10 +8175,9 @@ app.get('/api/tickets/active', async (req, res) => {
         const itens = tickets.map(ticket => {
             const historico = historicoPorTicket.get(String(ticket.ticketNumber)) || {};
             const classificacao = classificarPendenciaTicket(ticket);
-            const respostas = Array.isArray(ticket.respostasFluxo) && ticket.respostasFluxo.length
-                ? ticket.respostasFluxo
-                : (Array.isArray(historico.respostasTriagem) ? historico.respostasTriagem : []);
-            const triagem = progressoTriagemTicket(ticket, respostas);
+            const triagemBase = dadosTriagemTicket(ticket, historico || {});
+            const respostas = triagemBase.respostas;
+            const triagem = progressoTriagemTicket(triagemBase.ticket, respostas);
             const ultimaAtividade = Number(ticket.lastActivity || ticket.createdAt || 0) || null;
             const criadoEm = Number(ticket.createdAt || 0) || null;
             const idadeUltimaAtividadeMs = ultimaAtividade ? Math.max(0, agora - ultimaAtividade) : null;

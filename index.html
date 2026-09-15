@@ -2447,6 +2447,12 @@
         .ticket-chat-statuses { display:flex; align-items:center; gap:7px; flex-wrap:wrap; min-width:0; }
         .chat-op-pill { min-height:29px; padding:5px 9px; display:inline-flex; align-items:center; gap:6px; color:#56635d; background:#f5f7f6; border:1px solid #e0e5e2; border-radius:999px; font-size:.68rem; font-weight:700; white-space:nowrap; }
         .chat-op-pill > i { color:#819088; font-size:.72rem; }
+        .chat-op-pill-triage-none{color:#b3483a;background:#fff3f1;border-color:#f0d0cb;}
+        .chat-op-pill-triage-none > i{color:#c95a49;}
+        .chat-op-pill-triage-partial{color:#8b6713;background:#fff8e8;border-color:#ead6a0;}
+        .chat-op-pill-triage-partial > i{color:#b58b2b;}
+        .chat-op-pill-triage-complete{color:#1d6b4f;background:#eef9f3;border-color:#c4dfd0;}
+        .chat-op-pill-triage-complete > i{color:#2a8c66;}
         #ticket-chat-op-situation > i { color:#c5a059; font-size:.50rem; }
         .ticket-chat-operation-actions { display:flex; align-items:center; gap:7px; flex:0 0 auto; }
         .ticket-chat-claim,.ticket-chat-transfer { min-height:34px; padding:7px 11px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border-radius:8px; font-size:.73rem; font-weight:760; }
@@ -3148,6 +3154,12 @@
             color:#c6cfd5!important; background:#253139!important; border-color:#39474f!important;
         }
         html[data-theme="dark"] #ticket-chat-dialog .chat-op-pill > i { color:#99a7ae!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-op-pill-triage-none { color:#ffb3a8!important; background:#3a2222!important; border-color:#6a3b35!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-op-pill-triage-none > i { color:#ff998d!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-op-pill-triage-partial { color:#f3d27d!important; background:#3a311d!important; border-color:#68552a!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-op-pill-triage-partial > i { color:#f1c251!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-op-pill-triage-complete { color:#8fe0b7!important; background:#1d3429!important; border-color:#2d5b45!important; }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-op-pill-triage-complete > i { color:#70d69f!important; }
         html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-transfer,
         html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-documents-btn {
             color:#d3dadd!important; background:#263239!important; border-color:#405058!important;
@@ -8430,12 +8442,27 @@ function renderizarLista(itens) {
             if(!event.target.closest('#ticket-transfer-panel') && !event.target.closest('#ticket-chat-transfer')) fecharTransferenciaChat();
         });
 
+        function obterEstadoTriagemChat(triagem = {}) {
+            if (!triagem || triagem.possuiFluxo !== true) {
+                return { classe: '', total: 0, respondidas: 0, percentual: 0, label: 'Triagem sem etapas' };
+            }
+            const total = Math.max(0, Number(triagem.total || 0));
+            const respondidas = Math.max(0, Number(triagem.respondidas || 0));
+            const percentual = total > 0 ? Math.max(0, Math.min(100, Number(triagem.percentual || Math.round((respondidas / total) * 100)))) : 0;
+            let classe = 'chat-op-pill-triage-none';
+            if (total > 0 && respondidas >= total) classe = 'chat-op-pill-triage-complete';
+            else if (respondidas > 0) classe = 'chat-op-pill-triage-partial';
+            return {
+                classe,
+                total,
+                respondidas,
+                percentual,
+                label: `Triagem ${respondidas}/${total} · ${percentual}%`
+            };
+        }
+
         function textoTriagemChat(triagem = {}) {
-            if (!triagem || triagem.possuiFluxo !== true) return 'Triagem sem etapas';
-            const total = Number(triagem.total || 0);
-            const respondidas = Number(triagem.respondidas || 0);
-            const percentual = Number(triagem.percentual || 0);
-            return `Triagem ${respondidas}/${total} · ${percentual}%`;
+            return obterEstadoTriagemChat(triagem).label;
         }
 
 
@@ -8463,6 +8490,10 @@ function renderizarLista(itens) {
                 const total = Number(triagem.total || respostas.length || 0);
                 const respondidas = Number(triagem.respondidas || respostas.length || 0);
                 subtitle.textContent = total ? `${respondidas} de ${total} pergunta${total === 1 ? '' : 's'} respondida${respondidas === 1 ? '' : 's'}` : 'Sem perguntas sequenciais cadastradas';
+                if (triagem && typeof triagem === 'object') {
+                    window.activeChatTriageDetails = { ...(window.activeChatTriageDetails || {}), triagem };
+                    atualizarStatusOperacionalChat({ triagem });
+                }
             }
             body.replaceChildren();
             if (!respostas.length) {
@@ -8522,7 +8553,14 @@ function renderizarLista(itens) {
             const time = document.getElementById('ticket-chat-op-time');
             if (situation) situation.querySelector('span:last-child').textContent = data.pendenciaLabel || data.statusLabel || data.status || 'Em acompanhamento';
             if (owner) owner.querySelector('span:last-child').textContent = data.advogadoResponsavelNome ? `Responsável: ${data.advogadoResponsavelNome}` : 'Sem responsável';
-            if (triage) { const label = triage.querySelector('span'); if (label) label.textContent = textoTriagemChat(data.triagem || {}); }
+            if (triage) {
+                const infoTriagem = obterEstadoTriagemChat(data.triagem || (window.activeChatTriageDetails?.triagem) || {});
+                const label = triage.querySelector('span');
+                if (label) label.textContent = infoTriagem.label;
+                triage.classList.remove('chat-op-pill-triage-none', 'chat-op-pill-triage-partial', 'chat-op-pill-triage-complete');
+                if (infoTriagem.classe) triage.classList.add(infoTriagem.classe);
+                triage.title = infoTriagem.total ? `${infoTriagem.respondidas} de ${infoTriagem.total} perguntas respondidas (${infoTriagem.percentual}%)` : 'Ver perguntas e respostas da triagem';
+            }
             if (time) time.querySelector('span:last-child').textContent = data.lastActivity ? `Atividade ${formatarDataTicket(data.lastActivity)}` : 'Atividade não informada';
         }
 
