@@ -506,6 +506,10 @@
         .knowledge-gap-text{color:#34414d;font-size:.75rem;line-height:1.35;}
         .knowledge-gap-meta{color:#8a949e;font-size:.62rem;margin-top:3px;}
         .knowledge-gap-use{white-space:nowrap;border:1px solid #d6dde4;background:#fff;color:#465363;border-radius:8px;padding:6px 8px;font-size:.66rem;font-weight:800;}
+        .knowledge-gap-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end;max-width:470px;}
+        .knowledge-gap-link-select{min-width:220px;max-width:300px;font-size:.68rem;}
+        .knowledge-gap-link-btn{white-space:nowrap;border:1px solid #c9d3dc;background:#f8fafc;color:#3f4c59;border-radius:8px;padding:6px 9px;font-size:.66rem;font-weight:800;}
+        .knowledge-gap-link-btn:disabled{opacity:.55;cursor:not-allowed;}
         html[data-theme="dark"] .knowledge-ai-suggest{background:#252e36;border-color:#41505c;color:#d6dee4;}
         html[data-theme="dark"] .knowledge-suggestion{background:#1c2b24;border-color:#315241;}
         html[data-theme="dark"] .knowledge-suggestion-text{color:#e5ece8;}
@@ -514,6 +518,12 @@
         html[data-theme="dark"] .knowledge-gap-item{border-bottom-color:#303a42;}
         html[data-theme="dark"] .knowledge-gap-text{color:#d3dbe0;}
         html[data-theme="dark"] .knowledge-gap-use{background:#252e36;border-color:#41505c;color:#d6dee4;}
+        html[data-theme="dark"] .knowledge-gap-link-btn{background:#252e36;border-color:#41505c;color:#d6dee4;}
+        html[data-theme="dark"] .knowledge-site-page{background:#242c33;border-color:#39454e;}
+        html[data-theme="dark"] .knowledge-site-page-title{color:#e3e9ed;}
+        html[data-theme="dark"] .knowledge-site-page-url{color:#98a4ac;}
+        html[data-theme="dark"] .knowledge-site-page-summary{background:#1c242b;color:#adb8bf;}
+        html[data-theme="dark"] .knowledge-site-page-empty{color:#94a0a7;}
         .knowledge-web-card{margin-top:22px;max-width:1120px;}
         .knowledge-web-grid{display:grid;grid-template-columns:minmax(180px,.8fr) minmax(300px,1.8fr) 130px auto;gap:10px;align-items:end;}
         .knowledge-web-actions{display:flex;gap:8px;flex-wrap:wrap;}
@@ -552,6 +562,13 @@
         .knowledge-site-suggestion-text{margin-top:4px;color:#6b7680;font-size:.70rem;line-height:1.45;white-space:pre-wrap;}
         .knowledge-site-suggestion-meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;}
         .knowledge-site-suggestion-actions{display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end;}
+        .knowledge-site-pages{display:grid;gap:10px;margin-top:11px;}
+        .knowledge-site-page{border:1px solid #e1e7ea;border-radius:10px;background:#fff;padding:11px 12px;}
+        .knowledge-site-page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:7px;}
+        .knowledge-site-page-title{color:#2f3943;font-size:.75rem;font-weight:800;line-height:1.35;}
+        .knowledge-site-page-url{margin-top:2px;color:#89939c;font-size:.61rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:720px;}
+        .knowledge-site-page-summary{padding:8px 9px;border-radius:8px;background:#f7f9fa;color:#68737d;font-size:.68rem;line-height:1.45;white-space:pre-wrap;}
+        .knowledge-site-page-empty{margin-top:8px;color:#8b949d;font-size:.66rem;font-style:italic;}
         .knowledge-site-empty{padding:24px;border:1px dashed #dbe1e6;border-radius:11px;color:#7c8791;text-align:center;font-size:.73rem;}
         .knowledge-source-status{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
         html[data-theme="dark"] .knowledge-hub-tabs{background:#1b2229;border-color:#35404a;}
@@ -563,7 +580,7 @@
         html[data-theme="dark"] .knowledge-site-suggestion-title{color:#e3e9ed;}
         html[data-theme="dark"] .knowledge-site-suggestion-text{color:#9faab1;}
         html[data-theme="dark"] .knowledge-site-empty{color:#9ca8af;border-color:#3b4650;}
-        @media(max-width:767.98px){.knowledge-hub-tabs{display:grid;grid-template-columns:1fr 1fr}.knowledge-hub-tab{justify-content:center}.knowledge-site-suggestion{grid-template-columns:1fr}.knowledge-site-suggestion-actions{justify-content:flex-start}}
+        @media(max-width:767.98px){.knowledge-hub-tabs{display:grid;grid-template-columns:1fr 1fr}.knowledge-hub-tab{justify-content:center}.knowledge-site-suggestion{grid-template-columns:1fr}.knowledge-site-suggestion-actions{justify-content:flex-start}.knowledge-gap-item{flex-direction:column}.knowledge-gap-actions{width:100%;max-width:none;justify-content:flex-start}.knowledge-gap-link-select{min-width:0;max-width:none;flex:1 1 220px}.knowledge-site-page-head{flex-direction:column}}
         html[data-theme="dark"] .knowledge-web-badge.ok{background:#1d3429;border-color:#315c47;color:#8dd8b2;}
         html[data-theme="dark"] .knowledge-web-badge.error{background:#3a2222;border-color:#623a35;color:#f0aaa1;}
         html[data-theme="dark"] .knowledge-web-item-actions button{background:#273139;border-color:#414d56;color:#cbd3d8;}
@@ -3869,26 +3886,26 @@
 
                 <section class="knowledge-hub-view hidden" id="knowledge-view-sugestoes">
                     <div class="card-custom text-start knowledge-compact-card">
-                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3"><div><h5 class="knowledge-compact-title">Sugestões geradas pelos sites</h5><div class="knowledge-compact-help">O site nunca responde ao cliente. A IA resume o conteúdo sincronizado e propõe conhecimentos; só entram na base após sua aprovação.</div></div><button type="button" class="btn btn-sm btn-outline-secondary" onclick="carregarFontesSiteIA()"><i class="bi bi-arrow-repeat me-1"></i> Atualizar</button></div>
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3"><div><h5 class="knowledge-compact-title">Sugestões geradas pelos sites</h5><div class="knowledge-compact-help">Cada página sincronizada é analisada separadamente. A IA resume aquela URL e propõe conhecimentos específicos; nada entra na Base sem sua aprovação.</div></div><button type="button" class="btn btn-sm btn-outline-secondary" onclick="carregarFontesSiteIA()"><i class="bi bi-arrow-repeat me-1"></i> Atualizar</button></div>
                         <div id="knowledge-web-suggestions-list" class="knowledge-site-suggestions"><div class="knowledge-site-empty">Sincronize uma fonte para gerar sugestões.</div></div>
                     </div>
                 </section>
 
                 <section class="knowledge-hub-view hidden" id="knowledge-view-duvidas">
                     <div class="card-custom text-start knowledge-compact-card">
-                        <div class="mb-3"><h5 class="knowledge-compact-title">Dúvidas para ensinar</h5><div class="knowledge-compact-help">Perguntas reais que ainda não encontraram resposta segura na Base aprovada.</div></div>
+                        <div class="mb-3"><h5 class="knowledge-compact-title">Dúvidas para ensinar</h5><div class="knowledge-compact-help">Perguntas reais que ainda não encontraram resposta segura. Vincule a um conhecimento ativo para transformar a dúvida em nova palavra-chave/variação, ou ensine um conhecimento novo.</div></div>
                         <div id="knowledge-gaps-list"><div class="text-muted small">Nenhuma dúvida pendente.</div></div>
                     </div>
                 </section>
 
                 <section class="knowledge-hub-view hidden" id="knowledge-view-fontes">
                     <div class="card-custom text-start knowledge-compact-card knowledge-web-card" style="margin-top:0;max-width:none">
-                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3"><div><h5 class="knowledge-compact-title"><i class="bi bi-globe2 me-1"></i> Fontes do site</h5><div class="knowledge-compact-help">A sincronização serve apenas para gerar sugestões. Nenhum texto do site é usado pelo BOT até ser aprovado e salvo na Base.</div></div></div>
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3"><div><h5 class="knowledge-compact-title"><i class="bi bi-globe2 me-1"></i> Fontes do site</h5><div class="knowledge-compact-help">O sistema percorre as páginas internas do site e analisa cada URL separadamente. O conteúdo serve apenas para gerar sugestões; nada é usado pelo BOT até ser aprovado e salvo na Base.</div></div></div>
                         <input type="hidden" id="knowledge-web-id">
                         <div class="knowledge-web-grid">
                             <div><label class="form-label small fw-bold">Nome</label><input type="text" id="knowledge-web-name" class="form-control" placeholder="Site institucional"></div>
                             <div class="knowledge-web-url-field"><label class="form-label small fw-bold">URL inicial</label><input type="url" id="knowledge-web-url" class="form-control" placeholder="https://seusite.com.br/"></div>
-                            <div><label class="form-label small fw-bold">Máx. páginas</label><select id="knowledge-web-max-pages" class="form-select"><option value="5">5</option><option value="10">10</option><option value="15" selected>15</option><option value="20">20</option><option value="30">30</option></select></div>
+                            <div><label class="form-label small fw-bold">Limite de páginas</label><select id="knowledge-web-max-pages" class="form-select"><option value="15">15</option><option value="30">30</option><option value="50" selected>50</option><option value="75">75</option><option value="100">100</option></select><div class="form-text" style="font-size:.60rem">Percorre as páginas internas encontradas até este limite.</div></div>
                             <div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" id="knowledge-web-active" checked><label class="form-check-label small fw-bold" for="knowledge-web-active">Ativa</label></div>
                             <div class="knowledge-web-actions"><button type="button" class="btn btn-sm text-white fw-bold" style="background:var(--adv-blue)" id="knowledge-web-save" onclick="salvarFonteSiteIA(false)">Salvar</button><button type="button" class="btn btn-sm btn-outline-secondary" id="knowledge-web-save-sync" onclick="salvarFonteSiteIA(true)"><i class="bi bi-arrow-repeat me-1"></i> Salvar + sincronizar</button><button type="button" class="btn btn-sm btn-link text-muted hidden" id="knowledge-web-cancel" onclick="limparFonteSiteIA()">Cancelar</button></div>
                         </div>
@@ -5716,7 +5733,28 @@
         }
         function filtrarConhecimento(){const termo=textoFiltroExcel(document.getElementById('input_busca').value);const filtrados=(window.todosConhecimentos||[]).filter(item=>[item.pergunta,item.resposta,...(item.palavrasChave||[]),...(item.variacoesPergunta||[])].map(textoFiltroExcel).some(x=>x.includes(termo)));renderizarLista(filtrados);}
         async function carregarLacunasConhecimento(){const box=document.getElementById('knowledge-gaps-list');if(!box)return;try{const res=await fetch('/api/knowledgeColl/gaps',{cache:'no-store'});const data=await res.json().catch(()=>[]);if(!res.ok)return;window.knowledgeGaps=Array.isArray(data)?data:[];renderizarLacunasConhecimento(window.knowledgeGaps);}catch(_){}}
-        function renderizarLacunasConhecimento(items=[]){const box=document.getElementById('knowledge-gaps-list');const count=document.getElementById('knowledge-gap-count');if(count)count.textContent=String(items.length||0);if(!box)return;box.replaceChildren();if(!items.length){box.innerHTML='<div class="text-muted" style="font-size:.68rem;padding:5px 0">Nenhuma dúvida pendente de ensino.</div>';return;}const frag=document.createDocumentFragment();items.slice(0,10).forEach(item=>{const row=document.createElement('div');row.className='knowledge-gap-item';const copy=document.createElement('div');copy.className='knowledge-gap-copy';const txt=document.createElement('div');txt.className='knowledge-gap-text';txt.textContent=item.textoExemplo||'';const meta=document.createElement('div');meta.className='knowledge-gap-meta';meta.textContent=`Perguntada ${Number(item.ocorrencias||1)}x${item.areaExemplo?' · '+item.areaExemplo:''}`;copy.append(txt,meta);const btn=document.createElement('button');btn.type='button';btn.className='knowledge-gap-use';btn.textContent='Ensinar IA';btn.onclick=()=>ensinarLacunaConhecimento(item);row.append(copy,btn);frag.appendChild(row);});box.appendChild(frag);}
+        function conhecimentosAtivosParaVinculo(){return (window.todosConhecimentos||[]).filter(item=>item?.ativo!==false).sort((a,b)=>String(a?.pergunta||'').localeCompare(String(b?.pergunta||''),'pt-BR'));}
+        function renderizarLacunasConhecimento(items=[]){
+            const box=document.getElementById('knowledge-gaps-list');const count=document.getElementById('knowledge-gap-count');if(count)count.textContent=String(items.length||0);if(!box)return;box.replaceChildren();
+            if(!items.length){box.innerHTML='<div class="text-muted" style="font-size:.68rem;padding:5px 0">Nenhuma dúvida pendente de ensino.</div>';return;}
+            const conhecimentos=conhecimentosAtivosParaVinculo();const frag=document.createDocumentFragment();
+            items.slice(0,30).forEach(item=>{
+                const gapId=String(item?._id?.$oid||item?._id||'');const row=document.createElement('div');row.className='knowledge-gap-item';
+                const copy=document.createElement('div');copy.className='knowledge-gap-copy';const txt=document.createElement('div');txt.className='knowledge-gap-text';txt.textContent=item.textoExemplo||'';const meta=document.createElement('div');meta.className='knowledge-gap-meta';meta.textContent=`Perguntada ${Number(item.ocorrencias||1)}x${item.areaExemplo?' · '+item.areaExemplo:''}`;copy.append(txt,meta);
+                const actions=document.createElement('div');actions.className='knowledge-gap-actions';
+                const select=document.createElement('select');select.className='form-select form-select-sm knowledge-gap-link-select';select.innerHTML='<option value="">Vincular a conhecimento ativo...</option>';
+                conhecimentos.forEach(k=>{const id=String(k?._id?.$oid||k?._id||'');const opt=document.createElement('option');opt.value=id;opt.textContent=String(k.pergunta||'Conhecimento');select.appendChild(opt);});
+                const link=document.createElement('button');link.type='button';link.className='knowledge-gap-link-btn';link.innerHTML='<i class="bi bi-link-45deg me-1"></i>Vincular';link.disabled=true;select.addEventListener('change',()=>{link.disabled=!select.value;});link.onclick=()=>vincularLacunaConhecimento(gapId,select,link);
+                const teach=document.createElement('button');teach.type='button';teach.className='knowledge-gap-use';teach.innerHTML='<i class="bi bi-plus-circle me-1"></i>Ensinar novo';teach.onclick=()=>ensinarLacunaConhecimento(item);
+                actions.append(select,link,teach);row.append(copy,actions);frag.appendChild(row);
+            });box.appendChild(frag);
+        }
+        async function vincularLacunaConhecimento(gapId,select,button){
+            const knowledgeId=String(select?.value||'').trim();if(!gapId||!knowledgeId)return;
+            const old=button?.innerHTML||'';if(button){button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Vinculando';}
+            try{const res=await fetch(`/api/knowledgeColl/gaps/${encodeURIComponent(gapId)}/link`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({knowledgeId})});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível vincular a dúvida.');await Promise.all([carregarConhecimento(),carregarLacunasConhecimento()]);}
+            catch(err){alert(err.message||'Não foi possível vincular a dúvida.');if(button){button.disabled=false;button.innerHTML=old;}}
+        }
         function ensinarLacunaConhecimento(item={}){limparFormularioConhecimento();alternarPainelKnowledge('base');document.getElementById('knowledge_gap_id').value=String(item?._id?.$oid||item?._id||'');document.getElementById('pergunta_ia').value=String(item.textoExemplo||'');document.getElementById('knowledge-form-title').textContent='Ensinar novo conhecimento';document.getElementById('knowledge-cancel-edit').classList.remove('hidden');document.querySelector('.knowledge-editor-card')?.scrollIntoView({behavior:'auto',block:'start'});setTimeout(()=>document.getElementById('resposta_ia')?.focus({preventScroll:true}),120);}
         async function removerConhecimento(id){if(!confirm('Tem certeza que deseja remover este conhecimento?'))return;try{const res=await fetch(`/api/knowledgeColl/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');if(document.getElementById('knowledge_id').value===String(id))limparFormularioConhecimento();await carregarConhecimento();}catch(err){alert(err.message||'Não foi possível excluir o conhecimento.');}}
 
@@ -5728,11 +5766,11 @@
             renderizarSugestoesSiteIA(window.knowledgeWebSources||[]);
         }
         function limparFonteSiteIA(){
-            document.getElementById('knowledge-web-id').value='';document.getElementById('knowledge-web-name').value='';document.getElementById('knowledge-web-url').value='';document.getElementById('knowledge-web-max-pages').value='15';document.getElementById('knowledge-web-active').checked=true;document.getElementById('knowledge-web-cancel').classList.add('hidden');
+            document.getElementById('knowledge-web-id').value='';document.getElementById('knowledge-web-name').value='';document.getElementById('knowledge-web-url').value='';document.getElementById('knowledge-web-max-pages').value='50';document.getElementById('knowledge-web-active').checked=true;document.getElementById('knowledge-web-cancel').classList.add('hidden');
         }
         function editarFonteSiteIA(id){
             const item=(window.knowledgeWebSources||[]).find(x=>idFonteSiteIA(x)===String(id));if(!item)return;alternarPainelKnowledge('fontes');
-            document.getElementById('knowledge-web-id').value=id;document.getElementById('knowledge-web-name').value=item.nome||'';document.getElementById('knowledge-web-url').value=item.url||'';document.getElementById('knowledge-web-max-pages').value=String(item.maxPages||15);document.getElementById('knowledge-web-active').checked=item.ativo!==false;document.getElementById('knowledge-web-cancel').classList.remove('hidden');
+            document.getElementById('knowledge-web-id').value=id;document.getElementById('knowledge-web-name').value=item.nome||'';document.getElementById('knowledge-web-url').value=item.url||'';document.getElementById('knowledge-web-max-pages').value=String(item.maxPages||50);document.getElementById('knowledge-web-active').checked=item.ativo!==false;document.getElementById('knowledge-web-cancel').classList.remove('hidden');
             document.querySelector('.knowledge-web-card')?.scrollIntoView({behavior:'auto',block:'start'});
         }
         function dataFonteSiteIA(valor){const n=Number(valor||0);if(!n)return 'Nunca';try{return new Date(n).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(_){return 'Nunca';}}
@@ -5755,24 +5793,41 @@
                 const del=document.createElement('button');del.type='button';del.title='Excluir';del.innerHTML='<i class="bi bi-trash"></i>';del.onclick=()=>removerFonteSiteIA(id);actions.append(sync,gen,edit,del);row.append(copy,actions);frag.appendChild(row);
             });box.appendChild(frag);
         }
+        function paginasSugestoesFonte(source={}){
+            const analyses=Array.isArray(source.webPagesAnalysis)?source.webPagesAnalysis:[];
+            if(analyses.length)return analyses;
+            const grouped=new Map();
+            (source.knowledgeSuggestions||[]).forEach(s=>{const url=String(s.paginaUrl||s.fonteUrls?.[0]||source.url||'');if(!grouped.has(url))grouped.set(url,{url,title:s.paginaTitulo||'Página sincronizada',resumo:'',suggestionsCount:0});grouped.get(url).suggestionsCount+=1;});
+            return [...grouped.values()];
+        }
+        function renderizarSugestaoPaginaSite(sourceId,sug){
+            const row=document.createElement('div');row.className='knowledge-site-suggestion';const main=document.createElement('div');const title=document.createElement('div');title.className='knowledge-site-suggestion-title';title.textContent=sug.pergunta||'Sugestão';const txt=document.createElement('div');txt.className='knowledge-site-suggestion-text';txt.textContent=sug.resposta||'';const meta=document.createElement('div');meta.className='knowledge-site-suggestion-meta';(sug.palavrasChave||[]).slice(0,5).forEach(k=>{const c=document.createElement('span');c.className='knowledge-chip';c.textContent=k;meta.appendChild(c)});main.append(title,txt,meta);
+            const actions=document.createElement('div');actions.className='knowledge-site-suggestion-actions';const use=document.createElement('button');use.type='button';use.className='btn btn-sm text-white fw-bold';use.style.background='var(--adv-blue)';use.innerHTML='<i class="bi bi-arrow-right-circle me-1"></i>Revisar e inserir';use.onclick=()=>usarSugestaoSiteNaBase(sourceId,sug.id);const ignore=document.createElement('button');ignore.type='button';ignore.className='btn btn-sm btn-outline-secondary';ignore.textContent='Ignorar';ignore.onclick=()=>atualizarStatusSugestaoSite(sourceId,sug.id,'ignorado');actions.append(use,ignore);row.append(main,actions);return row;
+        }
         function renderizarSugestoesSiteIA(items=[]){
             const box=document.getElementById('knowledge-web-suggestions-list');const count=document.getElementById('knowledge-web-suggestion-count');if(!box)return;
-            const total=(items||[]).reduce((n,item)=>n+sugestoesPendentesFonte(item).length,0);if(count)count.textContent=String(total);
-            box.replaceChildren();
-            const fontesComConteudo=(items||[]).filter(item=>item.webSummary||sugestoesPendentesFonte(item).length||item.suggestionsStatus==='erro');
-            if(!fontesComConteudo.length){box.innerHTML='<div class="knowledge-site-empty"><i class="bi bi-globe2 me-1"></i>Sincronize uma fonte. A IA irá resumir o site e gerar sugestões para sua aprovação.</div>';return;}
-            const frag=document.createDocumentFragment();fontesComConteudo.forEach(source=>{
+            const total=(items||[]).reduce((n,item)=>n+sugestoesPendentesFonte(item).length,0);if(count)count.textContent=String(total);box.replaceChildren();
+            const fontesComConteudo=(items||[]).filter(item=>item.webSummary||paginasSugestoesFonte(item).length||sugestoesPendentesFonte(item).length||item.suggestionsStatus==='erro');
+            if(!fontesComConteudo.length){box.innerHTML='<div class="knowledge-site-empty"><i class="bi bi-globe2 me-1"></i>Sincronize uma fonte. Cada página será analisada individualmente e ficará disponível para revisão.</div>';return;}
+            const frag=document.createDocumentFragment();
+            fontesComConteudo.forEach(source=>{
                 const sourceId=idFonteSiteIA(source);const wrap=document.createElement('div');wrap.className='knowledge-site-source';
                 const head=document.createElement('div');head.className='knowledge-site-source-head';const copy=document.createElement('div');copy.innerHTML=`<div class="knowledge-web-title">${escapeHtmlChat(source.nome||'Site')}</div><div class="knowledge-web-url">${escapeHtmlChat(source.url||'')}</div>`;
-                const btn=document.createElement('button');btn.type='button';btn.className='btn btn-sm btn-outline-secondary';btn.innerHTML='<i class="bi bi-stars me-1"></i>Gerar novamente';btn.onclick=()=>gerarSugestoesFonteSiteIA(sourceId,btn);head.append(copy,btn);wrap.appendChild(head);
+                const btn=document.createElement('button');btn.type='button';btn.className='btn btn-sm btn-outline-secondary';btn.innerHTML='<i class="bi bi-stars me-1"></i>Analisar páginas novamente';btn.onclick=()=>gerarSugestoesFonteSiteIA(sourceId,btn);head.append(copy,btn);wrap.appendChild(head);
                 if(source.webSummary){const summary=document.createElement('div');summary.className='knowledge-site-summary';summary.textContent=source.webSummary;wrap.appendChild(summary);}
                 if(source.suggestionsStatus==='erro'&&source.suggestionsError){const er=document.createElement('div');er.className='alert alert-warning py-2 px-3 mt-2 mb-0 small';er.textContent=source.suggestionsError;wrap.appendChild(er);}
-                const suggestions=sugestoesPendentesFonte(source);
-                if(!suggestions.length){const empty=document.createElement('div');empty.className='knowledge-compact-help mt-2';empty.textContent='Nenhuma sugestão pendente desta fonte.';wrap.appendChild(empty);}
-                suggestions.forEach(sug=>{
-                    const row=document.createElement('div');row.className='knowledge-site-suggestion';const main=document.createElement('div');const title=document.createElement('div');title.className='knowledge-site-suggestion-title';title.textContent=sug.pergunta||'Sugestão';const txt=document.createElement('div');txt.className='knowledge-site-suggestion-text';txt.textContent=sug.resposta||'';const meta=document.createElement('div');meta.className='knowledge-site-suggestion-meta';(sug.palavrasChave||[]).slice(0,4).forEach(k=>{const c=document.createElement('span');c.className='knowledge-chip';c.textContent=k;meta.appendChild(c)});main.append(title,txt,meta);
-                    const actions=document.createElement('div');actions.className='knowledge-site-suggestion-actions';const use=document.createElement('button');use.type='button';use.className='btn btn-sm text-white fw-bold';use.style.background='var(--adv-blue)';use.innerHTML='<i class="bi bi-arrow-right-circle me-1"></i>Revisar e inserir';use.onclick=()=>usarSugestaoSiteNaBase(sourceId,sug.id);const ignore=document.createElement('button');ignore.type='button';ignore.className='btn btn-sm btn-outline-secondary';ignore.textContent='Ignorar';ignore.onclick=()=>atualizarStatusSugestaoSite(sourceId,sug.id,'ignorado');actions.append(use,ignore);row.append(main,actions);wrap.appendChild(row);
-                });frag.appendChild(wrap);
+                const pagesWrap=document.createElement('div');pagesWrap.className='knowledge-site-pages';const pages=paginasSugestoesFonte(source);const pendentes=sugestoesPendentesFonte(source);
+                if(!pages.length){const empty=document.createElement('div');empty.className='knowledge-compact-help mt-2';empty.textContent='Nenhuma página analisada ainda.';wrap.appendChild(empty);frag.appendChild(wrap);return;}
+                pages.forEach(page=>{
+                    const pageUrl=String(page.url||'');const pageCard=document.createElement('div');pageCard.className='knowledge-site-page';
+                    const phead=document.createElement('div');phead.className='knowledge-site-page-head';const pcopy=document.createElement('div');const ptitle=document.createElement('div');ptitle.className='knowledge-site-page-title';ptitle.textContent=page.title||'Página sincronizada';const purl=document.createElement('div');purl.className='knowledge-site-page-url';purl.textContent=pageUrl;purl.title=pageUrl;pcopy.append(ptitle,purl);
+                    const psugs=pendentes.filter(s=>String(s.paginaUrl||s.fonteUrls?.[0]||'')===pageUrl);const badge=document.createElement('span');badge.className='knowledge-chip';badge.textContent=`${psugs.length} pendente${psugs.length===1?'':'s'}`;phead.append(pcopy,badge);pageCard.appendChild(phead);
+                    if(page.resumo){const summary=document.createElement('div');summary.className='knowledge-site-page-summary';summary.textContent=page.resumo;pageCard.appendChild(summary);}
+                    if(psugs.length){psugs.forEach(s=>pageCard.appendChild(renderizarSugestaoPaginaSite(sourceId,s)));}
+                    else{const empty=document.createElement('div');empty.className='knowledge-site-page-empty';empty.textContent=Number(page.suggestionsCount||0)>0?'As sugestões desta página já foram adicionadas ou ignoradas.':'A IA não identificou conteúdo útil para criar um conhecimento nesta página.';pageCard.appendChild(empty);}
+                    pagesWrap.appendChild(pageCard);
+                });
+                wrap.appendChild(pagesWrap);frag.appendChild(wrap);
             });box.appendChild(frag);
         }
         function usarSugestaoSiteNaBase(sourceId,suggestionId){
@@ -5784,7 +5839,7 @@
         }
         async function carregarFontesSiteIA(){try{const res=await fetch('/api/knowledgeWebSources',{cache:'no-store'});const data=await res.json().catch(()=>[]);if(!res.ok)return;window.knowledgeWebSources=Array.isArray(data)?data:[];renderizarFontesSiteIA(window.knowledgeWebSources);renderizarSugestoesSiteIA(window.knowledgeWebSources);}catch(_){} }
         async function salvarFonteSiteIA(sincronizar=false){
-            const id=document.getElementById('knowledge-web-id').value.trim();const nome=document.getElementById('knowledge-web-name').value.trim();const url=document.getElementById('knowledge-web-url').value.trim();const maxPages=Number(document.getElementById('knowledge-web-max-pages').value||15);const ativo=document.getElementById('knowledge-web-active').checked;if(!nome||!url)return alert('Informe o nome da fonte e a URL do site.');
+            const id=document.getElementById('knowledge-web-id').value.trim();const nome=document.getElementById('knowledge-web-name').value.trim();const url=document.getElementById('knowledge-web-url').value.trim();const maxPages=Number(document.getElementById('knowledge-web-max-pages').value||50);const ativo=document.getElementById('knowledge-web-active').checked;if(!nome||!url)return alert('Informe o nome da fonte e a URL do site.');
             const btn=document.getElementById(sincronizar?'knowledge-web-save-sync':'knowledge-web-save');const old=btn?.innerHTML||'';if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span> Salvando…';}
             try{const res=await fetch(id?`/api/knowledgeWebSources/${encodeURIComponent(id)}`:'/api/knowledgeWebSources',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome,url,maxPages,ativo})});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível salvar a fonte.');const fonteId=id||data.id;limparFonteSiteIA();await carregarFontesSiteIA();if(sincronizar&&fonteId)await sincronizarFonteSiteIA(fonteId);}catch(err){alert(err.message||'Não foi possível salvar a fonte.');}finally{if(btn){btn.disabled=false;btn.innerHTML=old;}}
         }
