@@ -2588,7 +2588,7 @@ async function pilotoInterativoLiberadoParaJid(jid, ticket = null) {
 }
 
 function criarNosAdicionaisInteracaoPiloto(nomeFluxo = 'mixed') {
-    // V43: para quick_reply/lista genéricos, implementações atuais que funcionam
+    // V45: para quick_reply genérico, implementações atuais que funcionam
     // sobre WhiskeySockets anunciam o Native Flow como v=9/name=mixed. O pacote
     // oficial não injeta essa estrutura automaticamente, então fazemos isso apenas
     // no piloto e sem alterar o restante do socket.
@@ -2623,26 +2623,18 @@ async function enviarQuickRepliesPiloto(jid, { texto = '', footer = '', opcoes =
         .slice(0, 20);
     if (botoes.length < 2) throw new Error('A seleção interativa precisa de pelo menos duas opções.');
 
-    const nativeButtons = botoes.length <= 3
-        ? botoes.map(opcao => ({
-            name: 'quick_reply',
-            buttonParamsJson: JSON.stringify({ display_text: opcao.texto, id: opcao.id })
-        }))
-        : [{
-            name: 'single_select',
-            buttonParamsJson: JSON.stringify({
-                title: String(tituloBotao || 'Escolher opção').trim().slice(0, 24),
-                sections: [{
-                    title: 'Opções disponíveis',
-                    rows: botoes.map(opcao => ({
-                        header: '',
-                        title: opcao.texto.slice(0, 72),
-                        description: opcao.descricao.slice(0, 72),
-                        id: opcao.id
-                    }))
-                }]
-            })
-        }];
+    // V45: usamos somente quick_reply, que foi validado no ambiente real.
+    // O single_select não é usado porque o WhatsApp exibiu "Não foi possível carregar a mensagem".
+    if (botoes.length > 3) {
+        throw new Error('Quick reply suporta no máximo 3 botões por página. Use paginação.');
+    }
+    const nativeButtons = botoes.map(opcao => ({
+        name: 'quick_reply',
+        buttonParamsJson: JSON.stringify({
+            display_text: String(opcao.texto || '').trim().slice(0, 20),
+            id: opcao.id
+        })
+    }));
 
     const interactiveMessage = proto.Message.InteractiveMessage.fromObject({
         body: { text: String(texto || '').trim() },
@@ -2687,7 +2679,7 @@ async function sendBotQuickReplyPiloto(jid, config = {}) {
         registrarMensagemAutomaticaChat(jid, sent, { text: textoRegistro }).catch(err => {
             console.warn('[Chat] Falha ao registrar mensagem interativa automática:', err?.message || err);
         });
-        console.log(`[WA Interactive] Seleção Native Flow v9/mixed enviada para ${normalizarJid(jid) || jid} em ${Date.now() - inicio}ms | id=${id || '-'}.`);
+        console.log(`[WA Interactive] Botões Native Flow v9/mixed enviados para ${normalizarJid(jid) || jid} em ${Date.now() - inicio}ms | id=${id || '-'}.`);
         return true;
     } catch (err) {
         console.warn(`[WA Interactive] Falha na seleção interativa para ${normalizarJid(jid) || jid}; usando fallback textual:`, err?.message || err);
@@ -2757,27 +2749,54 @@ async function enviarPerguntaCadastroClientePiloto(jid, prefixo = '', ticket = n
     return false;
 }
 
-async function enviarMenuPrincipalInterativo(jid, { prefixo = '', ticket = null } = {}) {
+async function enviarMenuPrincipalInterativo(jid, { prefixo = '', ticket = null, pagina = 0 } = {}) {
     const opcoes = await carregarMenuOpcoes();
     const prefixoLimpo = String(prefixo || '').trim();
-    const textoInterativo = [prefixoLimpo, 'Para direcionarmos corretamente, selecione uma das opções abaixo:'].filter(Boolean).join('\n\n');
-    const escolhas = opcoes.map((item, index) => {
+    const TAMANHO_PAGINA = 2;
+    const totalPaginas = Math.max(1, Math.ceil(opcoes.length / TAMANHO_PAGINA));
+    const paginaSegura = Math.max(0, Math.min(Number(pagina) || 0, totalPaginas - 1));
+    const inicio = paginaSegura * TAMANHO_PAGINA;
+    const itensPagina = opcoes.slice(inicio, inicio + TAMANHO_PAGINA);
+
+    const linhasPagina = itensPagina.map((item, offset) => {
+        const indiceGlobal = inicio + offset + 1;
         const emoji = String(item?.emoji || '').trim();
+        const titulo = String(item?.titulo || `Opção ${indiceGlobal}`).trim();
+        return `${numeroComEmoji(indiceGlobal)} ${emoji ? `${emoji} ` : ''}${titulo}`;
+    }).join('\n');
+
+    const cabecalho = paginaSegura === 0
+        ? 'Para direcionarmos corretamente, selecione uma das opções abaixo:'
+        : `Mais opções de atendimento (${paginaSegura + 1}/${totalPaginas}):`;
+    const textoInterativo = [prefixoLimpo, cabecalho, linhasPagina].filter(Boolean).join('\n\n');
+
+    const escolhas = itensPagina.map((item, offset) => {
+        const indiceGlobal = inicio + offset + 1;
+        const titulo = String(item?.titulo || `Opção ${indiceGlobal}`).trim();
         return {
-            id: `aj_menu_${index + 1}`,
-            texto: `${emoji ? `${emoji} ` : ''}${String(item?.titulo || `Opção ${index + 1}`).trim()}`,
-            descricao: String(item?.area || '').trim()
+            id: `aj_menu_${indiceGlobal}`,
+            texto: `${indiceGlobal}. ${titulo}`
         };
     });
 
+    if (totalPaginas > 1) {
+        if (paginaSegura < totalPaginas - 1) {
+            escolhas.push({ id: `aj_menu_page_${paginaSegura + 1}`, texto: 'Mais opções' });
+        } else {
+            escolhas.push({ id: 'aj_menu_page_0', texto: 'Voltar ao início' });
+        }
+    }
+
     const enviado = await sendBotQuickReplyPiloto(jid, {
         texto: textoInterativo,
-        footer: 'Você também pode responder digitando o número da opção.',
+        footer: `Página ${paginaSegura + 1}/${totalPaginas} · Você também pode responder digitando o número da opção.`,
         opcoes: escolhas,
-        tituloBotao: 'Escolher área',
         ticket
     });
-    if (enviado) return true;
+    if (enviado) {
+        console.log(`[WA Interactive] Menu AJ ${ticket?.ticketNumber || '-'} página ${paginaSegura + 1}/${totalPaginas} enviado com ${itensPagina.length} opção(ões).`);
+        return true;
+    }
 
     const menuTexto = await gerarMenuTexto();
     await sendBotMsg(jid, {
@@ -2786,7 +2805,7 @@ async function enviarMenuPrincipalInterativo(jid, { prefixo = '', ticket = null 
     return false;
 }
 
-async function enviarPerguntaTriagemInterativa(jid, pergunta, { prefixo = '', ticket = null } = {}) {
+async function enviarPerguntaTriagemInterativa(jid, pergunta, { prefixo = '', ticket = null, pagina = 0 } = {}) {
     const prefixoLimpo = String(prefixo || '').trim();
     const perguntaTexto = String(pergunta?.texto || '').trim();
     const aceitas = Array.isArray(pergunta?.respostasAceitas) ? pergunta.respostasAceitas.filter(Boolean) : [];
@@ -2797,17 +2816,45 @@ async function enviarPerguntaTriagemInterativa(jid, pergunta, { prefixo = '', ti
         return false;
     }
 
+    const TAMANHO_PAGINA = 2;
+    const totalPaginas = Math.max(1, Math.ceil(aceitas.length / TAMANHO_PAGINA));
+    const paginaSegura = Math.max(0, Math.min(Number(pagina) || 0, totalPaginas - 1));
+    const inicio = paginaSegura * TAMANHO_PAGINA;
+    const respostasPagina = aceitas.slice(inicio, inicio + TAMANHO_PAGINA);
+    const indicePergunta = Number.isInteger(ticket?.indicePerguntaFluxo) ? ticket.indicePerguntaFluxo : 0;
+
+    const linhas = respostasPagina.map((resposta, offset) => {
+        const indiceGlobal = inicio + offset + 1;
+        return `${numeroComEmoji(indiceGlobal)} ${String(resposta).trim()}`;
+    }).join('\n');
+
+    const texto = [prefixoLimpo, perguntaTexto, linhas].filter(Boolean).join('\n\n');
+    const escolhas = respostasPagina.map((resposta, offset) => {
+        const indiceGlobal = inicio + offset + 1;
+        return {
+            id: `aj_triagem_${indiceGlobal}`,
+            texto: `${indiceGlobal}. ${String(resposta).trim()}`
+        };
+    });
+
+    if (totalPaginas > 1) {
+        if (paginaSegura < totalPaginas - 1) {
+            escolhas.push({ id: `aj_triagem_page_${indicePergunta}_${paginaSegura + 1}`, texto: 'Mais opções' });
+        } else {
+            escolhas.push({ id: `aj_triagem_page_${indicePergunta}_0`, texto: 'Voltar ao início' });
+        }
+    }
+
     const enviado = await sendBotQuickReplyPiloto(jid, {
-        texto: [prefixoLimpo, perguntaTexto].filter(Boolean).join('\n\n'),
-        footer: 'Você também pode digitar a resposta ou o número da opção.',
-        opcoes: aceitas.slice(0, 20).map((resposta, index) => ({
-            id: `aj_triagem_${index + 1}`,
-            texto: String(resposta).trim()
-        })),
-        tituloBotao: 'Escolher resposta',
+        texto,
+        footer: `Página ${paginaSegura + 1}/${totalPaginas} · Você também pode digitar a resposta ou o número da opção.`,
+        opcoes: escolhas,
         ticket
     });
-    if (enviado) return true;
+    if (enviado) {
+        console.log(`[WA Interactive] Triagem ${ticket?.ticketNumber || '-'} pergunta ${indicePergunta + 1} página ${paginaSegura + 1}/${totalPaginas} enviada.`);
+        return true;
+    }
 
     const fallback = `${perguntaTexto}\n\n${aceitas.map((item, index) => `${numeroComEmoji(index + 1)} ${item}`).join('\n')}`;
     await sendBotMsg(jid, { text: [prefixoLimpo, fallback].filter(Boolean).join('\n\n') });
@@ -3072,20 +3119,25 @@ function interpretarIdInterativoParaFluxo(id = '') {
     if (!valor) return '';
     const menu = valor.match(/^aj_menu_(\d{1,3})$/i);
     if (menu) return menu[1];
+    const menuPagina = valor.match(/^aj_menu_page_(\d{1,3})$/i);
+    if (menuPagina) return `__AJ_MENU_PAGE_${menuPagina[1]}__`;
     const triagem = valor.match(/^aj_triagem_(\d{1,3})$/i);
     if (triagem) return `__AJ_TRIAGEM_${triagem[1]}__`;
+    const triagemPagina = valor.match(/^aj_triagem_page_(\d{1,3})_(\d{1,3})$/i);
+    if (triagemPagina) return `__AJ_TRIAGEM_PAGE_${triagemPagina[1]}_${triagemPagina[2]}__`;
     return '';
 }
 
-// V44: componente único de seleção Native Flow v9/mixed.
-// 2/3 opções usam quick_reply; 4+ opções usam single_select.
+// V45: componente único usando somente quick_reply Native Flow v9/mixed.
+// Menus com mais de duas opções são paginados em 2 escolhas + navegação.
+// O single_select foi removido após falhar na renderização do WhatsApp.
 // Digitação permanece compatível e qualquer falha cai no texto tradicional.
 const WA_INTERACTIVE_POLL_HANDLED = new Set();
 const WA_INTERACTIVE_POLL_TITLE = 'Deseja se cadastrar?';
 
 if (WA_INTERACTIVE_ENABLED) {
     if (WA_INTERACTIVE_TEST_TARGETS.size) {
-        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}. seleções Native Flow v9/mixed ativas em menu, triagem fechada e cadastro.`);
+        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}. botões Native Flow v9/mixed paginados ativos em menu, triagem fechada e cadastro.`);
     } else {
         console.warn('[WA Interactive] WA_INTERACTIVE_ENABLED=true, mas WA_INTERACTIVE_TEST_NUMBERS está vazio. O piloto permanecerá inativo por segurança.');
     }
@@ -6872,6 +6924,33 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
         if (ticket && !ticket.ticketNumber) {
             await ticketsColl.deleteOne({ _id: ticket._id });
             ticket = null;
+        }
+
+        // Navegação dos menus paginados Native Flow. Estes cliques apenas trocam
+        // a página de botões e nunca avançam o estado do atendimento.
+        const menuPaginaInterativa = texto.match(/^__AJ_MENU_PAGE_(\d{1,3})__$/);
+        if (ticket && menuPaginaInterativa && ticket.aguardandoOpcao) {
+            await enviarMenuPrincipalInterativo(rawJid, {
+                ticket,
+                pagina: Number.parseInt(menuPaginaInterativa[1], 10) || 0
+            });
+            return;
+        }
+
+        const triagemPaginaInterativa = texto.match(/^__AJ_TRIAGEM_PAGE_(\d{1,3})_(\d{1,3})__$/);
+        if (ticket && triagemPaginaInterativa && ticket.aguardandoPerguntaFluxo) {
+            const indiceEsperado = Number.parseInt(triagemPaginaInterativa[1], 10);
+            const paginaSolicitada = Number.parseInt(triagemPaginaInterativa[2], 10) || 0;
+            const indiceAtual = Number.isInteger(ticket.indicePerguntaFluxo) ? ticket.indicePerguntaFluxo : 0;
+            const perguntaAtual = Array.isArray(ticket.perguntasFluxo) ? ticket.perguntasFluxo[indiceAtual] : null;
+            if (perguntaAtual) {
+                await enviarPerguntaTriagemInterativa(rawJid, perguntaAtual, {
+                    ticket,
+                    pagina: indiceEsperado === indiceAtual ? paginaSolicitada : 0,
+                    prefixo: indiceEsperado === indiceAtual ? '' : 'Essa etapa já mudou. Segue a pergunta atual:'
+                });
+            }
+            return;
         }
 
         if (ticket && /^__AJ_TRIAGEM_\d{1,3}__$/.test(texto)) {
