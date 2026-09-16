@@ -788,6 +788,15 @@ const KNOWLEDGE_WEB_DISCOVERY_VERSION = 3;
 const KNOWLEDGE_WEB_MAX_HTML_BYTES = 1_500_000;
 const KNOWLEDGE_WEB_MAX_TEXT_CHARS_PER_PAGE = 18000;
 const KNOWLEDGE_WEB_MAX_CANDIDATES = 4;
+// A geração de sugestões do site usa um modelo estável e possui retry/fallback
+// próprio. Isso evita perder uma página inteira quando um modelo preview sofre
+// pico temporário de demanda (HTTP 503/429).
+const KNOWLEDGE_WEB_AI_MAX_ATTEMPTS = Math.max(2, Math.min(6, Number(process.env.KNOWLEDGE_WEB_AI_MAX_ATTEMPTS || 4)));
+const KNOWLEDGE_WEB_AI_RETRY_BASE_MS = Math.max(500, Number(process.env.KNOWLEDGE_WEB_AI_RETRY_BASE_MS || 1200));
+const KNOWLEDGE_WEB_AI_TIMEOUT_MS = Math.max(8000, Number(process.env.KNOWLEDGE_WEB_AI_TIMEOUT_MS || 30000));
+const KNOWLEDGE_WEB_AI_PREFERRED_MODEL = String(process.env.GEMINI_KNOWLEDGE_WEB_MODEL || 'gemini-2.5-flash-lite').trim();
+const KNOWLEDGE_WEB_AI_FALLBACK_MODELS = String(process.env.GEMINI_KNOWLEDGE_WEB_FALLBACK_MODELS || 'gemini-2.5-flash')
+    .split(',').map(v => v.trim()).filter(Boolean);
 
 
 // Cache das opções de atendimento. O MongoDB passa a ser a fonte de verdade do menu.
@@ -3929,61 +3938,152 @@ function resumoPaginaFallbackKnowledgeWeb(page = {}) {
     return texto.slice(0, 420) + (texto.length > 420 ? '…' : '');
 }
 
-async function analisarLotePaginasKnowledgeWeb(source, pages = []) {
-    if (!geminiModel || !pages.length) return [];
-    const contexto = pages.map((pagina, i) => {
-        const trecho = String(pagina.text || '').trim().slice(0, 7500);
-        return `[PÁGINA ${i + 1}]\nTÍTULO: ${String(pagina.title || 'Sem título').slice(0, 260)}\nURL: ${pagina.url}\nCONTEÚDO:\n${trecho}`;
-    }).join('\n\n---\n\n');
+function erroTemporarioKnowledgeWebIA(err) {
+    const status = Number(err?.status || err?.statusCode || err?.response?.status || err?.cause?.status || 0);
+    const msg = String(err?.message || err || '').toLowerCase();
+    return [408, 409, 425, 429, 500, 502, 503, 504].includes(status)
+        || /high demand|service unavailable|resource exhausted|rate limit|too many requests|timed out|timeout|temporar|try again|overloaded/.test(msg);
+}
 
+function esperarKnowledgeWebIA(ms) {
+    return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0))));
+}
+
+function modelosKnowledgeWebIA() {
+    const itens = [];
+    const usados = new Set();
+    const adicionarNome = (nome) => {
+        nome = String(nome || '').trim();
+        if (!nome || usados.has(nome) || !genAI) return;
+        usados.add(nome);
+        try {
+            itens.push({
+                nome,
+                model: genAI.getGenerativeModel({ model: nome }, { apiVersion: 'v1beta' })
+            });
+        } catch (_) {}
+    };
+
+    // Para importação de site preferimos um modelo estável em vez do preview usado
+    // nas demais rotinas. O modelo principal ainda funciona como fallback.
+    adicionarNome(KNOWLEDGE_WEB_AI_PREFERRED_MODEL);
+    if (geminiModel) itens.push({ nome: 'modelo-principal', model: geminiModel });
+    KNOWLEDGE_WEB_AI_FALLBACK_MODELS.forEach(adicionarNome);
+    return itens;
+}
+
+async function gerarConteudoKnowledgeWebComRetry(prompt) {
+    const modelos = modelosKnowledgeWebIA();
+    if (!modelos.length) throw new Error('A IA não está disponível para gerar sugestões do site.');
+
+    let ultimoErro = null;
+    let tentativaGlobal = 0;
+    for (let indiceModelo = 0; indiceModelo < modelos.length && tentativaGlobal < KNOWLEDGE_WEB_AI_MAX_ATTEMPTS; indiceModelo++) {
+        const atual = modelos[indiceModelo];
+        // O primeiro modelo recebe até duas tentativas; os demais funcionam como
+        // fallback imediato para não prolongar demais uma sincronização com várias páginas.
+        const tentativasModelo = indiceModelo === 0 ? 2 : 1;
+        for (let local = 1; local <= tentativasModelo && tentativaGlobal < KNOWLEDGE_WEB_AI_MAX_ATTEMPTS; local++) {
+            tentativaGlobal += 1;
+            try {
+                const timeout = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Timeout ao gerar sugestão do site.')), KNOWLEDGE_WEB_AI_TIMEOUT_MS);
+                });
+                const resultado = await Promise.race([atual.model.generateContent(prompt), timeout]);
+                return { resultado, modelo: atual.nome, tentativas: tentativaGlobal };
+            } catch (err) {
+                ultimoErro = err;
+                const temporario = erroTemporarioKnowledgeWebIA(err);
+                const modeloInexistente = Number(err?.status || err?.statusCode || 0) === 404 || /not found|not supported/.test(String(err?.message || '').toLowerCase());
+                const aindaHaModelo = indiceModelo < modelos.length - 1;
+                if (!temporario && !modeloInexistente) throw err;
+                if (!temporario && modeloInexistente && !aindaHaModelo) throw err;
+                if (tentativaGlobal >= KNOWLEDGE_WEB_AI_MAX_ATTEMPTS) break;
+
+                const atraso = (KNOWLEDGE_WEB_AI_RETRY_BASE_MS * (2 ** Math.min(tentativaGlobal - 1, 3))) + Math.floor(Math.random() * 450);
+                console.warn(`[IA Site] Modelo ${atual.nome} indisponível na tentativa ${tentativaGlobal}/${KNOWLEDGE_WEB_AI_MAX_ATTEMPTS}. ${aindaHaModelo ? 'Tentando novamente/fallback' : 'Tentando novamente'} em ${atraso}ms.`);
+                await esperarKnowledgeWebIA(atraso);
+            }
+        }
+    }
+    throw ultimoErro || new Error('Não foi possível consultar a IA para esta página.');
+}
+
+function motivoIgnorarPaginaKnowledgeWeb(page = {}) {
+    const url = normalizarTexto(page?.url || '');
+    const titulo = normalizarTexto(page?.title || '');
+    const texto = normalizarTexto(String(page?.text || '').slice(0, 2500));
+    const alvo = `${url} ${titulo}`;
+    // Apenas descarte determinístico de resíduos técnicos/automáticos. Conteúdo
+    // apenas "pouco relevante" continua visível para decisão do advogado.
+    if (/\b(?:wp admin|wp login|feed|replytocom|hello world|pagina 404|erro 404|captcha)\b/.test(alvo)) return 'Página técnica/automática do site.';
+    if (/\b(?:politica de cookies|cookie policy|preferencias de cookies)\b/.test(alvo) && texto.length < 5000) return 'Página técnica de cookies.';
+    if (!texto || texto.length < 120) return 'Conteúdo textual insuficiente.';
+    return '';
+}
+
+function criarSugestaoFallbackKnowledgeWeb(page = {}, source = {}, index = 0) {
+    const titulo = String(page?.title || 'Página do site').trim().slice(0, 260);
+    const resumo = resumoPaginaFallbackKnowledgeWeb(page).slice(0, 1200);
+    const pergunta = /\?$/.test(titulo) ? titulo : `Informações sobre ${titulo}`;
+    return normalizarSugestaoKnowledgeWeb({
+        pergunta,
+        resposta: resumo,
+        palavrasChave: tokensRelevantes(titulo).slice(0, 8),
+        variacoesPergunta: [],
+        origemGeracao: 'extracao_fallback'
+    }, source, index, page);
+}
+
+async function analisarPaginaKnowledgeWeb(source, pagina) {
+    const trecho = String(pagina?.text || '').trim().slice(0, 11000);
     const prompt = `Você auxilia a construir uma BASE DE CONHECIMENTO aprovada para atendimento jurídico por WhatsApp.
 
-Analise CADA página abaixo separadamente. Sua tarefa NÃO é publicar nada automaticamente. Para cada página, gere um resumo fiel e sugestões que um humano poderá revisar antes de inserir na base.
+Analise SOMENTE a página abaixo. Sua tarefa é criar material para REVISÃO HUMANA; nada será publicado automaticamente.
 
 FONTE: ${JSON.stringify(source.nome || source.url || 'Site')}
-
-PÁGINAS SINCRONIZADAS:
-${contexto}
+TÍTULO: ${String(pagina?.title || 'Sem título').slice(0, 260)}
+URL: ${pagina?.url}
+CONTEÚDO DA PÁGINA:\n${trecho}
 
 Retorne SOMENTE JSON válido:
 {
-  "paginas":[
+  "resumoPagina":"resumo fiel e objetivo do conteúdo",
+  "ignorarPagina":false,
+  "confiancaIgnorar":0,
+  "motivoIgnorar":"",
+  "sugestoes":[
     {
-      "url":"URL exata recebida",
-      "resumoPagina":"resumo objetivo do que esta página informa",
-      "conteudoUtil":true,
-      "sugestoes":[
-        {
-          "pergunta":"título/pergunta principal",
-          "resposta":"resposta padrão humana para WhatsApp",
-          "palavrasChave":["..."],
-          "variacoesPergunta":["..."]
-        }
-      ]
+      "pergunta":"título/pergunta principal",
+      "resposta":"resposta padrão humana para WhatsApp",
+      "palavrasChave":["..."],
+      "variacoesPergunta":["..."]
     }
   ]
 }
 
 REGRAS OBRIGATÓRIAS:
-1. Retorne UMA entrada para CADA página fornecida, preservando exatamente a URL.
-2. Use EXCLUSIVAMENTE fatos presentes na própria página correspondente. Não misture fatos de páginas diferentes e não use conhecimento externo.
-3. O resumoPagina deve explicar os dados úteis encontrados naquela página em até 900 caracteres.
-4. Gere sugestões somente quando a página for institucional e útil ao público para entender o escritório, equipe, áreas de atuação, serviços, contato ou orientação institucional relevante.
-5. Em páginas sem conteúdo útil ao atendimento (cookies, política técnica, página vazia, post genérico, notícia, artigo, arquivo, conteúdo promocional isolado ou página automática do CMS), use conteudoUtil=false e sugestoes=[]. Não invente uma sugestão só para preencher.
-6. Em páginas como "Nossa equipe", preserve os nomes, cargos, áreas e informações exatamente como aparecem na página; nunca invente profissionais ou qualificações.
-7. Em páginas de áreas de atuação, preserve escopo e ressalvas. Não acrescente leis, prazos, valores ou resultados não informados.
-8. Cada resposta deve ser humana, clara, profissional e curta, adequada a WhatsApp.
-9. Palavras-chave e variações servem apenas para localizar o conhecimento; não podem acrescentar fatos.
-10. Nunca prometa resultado jurídico.`;
+1. Use EXCLUSIVAMENTE fatos desta página. Não use conhecimento externo e não combine informações de outras URLs.
+2. A decisão final é do advogado. NÃO descarte uma página apenas porque ela parece pouco relevante, específica, comercial ou difícil de transformar em FAQ.
+3. Por padrão use ignorarPagina=false e gere de 1 a 4 sugestões que representem fielmente os principais conteúdos da página.
+4. Use ignorarPagina=true SOMENTE quando estiver MUITO CLARO que o conteúdo é técnico/automático, impróprio, malicioso ou totalmente alheio ao escritório/serviços profissionais. Nesses casos use confiancaIgnorar entre 90 e 100 e explique brevemente o motivo.
+5. Se houver qualquer conteúdo que um advogado possa querer aproveitar na Base, use ignorarPagina=false. A relevância final será decidida pelo usuário do painel.
+6. O resumoPagina deve ter até 900 caracteres e preservar nomes, áreas, serviços, condições, ressalvas e demais fatos exatamente como constam na página.
+7. Em páginas de equipe, preserve nomes, cargos e áreas exatamente como publicados. Nunca invente profissional, especialidade ou qualificação.
+8. Em páginas jurídicas ou de serviços, não acrescente lei, prazo, valor, resultado, promessa ou interpretação que não esteja expressamente no conteúdo.
+9. As respostas devem ser humanas, claras e apropriadas para WhatsApp, mas não podem adicionar fatos.
+10. Palavras-chave e variações servem somente para localizar o conhecimento.
+11. Nunca prometa resultado jurídico.`;
 
-    const result = await geminiModel.generateContent(prompt);
-    const parsed = extrairJsonIA((await result.response).text());
-    return Array.isArray(parsed?.paginas) ? parsed.paginas : [];
+    const { resultado, modelo, tentativas } = await gerarConteudoKnowledgeWebComRetry(prompt);
+    const parsed = extrairJsonIA((await resultado.response).text());
+    if (!parsed || typeof parsed !== 'object') throw new Error('A IA retornou uma análise inválida para a página.');
+    return { ...parsed, _modelo: modelo, _tentativas: tentativas };
 }
 
 async function gerarSugestoesKnowledgeWeb(source) {
     if (!knowledgeWebPagesColl || !knowledgeWebSourcesColl) throw new Error('Fontes web ainda não estão disponíveis.');
-    if (!geminiModel) throw new Error('A IA não está disponível para gerar sugestões do site.');
+    if (!geminiModel && !genAI) throw new Error('A IA não está disponível para gerar sugestões do site.');
 
     const pages = await knowledgeWebPagesColl.find(
         { sourceId: source._id, ativo: { $ne: false }, principal: true, discoveryVersion: KNOWLEDGE_WEB_DISCOVERY_VERSION },
@@ -3993,36 +4093,69 @@ async function gerarSugestoesKnowledgeWeb(source) {
 
     const sugestoes = [];
     const webPagesAnalysis = [];
+    const avisos = [];
+    let paginasOcultadas = 0;
+
     for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
         const page = pages[pageIndex];
-        let analise = {};
-        try {
-            // Uma página por chamada: impede a IA de combinar/comparar conteúdos de URLs diferentes.
-            const retorno = await analisarLotePaginasKnowledgeWeb(source, [page]);
-            analise = retorno?.[0] || {};
-        } catch (err) {
-            console.warn(`[IA] Falha ao analisar página ${page.url}:`, err?.message || err);
+        const motivoTecnico = motivoIgnorarPaginaKnowledgeWeb(page);
+        if (motivoTecnico) {
+            paginasOcultadas += 1;
+            continue;
         }
+
+        let analise = null;
+        let falhaIA = null;
+        try {
+            analise = await analisarPaginaKnowledgeWeb(source, page);
+        } catch (err) {
+            falhaIA = err;
+            avisos.push(`${page.title || page.url}: IA temporariamente indisponível; foi criado um rascunho extraído da própria página.`);
+            console.warn(`[IA Site] Falha após retries/fallbacks em ${page.url}:`, err?.message || err);
+        }
+
+        const ignorarPelaIA = !!analise?.ignorarPagina && Number(analise?.confiancaIgnorar || 0) >= 90;
+        if (ignorarPelaIA) {
+            paginasOcultadas += 1;
+            console.log(`[IA Site] Página omitida por conteúdo claramente fora/técnico: ${page.url} — ${String(analise?.motivoIgnorar || '').slice(0, 220)}`);
+            continue;
+        }
+
         const resumoPagina = String(analise?.resumoPagina || '').trim().slice(0, 900) || resumoPaginaFallbackKnowledgeWeb(page);
-        const sugestoesPagina = (Array.isArray(analise?.sugestoes) ? analise.sugestoes : [])
+        let sugestoesPagina = (Array.isArray(analise?.sugestoes) ? analise.sugestoes : [])
             .map((item, index) => normalizarSugestaoKnowledgeWeb(item, source, pageIndex * 10 + index, page))
             .filter(Boolean)
             .slice(0, 4);
+
+        // Se a IA não viu uma FAQ perfeita, a página NÃO some. Criamos um rascunho
+        // fiel ao texto para o advogado decidir se aproveita, edita ou ignora.
+        if (!sugestoesPagina.length) {
+            const fallback = criarSugestaoFallbackKnowledgeWeb(page, source, pageIndex * 10);
+            if (fallback) sugestoesPagina = [fallback];
+        }
+
         sugestoes.push(...sugestoesPagina);
         webPagesAnalysis.push({
             pageId: String(page._id || ''),
             url: String(page.url || ''),
             title: String(page.title || 'Página sem título').slice(0, 300),
             resumo: resumoPagina,
-            conteudoUtil: analise?.conteudoUtil !== false && sugestoesPagina.length > 0,
             suggestionsCount: sugestoesPagina.length,
+            generationMode: falhaIA ? 'rascunho_local' : 'ia',
+            model: String(analise?._modelo || ''),
+            attempts: Number(analise?._tentativas || 0),
             generatedAt: Date.now()
         });
+
+        // Pequena pausa entre páginas reduz rajadas de requisições e picos 429/503.
+        if (pageIndex < pages.length - 1) await esperarKnowledgeWebIA(350 + Math.floor(Math.random() * 250));
     }
 
     const agora = Date.now();
     const totalComSugestoes = webPagesAnalysis.filter(item => item.suggestionsCount > 0).length;
-    const webSummary = `${pages.length} página${pages.length === 1 ? '' : 's'} autorizada${pages.length === 1 ? '' : 's'} analisada${pages.length === 1 ? '' : 's'} separadamente. ${totalComSugestoes} ${totalComSugestoes === 1 ? 'gerou' : 'geraram'} sugestões para revisão.`;
+    const webSummary = `${totalComSugestoes} página${totalComSugestoes === 1 ? '' : 's'} disponibilizada${totalComSugestoes === 1 ? '' : 's'} para revisão. ${paginasOcultadas ? `${paginasOcultadas} página${paginasOcultadas === 1 ? '' : 's'} técnica${paginasOcultadas === 1 ? '' : 's'}/fora do escopo ${paginasOcultadas === 1 ? 'foi omitida' : 'foram omitidas'}.` : 'Nenhuma página foi descartada por relevância.'}`;
+    const suggestionsStatus = avisos.length ? 'parcial' : 'ok';
+    const suggestionsError = avisos.slice(0, 5).join(' | ').slice(0, 1800);
 
     await knowledgeWebSourcesColl.updateOne(
         { _id: source._id },
@@ -4031,12 +4164,20 @@ async function gerarSugestoesKnowledgeWeb(source) {
             webPagesAnalysis,
             knowledgeSuggestions: sugestoes.slice(0, 300),
             suggestionsGeneratedAt: agora,
-            suggestionsStatus: 'ok',
-            suggestionsError: '',
+            suggestionsStatus,
+            suggestionsError,
             updatedAt: agora
         } }
     );
-    return { resumoFonte: webSummary, webPagesAnalysis, sugestoes: sugestoes.slice(0, 300), suggestionsCount: Math.min(300, sugestoes.length), generatedAt: agora };
+    return {
+        resumoFonte: webSummary,
+        webPagesAnalysis,
+        sugestoes: sugestoes.slice(0, 300),
+        suggestionsCount: Math.min(300, sugestoes.length),
+        generatedAt: agora,
+        suggestionsStatus,
+        warnings: avisos.length
+    };
 }
 
 async function carregarKnowledgeWebPages() {
@@ -4509,14 +4650,38 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
     }
 
     if (analiseIA.acao === 'ATENDIMENTO_HUMANO') {
+        const agora = Date.now();
+        const urgente = analiseIA.urgente === true;
         const jaComEquipe = ticket?.status === 'aguardando_especialista' || ticket?.status === 'em_atendimento_humano' || ticket?.paused === true;
+
         if (jaComEquipe) {
+            // O pedido repetido não muda o fluxo nem cria nova prioridade. Apenas deixa
+            // claro que o atendimento já está aberto. Um cooldown curto evita que o bot
+            // repita a mesma frase várias vezes se o cliente mandar mensagens em sequência.
+            const ultimaResposta = Number(ticket?.ultimaRespostaInsistenciaHumanoEm || 0);
+            if (!ultimaResposta || (agora - ultimaResposta) >= 45 * 1000) {
+                await sendBotMsg(jid, {
+                    text: 'Seu atendimento já está aberto. Aguarde mais um instante que alguém da equipe já vai entrar em contato com você.'
+                });
+                await ticketsColl.updateOne(
+                    { _id: ticket._id },
+                    { $set: { ultimaRespostaInsistenciaHumanoEm: agora, lastActivity: agora } }
+                ).catch(() => {});
+                ticket.ultimaRespostaInsistenciaHumanoEm = agora;
+            }
+            await atualizarHistorico(ticket.ticketNumber, {
+                ultimoPedidoRepetidoAtendimentoHumanoEm: agora,
+                mensagemPedidoHumano: String(mensagemCliente || '').trim().slice(0, 1200)
+            }).catch(() => {});
             return true;
         }
 
-        const agora = Date.now();
-        const urgente = analiseIA.urgente === true;
+        // Ainda não chegou à fila humana: o cliente precisa concluir o fluxo para que
+        // o caso seja direcionado corretamente. Pedido insistente não pula menu/triagem/cadastro.
+        const retomada = await mensagemRetomadaFluxo(ticket);
+        const mensagemFluxo = `Entendi que você quer falar com alguém da equipe. Para direcionar seu atendimento corretamente, preciso primeiro concluir estas informações.${retomada || ''}`.trim();
         await Promise.allSettled([
+            sendBotMsg(jid, { text: mensagemFluxo }),
             ticketsColl.updateOne(
                 { _id: ticket._id },
                 { $set: { solicitouAtendimentoHumanoEm: agora, pedidoAtendimentoUrgente: urgente, lastActivity: agora } }
@@ -4524,16 +4689,10 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
             atualizarHistorico(ticket.ticketNumber, {
                 solicitouAtendimentoHumanoEm: agora,
                 pedidoAtendimentoUrgente: urgente,
+                pedidoHumanoAguardandoConclusaoFluxo: true,
                 mensagemPedidoHumano: String(mensagemCliente || '').trim().slice(0, 1200)
             })
         ]);
-
-        await encaminharParaEspecialista(
-            ticket,
-            jid,
-            'Claro. Vou deixar seu atendimento com a equipe. Se ainda não enviou os detalhes, pode me contar brevemente o assunto por aqui.',
-            { mensagemCliente, tipo: urgente ? 'pedido_atendimento_humano_urgente' : 'pedido_atendimento_humano' }
-        );
         return true;
     }
 
@@ -6002,35 +6161,30 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             });
             dispararAnaliseArquivo(ticket);
 
-            // Se o primeiro contato já pedir uma pessoa/advogado, não força o cliente a
-            // passar pelo menu. É uma intenção operacional e independe da Base de Conhecimento.
+            // Mesmo quando o primeiro contato já pede um humano, o ticket precisa passar
+            // pelo fluxo de direcionamento. Registramos a intenção, mas não pulamos menu/triagem.
             const pedidoHumanoInicial = detectarPedidoAtendimentoHumano(texto);
             if (pedidoHumanoInicial.solicitado) {
                 const agoraPedido = Date.now();
                 await Promise.allSettled([
                     ticketsColl.updateOne(
                         { _id: ticket._id },
-                        { $set: { solicitouAtendimentoHumanoEm: agoraPedido, pedidoAtendimentoUrgente: pedidoHumanoInicial.urgente === true, lastActivity: agoraPedido } }
+                        { $set: { solicitouAtendimentoHumanoEm: agoraPedido, pedidoAtendimentoUrgente: pedidoHumanoInicial.urgente === true, pedidoHumanoAguardandoConclusaoFluxo: true, lastActivity: agoraPedido } }
                     ),
                     atualizarHistorico(ticket.ticketNumber, {
                         solicitouAtendimentoHumanoEm: agoraPedido,
                         pedidoAtendimentoUrgente: pedidoHumanoInicial.urgente === true,
+                        pedidoHumanoAguardandoConclusaoFluxo: true,
                         mensagemPedidoHumano: String(texto || '').trim().slice(0, 1200)
                     })
                 ]);
-                await encaminharParaEspecialista(
-                    ticket,
-                    rawJid,
-                    'Claro. Vou deixar seu atendimento com a equipe. Se ainda não enviou os detalhes, pode me contar brevemente o assunto por aqui.',
-                    { mensagemCliente: texto, tipo: pedidoHumanoInicial.urgente ? 'pedido_atendimento_humano_urgente' : 'pedido_atendimento_humano' }
-                );
-                console.log(`[Ticket ${ticket.ticketNumber}] Novo atendimento encaminhado diretamente à equipe por solicitação do cliente.`);
-                return;
             }
 
-            const recepcaoEnviada = await sendBotMsg(rawJid, {
-                text: await mensagemRecepcao(cliente, ticket.ticketNumber, texto)
-            });
+            const recepcaoBase = await mensagemRecepcao(cliente, ticket.ticketNumber, texto);
+            const recepcaoTexto = pedidoHumanoInicial.solicitado
+                ? `Entendi. Para direcionar você ao profissional adequado, preciso primeiro que siga o fluxo abaixo.\n\n${recepcaoBase}`
+                : recepcaoBase;
+            const recepcaoEnviada = await sendBotMsg(rawJid, { text: recepcaoTexto });
 
             // A recepção já contém a saudação do atendimento. Marcamos isso no ticket
             // para que nenhuma rotina posterior trate uma etapa do fluxo como nova abertura.
