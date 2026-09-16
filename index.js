@@ -8,7 +8,8 @@ const {
     downloadMediaMessage,
     makeCacheableSignalKeyStore,
     proto,
-    generateWAMessageFromContent
+    generateWAMessageFromContent,
+    getAggregateVotesInPollMessage
 } = require('@whiskeysockets/baileys');
 const { MongoClient, ObjectId } = require('mongodb');
 const express = require('express');
@@ -2684,18 +2685,52 @@ async function sendBotQuickReplyPiloto(jid, config = {}) {
     }
 }
 
+async function sendBotPollPiloto(jid, { texto = '', opcoes = [], ticket = null } = {}) {
+    if (!(await pilotoInterativoLiberadoParaJid(jid, ticket))) return false;
+    if (!sock?.user || typeof sock.sendMessage !== 'function') throw new Error('WhatsApp não conectado para enquete interativa.');
+
+    const valores = (Array.isArray(opcoes) ? opcoes : [])
+        .map(v => String(v || '').trim())
+        .filter(Boolean)
+        .slice(0, 12);
+    if (valores.length < 2) throw new Error('A enquete precisa de pelo menos duas opções.');
+
+    const inicio = Date.now();
+    try {
+        const sent = await executarEnvioSerializadoPorJid(jid, async () => {
+            const enviado = await sock.sendMessage(jid, {
+                poll: {
+                    name: String(texto || WA_INTERACTIVE_POLL_TITLE).trim(),
+                    values: valores,
+                    selectableCount: 1,
+                    toAnnouncementGroup: false
+                }
+            });
+            guardarMensagemEnviadaBaileys(enviado);
+            return enviado;
+        });
+
+        const id = String(sent?.key?.id || '').trim();
+        if (id) {
+            botMessageIds.add(id);
+            setTimeout(() => botMessageIds.delete(id), 60 * 1000);
+        }
+        console.log(`[WA Interactive] Piloto POLL enviado para ${normalizarJid(jid) || jid} em ${Date.now() - inicio}ms | id=${id || '-'}.`);
+        return true;
+    } catch (err) {
+        console.warn(`[WA Interactive] Falha ao enviar POLL para ${normalizarJid(jid) || jid}; usando fallback textual:`, err?.message || err);
+        return false;
+    }
+}
+
 async function enviarPerguntaCadastroClientePiloto(jid, prefixo = '', ticket = null) {
     const prefixoLimpo = String(prefixo || '').trim();
     const pergunta = 'Se quiser, posso deixar seu cadastro pronto para facilitar os próximos contatos com o escritório. Deseja se cadastrar?';
     const textoInterativo = [prefixoLimpo, pergunta].filter(Boolean).join('\n\n');
 
-    const enviadoInterativo = await sendBotQuickReplyPiloto(jid, {
+    const enviadoInterativo = await sendBotPollPiloto(jid, {
         texto: textoInterativo,
-        footer: WA_INTERACTIVE_PILOT_FOOTER,
-        opcoes: [
-            { id: 'aj_cadastro_sim', texto: 'Sim' },
-            { id: 'aj_cadastro_nao', texto: 'Não' }
-        ],
+        opcoes: ['Sim', 'Não'],
         ticket
     });
 
@@ -2704,6 +2739,57 @@ async function enviarPerguntaCadastroClientePiloto(jid, prefixo = '', ticket = n
     const fallback = [prefixoLimpo, PERGUNTA_CADASTRO_CLIENTE].filter(Boolean).join('\n\n');
     await sendBotMsg(jid, { text: fallback });
     return false;
+}
+
+async function processarAtualizacaoPollPiloto(key = {}, update = {}) {
+    if (!WA_INTERACTIVE_ENABLED || !Array.isArray(update?.pollUpdates) || !update.pollUpdates.length) return;
+    const pollId = String(key?.id || '').trim();
+    const jid = normalizarJid(key?.remoteJid) || key?.remoteJid;
+    if (!pollId || !jid || WA_INTERACTIVE_POLL_HANDLED.has(pollId)) return;
+
+    try {
+        const pollCreation = await obterMensagemEnviadaBaileys(key);
+        if (!pollCreation) {
+            console.warn(`[WA Interactive] Atualização de POLL ${pollId} recebida, mas a mensagem original não foi localizada.`);
+            return;
+        }
+
+        const pollMessage = pollCreation?.pollCreationMessage || pollCreation?.pollCreationMessageV2 || pollCreation?.pollCreationMessageV3;
+        const nomePoll = String(pollMessage?.name || '').trim();
+        if (!nomePoll || !nomePoll.toLowerCase().includes('deseja se cadastrar')) return;
+
+        const agregadas = getAggregateVotesInPollMessage({
+            message: pollCreation,
+            pollUpdates: update.pollUpdates
+        }, sock?.user?.id);
+
+        const escolhida = (Array.isArray(agregadas) ? agregadas : []).find(item => Array.isArray(item?.voters) && item.voters.length > 0);
+        const resposta = String(escolhida?.name || '').trim();
+        if (!/^(sim|não|nao)$/i.test(resposta)) {
+            console.warn(`[WA Interactive] POLL ${pollId} atualizado sem opção reconhecida: ${resposta || 'nenhuma'}.`);
+            return;
+        }
+
+        WA_INTERACTIVE_POLL_HANDLED.add(pollId);
+        setTimeout(() => WA_INTERACTIVE_POLL_HANDLED.delete(pollId), 6 * 60 * 60 * 1000);
+
+        const textoResposta = /^sim$/i.test(resposta) ? 'Sim' : 'Não';
+        const updateId = String(update.pollUpdates?.[0]?.pollUpdateMessageKey?.id || `pollvote_${pollId}_${Date.now()}`);
+        console.log(`[WA Interactive] Voto do POLL ${pollId}: ${textoResposta}. Encaminhando ao fluxo do ticket.`);
+
+        await processarMensagemUpsert({
+            key: {
+                remoteJid: jid,
+                fromMe: false,
+                id: updateId
+            },
+            messageTimestamp: Math.floor(Date.now() / 1000),
+            message: { conversation: textoResposta },
+            pushName: 'Cliente'
+        }, 'notify');
+    } catch (err) {
+        console.error(`[WA Interactive] Falha ao processar voto do POLL ${pollId || '-'}:`, err?.message || err);
+    }
 }
 
 function validarCPF(cpf) {
@@ -2895,10 +2981,15 @@ const WA_INTERACTIVE_REPLY_LABELS = new Map([
     ['aj_cadastro_sim', 'Sim'],
     ['aj_cadastro_nao', 'Não']
 ]);
+// V42: o pacote oficial WhiskeySockets rejeitou o Native Flow com ACK 405
+// no ambiente real. O piloto passa a usar Poll, formato documentado pelo Baileys,
+// mantendo o fluxo textual como fallback.
+const WA_INTERACTIVE_POLL_HANDLED = new Set();
+const WA_INTERACTIVE_POLL_TITLE = 'Deseja se cadastrar?';
 
 if (WA_INTERACTIVE_ENABLED) {
     if (WA_INTERACTIVE_TEST_TARGETS.size) {
-        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}. Diagnóstico de elegibilidade ativo.`);
+        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}. Piloto de seleção via POLL ativo.`);
     } else {
         console.warn('[WA Interactive] WA_INTERACTIVE_ENABLED=true, mas WA_INTERACTIVE_TEST_NUMBERS está vazio. O piloto permanecerá inativo por segurança.');
     }
@@ -7629,6 +7720,19 @@ socketAtual.ev.on('messages.upsert', (m = {}) => {
             }
         }
     });
+});
+
+
+// V42: respostas de Poll chegam em messages.update já decriptadas pelo Baileys,
+// desde que getMessage consiga recuperar a mensagem original (o socket deste projeto
+// já usa obterMensagemEnviadaBaileys para isso).
+socketAtual.ev.on('messages.update', (updates = []) => {
+    for (const item of Array.isArray(updates) ? updates : []) {
+        if (!item?.update?.pollUpdates) continue;
+        processarAtualizacaoPollPiloto(item.key || {}, item.update || {}).catch(err => {
+            console.error('[WA Interactive] Falha não tratada no evento de POLL:', err?.message || err);
+        });
+    }
 });
 
         // Atualiza o cadastro quando o Baileys informar um novo mapeamento LID <-> número.
