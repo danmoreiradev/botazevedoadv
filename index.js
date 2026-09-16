@@ -783,7 +783,8 @@ let knowledgeCache = { items: [], loadedAt: 0 };
 let knowledgeWebCache = { pages: [], loadedAt: 0 };
 const KNOWLEDGE_WEB_CACHE_TTL_MS = 45 * 1000;
 const KNOWLEDGE_WEB_MAX_PAGES = 100;
-const KNOWLEDGE_WEB_DEFAULT_PAGES = 50;
+const KNOWLEDGE_WEB_DEFAULT_PAGES = 30;
+const KNOWLEDGE_WEB_DISCOVERY_VERSION = 2;
 const KNOWLEDGE_WEB_MAX_HTML_BYTES = 1_500_000;
 const KNOWLEDGE_WEB_MAX_TEXT_CHARS_PER_PAGE = 18000;
 const KNOWLEDGE_WEB_MAX_CANDIDATES = 4;
@@ -3601,6 +3602,7 @@ function htmlParaTextoKnowledgeWeb(html = '') {
         String(html || '')
             .replace(/<!--[\s\S]*?-->/g, ' ')
             .replace(/<(script|style|noscript|svg|template|iframe)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+            .replace(/<(header|nav|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
             .replace(/<br\s*\/?>/gi, '\n')
             .replace(/<\/(p|div|section|article|li|h[1-6]|tr|header|footer|main|nav)>/gi, '\n')
             .replace(/<[^>]+>/g, ' ')
@@ -3621,6 +3623,93 @@ function urlCanonicaKnowledgeWeb(valor, origem) {
         if (/\.(?:jpg|jpeg|png|webp|gif|svg|ico|pdf|docx?|xlsx?|pptx?|zip|rar|7z|mp3|mp4|avi|mov|css|js|xml)(?:$|\?)/i.test(url.pathname + url.search)) return null;
         return url.toString();
     } catch (_) { return null; }
+}
+
+function motivoUrlDescartadaKnowledgeWeb(valor = '', origemPermitida = '') {
+    let url;
+    try { url = new URL(String(valor || '')); }
+    catch (_) { return 'url_invalida'; }
+    if (origemPermitida && url.origin !== origemPermitida) return 'outro_dominio';
+
+    // Páginas com parâmetros normalmente representam busca, comentários, tracking,
+    // paginação ou variações técnicas. A base web deve refletir páginas institucionais
+    // estáveis e facilmente acessíveis pelo público.
+    const params = [...url.searchParams.keys()].map(v => String(v || '').toLowerCase());
+    if (params.length) return 'parametros';
+
+    const path = decodeURIComponent(String(url.pathname || '/')).toLowerCase().replace(/\/{2,}/g, '/');
+    if (/\/(?:wp-admin|wp-login|wp-json|xmlrpc|feed|comments?|comment-page|author|tag|category|search|attachment|trackback|embed)(?:\/|$)/i.test(path)) return 'tecnica';
+    if (/\/(?:hello-world|sample-page|pagina-de-exemplo)(?:\/|$)/i.test(path)) return 'padrao_wordpress';
+    if (/\/(?:20\d{2})\/(?:0?[1-9]|1[0-2])(?:\/(?:0?[1-9]|[12]\d|3[01]))?(?:\/|$)/i.test(path)) return 'arquivo_data';
+    if (/\/page\/\d+(?:\/|$)/i.test(path)) return 'paginacao';
+    if (/\/(?:amp)(?:\/|$)/i.test(path)) return 'variacao_amp';
+    return '';
+}
+
+function profundidadeUrlKnowledgeWeb(valor = '') {
+    try {
+        return new URL(valor).pathname.split('/').filter(Boolean).length;
+    } catch (_) { return 99; }
+}
+
+function pontuarUrlPrincipalKnowledgeWeb(valor = '', origemPermitida = '') {
+    let url;
+    try { url = new URL(String(valor || '')); }
+    catch (_) { return -999; }
+    const motivo = motivoUrlDescartadaKnowledgeWeb(url.toString(), origemPermitida);
+    if (motivo) return -999;
+    const path = decodeURIComponent(url.pathname || '/').toLowerCase();
+    const profundidade = profundidadeUrlKnowledgeWeb(url.toString());
+    if (path === '/' || !path.replace(/\//g, '')) return 100;
+    let score = 0;
+    if (profundidade === 1) score += 45;
+    else if (profundidade === 2) score += 18;
+    else score -= 25;
+
+    const positivos = [
+        'sobre','quem-somos','escritorio','institucional','equipe','advogado','advogados','profissionais',
+        'areas','areas-de-atuacao','atuacao','servicos','especialidades','contato','fale-conosco','atendimento',
+        'direito-civil','direito-digital','direito-trabalhista','direito-do-consumidor','consumidor','familia',
+        'imobiliario','empresarial','tributario','previdenciario','holding','sucessorio','societario'
+    ];
+    if (positivos.some(t => path.includes(t))) score += 45;
+
+    const negativos = ['blog','noticia','noticias','artigo','artigos','post','posts','evento','eventos','portfolio','case','cases','politica-de-privacidade','privacy','termos','cookies'];
+    if (negativos.some(t => path.includes(t))) score -= 35;
+    return score;
+}
+
+function urlPrincipalElegivelKnowledgeWeb(valor = '', origemPermitida = '') {
+    return pontuarUrlPrincipalKnowledgeWeb(valor, origemPermitida) >= 0;
+}
+
+function extrairLinksDeTrechoKnowledgeWeb(html = '', paginaUrl = '', origemPermitida = '') {
+    return extrairLinksKnowledgeWeb(html, paginaUrl, origemPermitida)
+        .filter(url => urlPrincipalElegivelKnowledgeWeb(url, origemPermitida));
+}
+
+function extrairLinksNavegacaoPrincipalKnowledgeWeb(html = '', paginaUrl = '', origemPermitida = '') {
+    const bruto = String(html || '');
+    const blocos = [];
+    const padroes = [
+        /<nav\b[^>]*>[\s\S]*?<\/nav>/gi,
+        /<header\b[^>]*>[\s\S]*?<\/header>/gi,
+        /<(?:div|ul)\b[^>]*(?:id|class)\s*=\s*["'][^"']*(?:menu|nav|navbar|navigation|header-menu|main-menu|primary-menu)[^"']*["'][^>]*>[\s\S]*?<\/(?:div|ul)>/gi
+    ];
+    for (const regex of padroes) {
+        let m;
+        while ((m = regex.exec(bruto)) && blocos.length < 40) blocos.push(m[0]);
+    }
+    const vistos = new Set();
+    const links = [];
+    for (const bloco of blocos) {
+        for (const url of extrairLinksDeTrechoKnowledgeWeb(bloco, paginaUrl, origemPermitida)) {
+            if (vistos.has(url)) continue;
+            vistos.add(url);
+            links.push(url);
+        }
+    }
+    return links.sort((a,b) => pontuarUrlPrincipalKnowledgeWeb(b, origemPermitida) - pontuarUrlPrincipalKnowledgeWeb(a, origemPermitida));
 }
 
 function extrairLinksKnowledgeWeb(html = '', paginaUrl = '', origemPermitida = '') {
@@ -3713,7 +3802,7 @@ async function descobrirUrlsSitemapKnowledgeWeb(urlBase, origemPermitida, limite
                     continue;
                 }
                 const canonica = urlCanonicaKnowledgeWeb(parsed.toString(), urlBase);
-                if (!canonica || paginasVistas.has(canonica)) continue;
+                if (!canonica || paginasVistas.has(canonica) || !urlPrincipalElegivelKnowledgeWeb(canonica, origemPermitida)) continue;
                 paginasVistas.add(canonica);
                 paginas.push(canonica);
             }
@@ -3729,47 +3818,86 @@ async function sincronizarFonteKnowledgeWeb(source) {
     const inicial = await validarUrlPublicaKnowledgeWeb(source.url);
     const origem = inicial.origin;
     const limite = Math.max(1, Math.min(KNOWLEDGE_WEB_MAX_PAGES, Number(source.maxPages || KNOWLEDGE_WEB_DEFAULT_PAGES)));
-    const urlsSitemap = await descobrirUrlsSitemapKnowledgeWeb(inicial.toString(), origem, limite).catch(() => []);
-    const fila = [{ url: inicial.toString(), depth: 0 }, ...urlsSitemap.filter(url => url !== inicial.toString()).map(url => ({ url, depth: 0 }))];
     const visitadas = new Set();
     const paginas = [];
     const erros = [];
+    const ignoradas = [];
+    const urlsPrincipais = new Set([urlCanonicaKnowledgeWeb(inicial.toString(), inicial) || inicial.toString()]);
+
+    // A home é a autoridade principal para descobrir o que o público realmente vê.
+    // Primeiro lemos a navegação visível; o sitemap entra somente como fallback.
+    let homeBaixada = null;
+    try {
+        homeBaixada = await baixarPaginaKnowledgeWeb(inicial.toString());
+        const homeCanonical = urlCanonicaKnowledgeWeb(homeBaixada.url, inicial) || homeBaixada.url;
+        urlsPrincipais.add(homeCanonical);
+        const linksMenu = extrairLinksNavegacaoPrincipalKnowledgeWeb(homeBaixada.html, homeBaixada.url, origem);
+        linksMenu.slice(0, Math.max(limite * 2, 30)).forEach(url => urlsPrincipais.add(url));
+    } catch (err) {
+        erros.push(`${inicial.toString()}: ${String(err?.message || err).slice(0, 180)}`);
+    }
+
+    // Se o menu não puder ser identificado (tema JS, markup incomum etc.), usa sitemap
+    // com filtro de relevância e profundidade, evitando posts, arquivos e páginas técnicas.
+    if (urlsPrincipais.size <= 1) {
+        const urlsSitemap = await descobrirUrlsSitemapKnowledgeWeb(inicial.toString(), origem, Math.min(limite * 3, KNOWLEDGE_WEB_MAX_PAGES)).catch(() => []);
+        urlsSitemap
+            .filter(url => urlPrincipalElegivelKnowledgeWeb(url, origem))
+            .sort((a,b) => pontuarUrlPrincipalKnowledgeWeb(b, origem) - pontuarUrlPrincipalKnowledgeWeb(a, origem))
+            .slice(0, limite)
+            .forEach(url => urlsPrincipais.add(url));
+    }
+
+    const fila = [...urlsPrincipais]
+        .filter(Boolean)
+        .sort((a,b) => pontuarUrlPrincipalKnowledgeWeb(b, origem) - pontuarUrlPrincipalKnowledgeWeb(a, origem))
+        .map(url => ({ url }));
 
     while (fila.length && paginas.length < limite) {
         const atual = fila.shift();
         const canonical = urlCanonicaKnowledgeWeb(atual.url, inicial);
         if (!canonical || visitadas.has(canonical)) continue;
         visitadas.add(canonical);
+        const motivo = motivoUrlDescartadaKnowledgeWeb(canonical, origem);
+        if (motivo) { ignoradas.push({ url: canonical, motivo }); continue; }
+        if (!urlPrincipalElegivelKnowledgeWeb(canonical, origem)) { ignoradas.push({ url: canonical, motivo: 'baixa_relevancia' }); continue; }
+
         try {
-            const baixada = await baixarPaginaKnowledgeWeb(canonical);
+            const baixada = homeBaixada && canonical === (urlCanonicaKnowledgeWeb(homeBaixada.url, inicial) || homeBaixada.url)
+                ? homeBaixada
+                : await baixarPaginaKnowledgeWeb(canonical);
+            const finalCanonical = urlCanonicaKnowledgeWeb(baixada.url, inicial) || baixada.url;
+            const motivoFinal = motivoUrlDescartadaKnowledgeWeb(finalCanonical, origem);
+            if (motivoFinal || !urlPrincipalElegivelKnowledgeWeb(finalCanonical, origem)) {
+                ignoradas.push({ url: finalCanonical, motivo: motivoFinal || 'baixa_relevancia' });
+                continue;
+            }
             const texto = htmlParaTextoKnowledgeWeb(baixada.html);
-            if (texto.length >= 80) {
-                const titulo = extrairTituloKnowledgeWeb(baixada.html, new URL(baixada.url).pathname || source.nome || 'Página');
-                paginas.push({
-                    sourceId: source._id,
-                    sourceName: source.nome || inicial.hostname,
-                    url: baixada.url,
-                    title: titulo || source.nome || inicial.hostname,
-                    text: texto,
-                    contentHash: crypto.createHash('sha256').update(texto).digest('hex'),
-                    fetchedAt: Date.now(),
-                    ativo: source.ativo !== false
-                });
+            if (texto.length < 120) {
+                ignoradas.push({ url: finalCanonical, motivo: 'conteudo_insuficiente' });
+                continue;
             }
-            if (paginas.length < limite) {
-                const links = extrairLinksKnowledgeWeb(baixada.html, baixada.url, origem);
-                for (const link of links) {
-                    if (!visitadas.has(link) && fila.length < limite * 5) fila.push({ url: link, depth: atual.depth + 1 });
-                }
-            }
+            const titulo = extrairTituloKnowledgeWeb(baixada.html, new URL(baixada.url).pathname || source.nome || 'Página');
+            paginas.push({
+                sourceId: source._id,
+                sourceName: source.nome || inicial.hostname,
+                url: finalCanonical,
+                title: titulo || source.nome || inicial.hostname,
+                text: texto,
+                contentHash: crypto.createHash('sha256').update(texto).digest('hex'),
+                fetchedAt: Date.now(),
+                ativo: source.ativo !== false,
+                principal: true,
+                discoveryVersion: KNOWLEDGE_WEB_DISCOVERY_VERSION
+            });
         } catch (err) {
             erros.push(`${canonical}: ${String(err?.message || err).slice(0, 180)}`);
         }
     }
 
-    if (!paginas.length) throw new Error(erros[0] || 'Nenhuma página pública pôde ser importada deste endereço.');
+    if (!paginas.length) throw new Error(erros[0] || 'Nenhuma página institucional principal pôde ser importada deste endereço.');
     const agora = Date.now();
-    const urlsAtuais = paginas.map(p => p.url);
+    const urlsAtuais = [...new Set(paginas.map(p => p.url))];
     for (const pagina of paginas) {
         await knowledgeWebPagesColl.updateOne(
             { sourceId: source._id, url: pagina.url },
@@ -3777,9 +3905,11 @@ async function sincronizarFonteKnowledgeWeb(source) {
             { upsert: true }
         );
     }
+    // Qualquer página capturada pela estratégia antiga (posts, comentários, query strings etc.)
+    // deixa de participar imediatamente das sugestões após uma nova sincronização.
     await knowledgeWebPagesColl.updateMany(
         { sourceId: source._id, url: { $nin: urlsAtuais } },
-        { $set: { ativo: false, updatedAt: agora } }
+        { $set: { ativo: false, principal: false, updatedAt: agora } }
     );
     await knowledgeWebSourcesColl.updateOne(
         { _id: source._id },
@@ -3787,6 +3917,9 @@ async function sincronizarFonteKnowledgeWeb(source) {
             lastSyncAt: agora,
             lastSyncStatus: 'ok',
             pageCount: paginas.length,
+            ignoredPageCount: ignoradas.length,
+            discoveryVersion: KNOWLEDGE_WEB_DISCOVERY_VERSION,
+            principalUrls: urlsAtuais,
             lastError: erros.slice(0, 3).join(' | '),
             webSummary: '',
             webPagesAnalysis: [],
@@ -3798,7 +3931,7 @@ async function sincronizarFonteKnowledgeWeb(source) {
         } }
     );
     invalidarCacheKnowledgeWeb();
-    return { pageCount: paginas.length, warnings: erros.length };
+    return { pageCount: paginas.length, ignoredPageCount: ignoradas.length, warnings: erros.length };
 }
 
 function normalizarSugestaoKnowledgeWeb(item = {}, source = {}, index = 0, pagina = {}) {
@@ -3867,8 +4000,8 @@ REGRAS OBRIGATÓRIAS:
 1. Retorne UMA entrada para CADA página fornecida, preservando exatamente a URL.
 2. Use EXCLUSIVAMENTE fatos presentes na própria página correspondente. Não misture fatos de páginas diferentes e não use conhecimento externo.
 3. O resumoPagina deve explicar os dados úteis encontrados naquela página em até 900 caracteres.
-4. Em páginas com conteúdo útil ao atendimento, gere de 1 a 4 sugestões específicas daquela página.
-5. Em páginas sem conteúdo útil ao atendimento (cookies, política técnica, página vazia etc.), use conteudoUtil=false e sugestoes=[]. Não invente uma sugestão só para preencher.
+4. Gere sugestões somente quando a página for institucional e útil ao público para entender o escritório, equipe, áreas de atuação, serviços, contato ou orientação institucional relevante.
+5. Em páginas sem conteúdo útil ao atendimento (cookies, política técnica, página vazia, post genérico, notícia, artigo, arquivo, conteúdo promocional isolado ou página automática do CMS), use conteudoUtil=false e sugestoes=[]. Não invente uma sugestão só para preencher.
 6. Em páginas como "Nossa equipe", preserve os nomes, cargos, áreas e informações exatamente como aparecem na página; nunca invente profissionais ou qualificações.
 7. Em páginas de áreas de atuação, preserve escopo e ressalvas. Não acrescente leis, prazos, valores ou resultados não informados.
 8. Cada resposta deve ser humana, clara, profissional e curta, adequada a WhatsApp.
@@ -3886,10 +4019,10 @@ async function gerarSugestoesKnowledgeWeb(source) {
 
     const limite = Math.max(1, Math.min(KNOWLEDGE_WEB_MAX_PAGES, Number(source.maxPages || KNOWLEDGE_WEB_DEFAULT_PAGES)));
     const pages = await knowledgeWebPagesColl.find(
-        { sourceId: source._id, ativo: { $ne: false } },
-        { projection: { _id: 1, title: 1, url: 1, text: 1, fetchedAt: 1 } }
+        { sourceId: source._id, ativo: { $ne: false }, principal: true, discoveryVersion: KNOWLEDGE_WEB_DISCOVERY_VERSION },
+        { projection: { _id: 1, title: 1, url: 1, text: 1, fetchedAt: 1, principal: 1 } }
     ).sort({ url: 1 }).limit(limite).toArray();
-    if (!pages.length) throw new Error('Sincronize o site antes de gerar sugestões.');
+    if (!pages.length) throw new Error('Sincronize novamente o site para identificar apenas as páginas principais do menu público.');
 
     const analisesPorUrl = new Map();
     const tamanhoLote = 4;
@@ -3965,7 +4098,7 @@ async function carregarKnowledgeWebPages() {
     if (!ids.length) return [];
     const nomes = new Map(fontes.map(f => [String(f._id), f.nome || 'Site']));
     const pages = await knowledgeWebPagesColl.find(
-        { sourceId: { $in: ids }, ativo: { $ne: false } },
+        { sourceId: { $in: ids }, ativo: { $ne: false }, principal: true, discoveryVersion: KNOWLEDGE_WEB_DISCOVERY_VERSION },
         { projection: { sourceId: 1, title: 1, url: 1, text: 1, fetchedAt: 1 } }
     ).sort({ fetchedAt: -1 }).limit(120).toArray();
     const result = pages.map(page => ({ ...page, sourceName: nomes.get(String(page.sourceId)) || 'Site' }));
@@ -10417,7 +10550,16 @@ app.get('/api/knowledgeWebSources', async (req, res) => {
     if (!knowledgeWebSourcesColl) return res.json([]);
     try {
         const data = await knowledgeWebSourcesColl.find({}).sort({ updatedAt: -1, createdAt: -1 }).toArray();
-        res.json(data);
+        res.json(data.map(item => {
+            if (Number(item.discoveryVersion || 0) >= KNOWLEDGE_WEB_DISCOVERY_VERSION) return item;
+            return {
+                ...item,
+                webSummary: item.lastSyncAt ? 'Esta fonte precisa ser sincronizada novamente para filtrar apenas as páginas principais do site.' : (item.webSummary || ''),
+                webPagesAnalysis: [],
+                knowledgeSuggestions: [],
+                suggestionsStatus: item.lastSyncAt ? 'requer_ressincronizacao' : item.suggestionsStatus
+            };
+        }));
     } catch (err) {
         res.status(500).json({ erro: 'Não foi possível carregar as fontes do site.' });
     }
@@ -10431,7 +10573,7 @@ app.post('/api/knowledgeWebSources', async (req, res) => {
         const url = await validarUrlPublicaKnowledgeWeb(doc.url);
         doc.url = url.toString();
         const agora = Date.now();
-        const result = await knowledgeWebSourcesColl.insertOne({ ...doc, pageCount: 0, lastSyncStatus: 'nunca', webSummary: '', webPagesAnalysis: [], knowledgeSuggestions: [], suggestionsStatus: 'nunca', suggestionsGeneratedAt: null, suggestionsError: '', createdAt: agora, updatedAt: agora });
+        const result = await knowledgeWebSourcesColl.insertOne({ ...doc, pageCount: 0, lastSyncStatus: 'nunca', webSummary: '', webPagesAnalysis: [], knowledgeSuggestions: [], principalUrls: [], discoveryVersion: 0, ignoredPageCount: 0, suggestionsStatus: 'nunca', suggestionsGeneratedAt: null, suggestionsError: '', createdAt: agora, updatedAt: agora });
         invalidarCacheKnowledgeWeb();
         res.status(201).json({ ok: true, id: String(result.insertedId) });
     } catch (err) {
@@ -10451,7 +10593,7 @@ app.put('/api/knowledgeWebSources/:id', async (req, res) => {
         const url = await validarUrlPublicaKnowledgeWeb(doc.url);
         doc.url = url.toString();
         const mudouUrl = doc.url !== existente.url;
-        await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { ...doc, ...(mudouUrl ? { pageCount: 0, lastSyncStatus: 'nunca', lastSyncAt: null, lastError: '', webSummary: '', webPagesAnalysis: [], knowledgeSuggestions: [], suggestionsStatus: 'nunca', suggestionsGeneratedAt: null, suggestionsError: '' } : {}), updatedAt: Date.now() } });
+        await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { ...doc, ...(mudouUrl ? { pageCount: 0, ignoredPageCount: 0, discoveryVersion: 0, principalUrls: [], lastSyncStatus: 'nunca', lastSyncAt: null, lastError: '', webSummary: '', webPagesAnalysis: [], knowledgeSuggestions: [], suggestionsStatus: 'nunca', suggestionsGeneratedAt: null, suggestionsError: '' } : {}), updatedAt: Date.now() } });
         if (mudouUrl) await knowledgeWebPagesColl.deleteMany({ sourceId: id });
         invalidarCacheKnowledgeWeb();
         res.json({ ok: true });
@@ -10499,7 +10641,7 @@ app.post('/api/knowledgeWebSources/:id/sync', async (req, res) => {
                 ).catch(() => {});
             }
         }
-        io.emit('knowledge_web_updated', { sourceId: String(id), pageCount: resultado.pageCount, suggestionsCount: sugestoesResultado?.suggestionsCount || 0, syncedAt: Date.now() });
+        io.emit('knowledge_web_updated', { sourceId: String(id), pageCount: resultado.pageCount, ignoredPageCount: resultado.ignoredPageCount || 0, suggestionsCount: sugestoesResultado?.suggestionsCount || 0, syncedAt: Date.now() });
         res.json({ ok: true, ...resultado, suggestionsCount: sugestoesResultado?.suggestionsCount || 0, suggestionsError: sugestoesErro || null });
     } catch (err) {
         if (id && knowledgeWebSourcesColl) {
