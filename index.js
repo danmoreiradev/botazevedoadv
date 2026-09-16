@@ -4486,25 +4486,95 @@ function possuiSinalDePergunta(texto = '') {
 }
 
 function detectarPedidoAtendimentoHumano(texto = '') {
-    const valor = normalizarTexto(texto)
+    let valor = normalizarTexto(texto)
         .replace(/[^a-z0-9\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-    if (!valor) return { solicitado: false, urgente: false };
+    if (!valor) return { solicitado: false, urgente: false, confianca: 0 };
 
-    const negado = /\b(?:nao|nem|dispenso)\s+(?:quero|preciso|gostaria).{0,30}\b(?:advogad[oa]|atendente|humano|pessoa)\b/.test(valor);
-    if (negado) return { solicitado: false, urgente: false };
+    // Normaliza abreviações muito comuns do WhatsApp antes da classificação.
+    valor = ` ${valor} `
+        .replace(/\badvs?\b/g, ' advogado ')
+        .replace(/\badvog\b/g, ' advogado ')
+        .replace(/\bdout\b/g, ' doutor ')
+        .replace(/\batend\b/g, ' atendente ')
+        .replace(/\bpessoa real\b/g, ' humano ')
+        .replace(/\s+/g, ' ')
+        .trim();
 
-    const pediuPessoa = [
-        /\b(?:quero|preciso|gostaria|posso|poderia)\s+(?:falar|conversar|ser atendid[oa])\s+(?:com\s+)?(?:um\s+|uma\s+)?(?:advogad[oa]|atendente|pessoa|humano)\b/,
-        /\b(?:falar|conversar)\s+(?:com\s+)?(?:um\s+|uma\s+)?(?:advogad[oa]|atendente|pessoa|humano|dr|dra|doutor|doutora)\b/,
-        /\b(?:chama|chamar|chame|quero)\s+(?:um\s+|uma\s+)?(?:advogad[oa]|atendente|pessoa)\b/,
-        /\b(?:atendimento|suporte)\s+(?:humano|com\s+advogad[oa])\b/,
-        /\b(?:advogad[oa]|atendente)\s+(?:por favor|pf|urgente)\b/
+    // Negação explícita sempre vence para evitar encaminhamento indevido.
+    const negado = [
+        /\b(?:nao|nem)\s+(?:quero|preciso|gostaria|necessito).{0,35}\b(?:advogad[oa]|atendente|humano|pessoa|alguem|doutor|doutora)\b/,
+        /\b(?:nao|nem)\s+(?:quero|preciso)\s+(?:falar|conversar|contato|atendimento)\b/,
+        /\b(?:dispenso|sem necessidade de)\s+(?:advogad[oa]|atendente|humano|pessoa)\b/
     ].some(regex => regex.test(valor));
+    if (negado) return { solicitado: false, urgente: false, confianca: 1, origem: 'regra_negacao' };
 
-    const urgente = /\b(?:urgente|urgencia|emergencia|o quanto antes|agora)\b/.test(valor);
-    return { solicitado: pediuPessoa, urgente };
+    const urgente = /\b(?:urgente|urgencia|emergencia|o quanto antes|agora|imediatamente|rapido|rapidamente)\b/.test(valor);
+
+    const padroesFortes = [
+        /\b(?:quero|preciso|gostaria|necessito|queria)\s+(?:falar|conversar|ter contato|entrar em contato|ser atendid[oa])\s+(?:com\s+)?(?:um\s+|uma\s+|algum\s+|alguma\s+)?(?:advogad[oa]|atendente|pessoa|humano|alguem|doutor|doutora|dr|dra|especialista|profissional)\b/,
+        /\b(?:falar|conversar|contato|atendimento)\s+(?:com\s+)?(?:um\s+|uma\s+|algum\s+|alguma\s+)?(?:advogad[oa]|atendente|pessoa|humano|alguem|doutor|doutora|dr|dra|especialista|profissional)\b/,
+        /\b(?:chama|chamar|chame|manda|mande|coloca|coloque)\s+(?:um\s+|uma\s+|algum\s+|alguma\s+)?(?:advogad[oa]|atendente|pessoa|humano|alguem|doutor|doutora|dr|dra)\b/,
+        /\b(?:preciso|quero|necessito|gostaria|queria)\s+(?:de\s+)?(?:um\s+|uma\s+|algum\s+|alguma\s+)?(?:advogad[oa]|atendente|humano|alguem|pessoa|especialista)\b/,
+        /\b(?:atendimento|suporte)\s+(?:humano|com\s+advogad[oa]|com\s+atendente)\b/,
+        /\b(?:advogad[oa]|atendente|humano|especialista)\s+(?:por favor|pf|urgente|agora)\b/,
+        /\b(?:tem|ha|cad[eê]|onde esta)\s+(?:alguem|um atendente|uma pessoa|um advogado|advogado)\s+(?:ai|a[ií])?\b/
+    ];
+    if (padroesFortes.some(regex => regex.test(valor))) {
+        return { solicitado: true, urgente, confianca: 1, origem: 'regra_forte' };
+    }
+
+    // Frases curtas típicas também são tratadas localmente para resposta imediata.
+    const tokens = new Set(valor.split(' ').filter(Boolean));
+    const alvoHumano = ['advogado','advogada','atendente','humano','alguem','pessoa','doutor','doutora','dr','dra','especialista','profissional']
+        .some(t => tokens.has(t));
+    const intencaoContato = ['quero','preciso','necessito','gostaria','queria','falar','conversar','contato','chamar','chama','chame','atendimento','urgente']
+        .some(t => tokens.has(t));
+    if (alvoHumano && intencaoContato && valor.split(' ').length <= 12) {
+        return { solicitado: true, urgente, confianca: 0.9, origem: 'regra_tokens' };
+    }
+
+    return { solicitado: false, urgente, confianca: 0, origem: 'nenhuma' };
+}
+
+function parecePedidoHumanoAmbiguo(texto = '') {
+    const valor = normalizarTexto(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!valor || valor.length > 260) return false;
+    const alvo = /\b(?:adv|advogado|advogada|advogad|atendente|atendimento|humano|alguem|pessoa|dr|dra|doutor|doutora|especialista|profissional)\b/.test(valor);
+    const intencao = /\b(?:quero|preciso|necessito|gostaria|queria|falar|conversar|contato|chamar|chama|atender|urgente|agora|ajuda)\b/.test(valor);
+    return alvo && intencao;
+}
+
+async function detectarPedidoAtendimentoHumanoComIA(texto = '') {
+    const local = detectarPedidoAtendimentoHumano(texto);
+    if (local.solicitado || !parecePedidoHumanoAmbiguo(texto)) return local;
+
+    const prompt = `Classifique APENAS a intenção desta mensagem de WhatsApp:
+${JSON.stringify(String(texto || '').slice(0, 500))}
+
+Retorne somente JSON válido: {"solicitado":true,"urgente":false}
+
+Use solicitado=true apenas se a pessoa estiver pedindo para falar, conversar, ser atendida ou entrar em contato com um ser humano, advogado, atendente, doutor ou profissional da equipe.
+Não marque true se ela estiver apenas perguntando uma informação sobre advogado, preço, área de atuação ou fazendo uma pergunta jurídica.
+Se houver negação (ex.: "não quero falar com advogado"), use false.
+Urgente=true somente se houver urgência explícita. Não use conhecimento externo.`;
+
+    try {
+        const { resultado } = await gerarConteudoKnowledgeBaseComRetry(prompt);
+        const parsed = extrairJsonIA((await resultado.response).text());
+        if (typeof parsed?.solicitado === 'boolean') {
+            return {
+                solicitado: parsed.solicitado === true,
+                urgente: parsed.urgente === true || local.urgente === true,
+                confianca: parsed.solicitado === true ? 0.75 : 0,
+                origem: 'ia_intencao_humano'
+            };
+        }
+    } catch (err) {
+        console.warn('[IA] Falha ao classificar pedido de atendimento humano; seguindo regras locais:', err?.message || err);
+    }
+    return local;
 }
 
 function entradaEstruturadaDoFluxo(ticket, texto = '') {
@@ -4608,9 +4678,13 @@ async function analisarMensagemComIA(texto, ticket) {
 
     // Pedido de contato humano é uma intenção operacional, não uma pergunta de conhecimento.
     // Portanto não consulta a Base e nunca deve cair em "não encontrei essa informação".
-    const pedidoHumano = detectarPedidoAtendimentoHumano(texto);
+    const pedidoHumano = await detectarPedidoAtendimentoHumanoComIA(texto);
     if (pedidoHumano.solicitado) {
-        return { acao: 'ATENDIMENTO_HUMANO', origem: 'regra', urgente: pedidoHumano.urgente === true };
+        return {
+            acao: 'ATENDIMENTO_HUMANO',
+            origem: pedidoHumano.origem || 'regra',
+            urgente: pedidoHumano.urgente === true
+        };
     }
 
     const atendimentoHumanoAtivo = ticket.status === 'em_atendimento_humano';
@@ -4849,48 +4923,36 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
     if (analiseIA.acao === 'ATENDIMENTO_HUMANO') {
         const agora = Date.now();
         const urgente = analiseIA.urgente === true;
-        const jaComEquipe = ticket?.status === 'aguardando_especialista' || ticket?.status === 'em_atendimento_humano' || ticket?.paused === true;
 
-        if (jaComEquipe) {
-            // O pedido repetido não muda o fluxo nem cria nova prioridade. Apenas deixa
-            // claro que o atendimento já está aberto. Um cooldown curto evita que o bot
-            // repita a mesma frase várias vezes se o cliente mandar mensagens em sequência.
-            const ultimaResposta = Number(ticket?.ultimaRespostaInsistenciaHumanoEm || 0);
-            if (!ultimaResposta || (agora - ultimaResposta) >= 45 * 1000) {
-                await sendBotMsg(jid, {
-                    text: 'Seu atendimento já está aberto. Aguarde mais um instante que alguém da equipe já vai entrar em contato com você.'
-                });
-                await ticketsColl.updateOne(
+        // Se esta rotina foi chamada, existe um ticket ativo. Pedido por advogado/humano
+        // nunca consulta a Base e sempre recebe a mesma confirmação operacional.
+        // Não usamos cooldown: cada nova insistência explícita recebe retorno claro.
+        if (ticket) {
+            const mensagemEspera = 'Seu atendimento já está aberto. Aguarde mais um instante que alguém da equipe já vai entrar em contato com você.';
+            await Promise.allSettled([
+                sendBotMsg(jid, { text: mensagemEspera }),
+                ticketsColl.updateOne(
                     { _id: ticket._id },
-                    { $set: { ultimaRespostaInsistenciaHumanoEm: agora, lastActivity: agora } }
-                ).catch(() => {});
-                ticket.ultimaRespostaInsistenciaHumanoEm = agora;
-            }
-            await atualizarHistorico(ticket.ticketNumber, {
-                ultimoPedidoRepetidoAtendimentoHumanoEm: agora,
-                mensagemPedidoHumano: String(mensagemCliente || '').trim().slice(0, 1200)
-            }).catch(() => {});
+                    { $set: {
+                        ultimaRespostaInsistenciaHumanoEm: agora,
+                        solicitouAtendimentoHumanoEm: ticket.solicitouAtendimentoHumanoEm || agora,
+                        pedidoAtendimentoUrgente: urgente || ticket.pedidoAtendimentoUrgente === true,
+                        lastActivity: agora
+                    } }
+                ),
+                atualizarHistorico(ticket.ticketNumber, {
+                    ultimoPedidoRepetidoAtendimentoHumanoEm: agora,
+                    solicitouAtendimentoHumanoEm: ticket.solicitouAtendimentoHumanoEm || agora,
+                    pedidoAtendimentoUrgente: urgente || ticket.pedidoAtendimentoUrgente === true,
+                    mensagemPedidoHumano: String(mensagemCliente || '').trim().slice(0, 1200),
+                    origemDeteccaoPedidoHumano: analiseIA.origem || 'regra'
+                })
+            ]);
+            ticket.ultimaRespostaInsistenciaHumanoEm = agora;
             return true;
         }
 
-        // Ainda não chegou à fila humana: o cliente precisa concluir o fluxo para que
-        // o caso seja direcionado corretamente. Pedido insistente não pula menu/triagem/cadastro.
-        const retomada = await mensagemRetomadaFluxo(ticket);
-        const mensagemFluxo = `Entendi que você quer falar com alguém da equipe. Para direcionar seu atendimento corretamente, preciso primeiro concluir estas informações.${retomada || ''}`.trim();
-        await Promise.allSettled([
-            sendBotMsg(jid, { text: mensagemFluxo }),
-            ticketsColl.updateOne(
-                { _id: ticket._id },
-                { $set: { solicitouAtendimentoHumanoEm: agora, pedidoAtendimentoUrgente: urgente, lastActivity: agora } }
-            ),
-            atualizarHistorico(ticket.ticketNumber, {
-                solicitouAtendimentoHumanoEm: agora,
-                pedidoAtendimentoUrgente: urgente,
-                pedidoHumanoAguardandoConclusaoFluxo: true,
-                mensagemPedidoHumano: String(mensagemCliente || '').trim().slice(0, 1200)
-            })
-        ]);
-        return true;
+        return false;
     }
 
     if (analiseIA.acao === 'CORTESIA') {
