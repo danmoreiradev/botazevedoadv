@@ -2631,6 +2631,24 @@ function normalizarRespostasAceitas(respostas = [], numeroPergunta = 0) {
     return [...unicas.values()];
 }
 
+function perguntaPareceSolicitarAnexo(texto = '') {
+    const normalizado = normalizarTexto(String(texto || ''))
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!normalizado) return false;
+
+    // Fallback para perguntas antigas, criadas antes da opção explícita no painel.
+    // A regra só é inferida quando também existem respostas Sim/Não.
+    return /\b(documento|documentos|imagem|imagens|foto|fotos|print|prints|arquivo|arquivos|anexo|anexos|comprovante|comprovantes|contrato|contratos|laudo|laudos|holerite|holerites|nota fiscal|notas fiscais)\b/.test(normalizado);
+}
+
+function respostasPossuemSimENao(respostas = []) {
+    const normalizadas = new Set((Array.isArray(respostas) ? respostas : []).map(normalizarRespostaParaValidacao));
+    return normalizadas.has('sim') && normalizadas.has('nao');
+}
+
 function normalizarPerguntasTriagem(perguntas = []) {
     if (!Array.isArray(perguntas)) return [];
     if (perguntas.length > MAX_PERGUNTAS_TRIAGEM) {
@@ -2646,10 +2664,18 @@ function normalizarPerguntasTriagem(perguntas = []) {
                 throw new Error(`A pergunta ${index + 1} ultrapassa ${MAX_CARACTERES_PERGUNTA} caracteres.`);
             }
 
+            const respostasAceitas = normalizarRespostasAceitas(objeto.respostasAceitas || [], index + 1);
+            const exigirAnexoSeSim = objeto.exigirAnexoSeSim === true || (
+                objeto.exigirAnexoSeSim == null &&
+                perguntaPareceSolicitarAnexo(texto) &&
+                respostasPossuemSimENao(respostasAceitas)
+            );
+
             return {
                 id: String(objeto.id || new ObjectId().toString()),
                 texto,
-                respostasAceitas: normalizarRespostasAceitas(objeto.respostasAceitas || [], index + 1),
+                respostasAceitas,
+                exigirAnexoSeSim,
                 ordem: index + 1,
                 ativo: objeto.ativo !== false
             };
@@ -2674,6 +2700,23 @@ function normalizarRespostaParaValidacao(texto = '') {
         .replace(/[^a-z0-9\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function respostaEhSim(texto = '') {
+    return ['sim', 's'].includes(normalizarRespostaParaValidacao(texto));
+}
+
+function respostaEhNao(texto = '') {
+    return ['nao', 'n'].includes(normalizarRespostaParaValidacao(texto));
+}
+
+function perguntaExigeAnexoSeSim(pergunta = {}) {
+    return pergunta?.exigirAnexoSeSim === true;
+}
+
+function mensagemSolicitarAnexoPergunta(pergunta = {}) {
+    const perguntaTexto = String(pergunta?.texto || '').trim();
+    return `Perfeito. Para continuar, envie agora a *imagem ou o documento* por aqui.\n\nSe você não possuir o arquivo, responda *Não*${perguntaTexto ? `.\n\n${perguntaTexto}` : '.'}`;
 }
 
 // As respostas aceitas ficam ocultas inicialmente.
@@ -5881,6 +5924,9 @@ async function encaminharParaEspecialista(ticket, jid, mensagem = null, { mensag
             $set: {
                 status: 'aguardando_especialista',
                 aguardandoPerguntaFluxo: false,
+                aguardandoAnexoPerguntaFluxo: false,
+                perguntaAguardandoAnexoId: null,
+                respostaAguardandoAnexo: null,
                 aguardandoDetalhesForaHorario: false,
                 aguardandoCadastroCliente: false,
                 aguardandoNomeCadastro: false,
@@ -5897,6 +5943,9 @@ async function encaminharParaEspecialista(ticket, jid, mensagem = null, { mensag
     ticket.paused = true;
     ticket.until = agora + tresDiasEmMs;
     ticket.aguardandoPerguntaFluxo = false;
+    ticket.aguardandoAnexoPerguntaFluxo = false;
+    ticket.perguntaAguardandoAnexoId = null;
+    ticket.respostaAguardandoAnexo = null;
     ticket.aguardandoDetalhesForaHorario = false;
     ticket.aguardandoCadastroCliente = false;
     ticket.aguardandoNomeCadastro = false;
@@ -5926,6 +5975,9 @@ async function concluirTriagemEAvancar(ticket, jid, mensagemCliente = '') {
         {
             $set: {
                 aguardandoPerguntaFluxo: false,
+                aguardandoAnexoPerguntaFluxo: false,
+                perguntaAguardandoAnexoId: null,
+                respostaAguardandoAnexo: null,
                 indicePerguntaFluxo: Array.isArray(ticket.perguntasFluxo) ? ticket.perguntasFluxo.length : 0,
                 status: ticket.clienteCadastrado ? 'aguardando_especialista' : 'aguardando_cadastro',
                 aguardandoCadastroCliente: !ticket.clienteCadastrado,
@@ -5935,6 +5987,9 @@ async function concluirTriagemEAvancar(ticket, jid, mensagemCliente = '') {
     );
 
     ticket.aguardandoPerguntaFluxo = false;
+    ticket.aguardandoAnexoPerguntaFluxo = false;
+    ticket.perguntaAguardandoAnexoId = null;
+    ticket.respostaAguardandoAnexo = null;
     ticket.aguardandoCadastroCliente = !ticket.clienteCadastrado;
 
     if (ticket.clienteCadastrado) {
@@ -6806,6 +6861,9 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                             aguardandoOpcao: false,
                             aguardandoDetalhes: false,
                             aguardandoPerguntaFluxo: true,
+                            aguardandoAnexoPerguntaFluxo: false,
+                            perguntaAguardandoAnexoId: null,
+                            respostaAguardandoAnexo: null,
                             perguntasFluxo,
                             indicePerguntaFluxo: 0,
                             respostasFluxo: [],
@@ -6821,7 +6879,13 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                     menuOptionTitle: opcaoSelecionada.titulo,
                     menuOptionEmoji: opcaoSelecionada.emoji || '',
                     status: 'aguardando_pergunta_fluxo',
-                    perguntasTriagem: perguntasFluxo.map(({ id, texto, respostasAceitas, ordem }) => ({ id, texto, respostasAceitas: respostasAceitas || [], ordem })),
+                    perguntasTriagem: perguntasFluxo.map(({ id, texto, respostasAceitas, exigirAnexoSeSim, ordem }) => ({
+                        id,
+                        texto,
+                        respostasAceitas: respostasAceitas || [],
+                        exigirAnexoSeSim: exigirAnexoSeSim === true,
+                        ordem
+                    })),
                     respostasTriagem: []
                 }).catch(err => console.warn('[Histórico] Falha ao registrar seleção de menu:', err?.message || err));
 
@@ -6881,34 +6945,76 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                 return;
             }
 
+            const temImagem = !!conteudoEntrada.imageMessage;
+            const temDocumento = !!conteudoEntrada.documentMessage;
+            const temAnexoValido = temImagem || temDocumento;
+            const exigeAnexoSeSim = perguntaExigeAnexoSeSim(perguntaAtual);
+            const aguardandoAnexoDaPerguntaAtual = exigeAnexoSeSim &&
+                ticket.aguardandoAnexoPerguntaFluxo === true &&
+                String(ticket.perguntaAguardandoAnexoId || '') === String(perguntaAtual.id || '');
+
             if (!texto && !isMedia) {
                 await sendBotMsg(rawJid, {
-                    text: `Para continuar, responda à pergunta abaixo:\n\n${formatarPerguntaParaEnvio(perguntaAtual)}`
+                    text: aguardandoAnexoDaPerguntaAtual
+                        ? mensagemSolicitarAnexoPergunta(perguntaAtual)
+                        : `Para continuar, responda à pergunta abaixo:\n\n${formatarPerguntaParaEnvio(perguntaAtual)}`
                 });
                 return;
+            }
+
+            let respostaTextoEfetiva = texto;
+            let respostaVeioDeAnexoPendente = false;
+
+            // Estado intermediário: o cliente já respondeu "Sim" e agora PRECISA
+            // enviar imagem/documento. Áudio, vídeo ou novo texto não liberam a etapa,
+            // exceto "Não", que significa que ele não possui o arquivo.
+            if (aguardandoAnexoDaPerguntaAtual) {
+                if (respostaEhNao(texto)) {
+                    respostaTextoEfetiva = 'Não';
+                } else if (temAnexoValido) {
+                    respostaTextoEfetiva = String(ticket.respostaAguardandoAnexo || 'Sim').trim() || 'Sim';
+                    respostaVeioDeAnexoPendente = true;
+                } else {
+                    await sendBotMsg(rawJid, { text: mensagemSolicitarAnexoPergunta(perguntaAtual) });
+                    await ticketsColl.updateOne(
+                        { _id: ticket._id },
+                        { $set: { lastActivity: Date.now() } }
+                    );
+                    return;
+                }
+            } else if (exigeAnexoSeSim && temAnexoValido && !texto) {
+                // O cliente pode pular a palavra "Sim" e já mandar o arquivo.
+                respostaTextoEfetiva = 'Sim';
             }
 
             const tentativasInvalidasAtuais = Number.isInteger(ticket.tentativasInvalidasPerguntaFluxo)
                 ? ticket.tentativasInvalidasPerguntaFluxo
                 : 0;
 
-            // Primeiro valida sem revelar as respostas aceitas.
-            let validacaoResposta = validarRespostaDaPergunta(
-                perguntaAtual,
-                texto,
-                isMedia,
-                { mostrarOpcoes: false }
-            );
+            // Para perguntas do tipo Sim/Não com anexo, "Sim" e "Não" têm semântica
+            // própria. Nas demais respostas, preservamos a validação exata já existente.
+            let validacaoResposta;
+            if (exigeAnexoSeSim && (respostaEhSim(respostaTextoEfetiva) || respostaEhNao(respostaTextoEfetiva))) {
+                validacaoResposta = { valida: true };
+            } else if (exigeAnexoSeSim && temAnexoValido && respostaVeioDeAnexoPendente) {
+                validacaoResposta = { valida: true };
+            } else {
+                validacaoResposta = validarRespostaDaPergunta(
+                    perguntaAtual,
+                    respostaTextoEfetiva,
+                    isMedia,
+                    { mostrarOpcoes: false }
+                );
+            }
 
             if (!validacaoResposta.valida) {
                 const novaTentativaInvalida = tentativasInvalidasAtuais + 1;
                 const mostrarOpcoes = novaTentativaInvalida >= EXIBIR_OPCOES_APOS_TENTATIVAS_INVALIDAS;
 
-                // A lista só é exibida quando o cliente já errou o número configurado de vezes.
                 if (mostrarOpcoes) {
                     validacaoResposta = validarRespostaDaPergunta(
                         perguntaAtual,
-                        texto,
+                        respostaTextoEfetiva,
                         isMedia,
                         { mostrarOpcoes: true }
                     );
@@ -6929,17 +7035,49 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                 return;
             }
 
+            // Regra solicitada: "Sim" SEM imagem/documento não conclui a pergunta.
+            // Persistimos o estado antes de pedir o arquivo para suportar respostas rápidas.
+            if (exigeAnexoSeSim && respostaEhSim(respostaTextoEfetiva) && !temAnexoValido && !respostaVeioDeAnexoPendente) {
+                const agoraAguardandoAnexo = Date.now();
+                await ticketsColl.updateOne(
+                    { _id: ticket._id },
+                    {
+                        $set: {
+                            aguardandoAnexoPerguntaFluxo: true,
+                            perguntaAguardandoAnexoId: String(perguntaAtual.id || ''),
+                            respostaAguardandoAnexo: String(respostaTextoEfetiva || 'Sim').trim() || 'Sim',
+                            tentativasInvalidasPerguntaFluxo: 0,
+                            lastActivity: agoraAguardandoAnexo
+                        }
+                    }
+                );
+
+                ticket.aguardandoAnexoPerguntaFluxo = true;
+                ticket.perguntaAguardandoAnexoId = String(perguntaAtual.id || '');
+                ticket.respostaAguardandoAnexo = String(respostaTextoEfetiva || 'Sim').trim() || 'Sim';
+                ticket.tentativasInvalidasPerguntaFluxo = 0;
+
+                await sendBotMsg(rawJid, { text: mensagemSolicitarAnexoPergunta(perguntaAtual) });
+                return;
+            }
+
             let tipoResposta = 'texto';
             if (conteudoEntrada.audioMessage) tipoResposta = 'audio';
             else if (conteudoEntrada.imageMessage) tipoResposta = 'imagem';
             else if (conteudoEntrada.videoMessage) tipoResposta = 'video';
             else if (conteudoEntrada.documentMessage) tipoResposta = 'documento';
 
+            let respostaParaRegistro = respostaTextoEfetiva || `[${tipoResposta} recebido]`;
+            if (exigeAnexoSeSim && temAnexoValido && respostaEhSim(respostaTextoEfetiva)) {
+                respostaParaRegistro = `${respostaTextoEfetiva || 'Sim'} — [${tipoResposta} recebido]`;
+            }
+
             const respostaRegistrada = {
                 perguntaId: perguntaAtual.id,
                 pergunta: perguntaAtual.texto,
                 respostasAceitas: Array.isArray(perguntaAtual.respostasAceitas) ? perguntaAtual.respostasAceitas : [],
-                resposta: texto || `[${tipoResposta} recebido]`,
+                exigirAnexoSeSim: exigeAnexoSeSim,
+                resposta: respostaParaRegistro,
                 tipo: tipoResposta,
                 respondidaEm: Date.now()
             };
@@ -6963,15 +7101,16 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                         respostasFluxo: respostasAtualizadas,
                         indicePerguntaFluxo: proximoIndice,
                         aguardandoPerguntaFluxo: temProximaPergunta,
+                        aguardandoAnexoPerguntaFluxo: false,
+                        perguntaAguardandoAnexoId: null,
+                        respostaAguardandoAnexo: null,
+                        tentativasInvalidasPerguntaFluxo: 0,
                         status: statusEtapaTriagem,
                         lastActivity: agoraEtapaTriagem
                     }
                 }
             );
 
-            // O painel precisa receber o progresso da triagem no exato momento em que
-            // cada resposta é persistida. Sem este evento, o chip do chat só descobria
-            // o novo percentual quando o advogado abria manualmente as respostas.
             const triagemAtualizada = progressoTriagemTicket(
                 { ...ticket, perguntasFluxo: perguntas, status: statusEtapaTriagem },
                 respostasAtualizadas
@@ -6996,12 +7135,14 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                 return;
             }
 
-            // Atualiza a cópia local antes de reutilizar a função de finalização.
             ticket.respostasFluxo = respostasAtualizadas;
             ticket.indicePerguntaFluxo = proximoIndice;
             ticket.tentativasInvalidasPerguntaFluxo = 0;
             ticket.aguardandoPerguntaFluxo = false;
-            await concluirTriagemEAvancar(ticket, rawJid, texto);
+            ticket.aguardandoAnexoPerguntaFluxo = false;
+            ticket.perguntaAguardandoAnexoId = null;
+            ticket.respostaAguardandoAnexo = null;
+            await concluirTriagemEAvancar(ticket, rawJid, respostaTextoEfetiva || texto);
             return;
         }
 

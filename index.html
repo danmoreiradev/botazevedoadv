@@ -6074,12 +6074,32 @@
             validacaoHelp.className = 'form-text';
             validacaoHelp.textContent = 'Se vazio, qualquer resposta será aceita. Se preenchido, o bot só avança quando o cliente responder exatamente uma das opções, ignorando maiúsculas, minúsculas e acentos. A IA apenas sugere; você pode editar tudo antes de salvar.';
 
+            const exigirAnexoWrap = document.createElement('div');
+            exigirAnexoWrap.className = 'form-check form-switch mt-3';
+
+            const exigirAnexo = document.createElement('input');
+            exigirAnexo.type = 'checkbox';
+            exigirAnexo.className = 'form-check-input menu-pergunta-exigir-anexo';
+            exigirAnexo.checked = pergunta.exigirAnexoSeSim === true;
+            exigirAnexo.id = `question-require-attachment-${Math.random().toString(36).slice(2)}`;
+
+            const exigirAnexoLabel = document.createElement('label');
+            exigirAnexoLabel.className = 'form-check-label small fw-bold';
+            exigirAnexoLabel.htmlFor = exigirAnexo.id;
+            exigirAnexoLabel.textContent = 'Se responder SIM, exigir imagem/documento antes de avançar';
+
+            const exigirAnexoHelp = document.createElement('div');
+            exigirAnexoHelp.className = 'form-text ms-1';
+            exigirAnexoHelp.textContent = 'Ideal para perguntas como “Você possui documentos, fotos ou prints?”. Se o cliente responder Sim, o fluxo fica travado até receber uma imagem/documento. Se responder Não, a próxima pergunta é liberada.';
+
+            exigirAnexoWrap.append(exigirAnexo, exigirAnexoLabel);
+
             const aiStatus = document.createElement('div');
             aiStatus.className = 'question-ai-status text-muted';
 
             btnGerarIA.onclick = () => gerarSugestoesRespostasAceitasIA(linha, textarea, respostasAceitas, btnGerarIA, aiStatus);
 
-            validacaoBox.append(validacaoHeader, respostasAceitas, validacaoHelp, aiStatus);
+            validacaoBox.append(validacaoHeader, respostasAceitas, validacaoHelp, exigirAnexoWrap, exigirAnexoHelp, aiStatus);
             corpo.appendChild(validacaoBox);
 
             const controles = document.createElement('div');
@@ -6151,6 +6171,7 @@
                         .split(/\r?\n|;/)
                         .map(item => item.trim())
                         .filter(Boolean),
+                    exigirAnexoSeSim: linha.querySelector('.menu-pergunta-exigir-anexo')?.checked === true,
                     ordem: index + 1,
                     ativo: true
                 }))
