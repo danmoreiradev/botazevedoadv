@@ -472,7 +472,7 @@ async function gerarConteudoDocumentoComRetry(partesEntrada) {
         if (tentativasExecutadas >= DOCUMENT_AI_GEMINI_MAX_ATTEMPTS) break;
         let modelo = null;
         try {
-            modelo = genAI.getGenerativeModel({ model: nomeModelo }, { apiVersion: 'v1beta' });
+            modelo = genAI.getGenerativeModel({ model: nomeModelo, generationConfig: { responseMimeType: 'application/json' } }, { apiVersion: 'v1beta' });
         } catch (err) {
             ultimoErro = err;
             continue;
@@ -3060,6 +3060,39 @@ function normalizarTexto(texto = '') {
         .trim();
 }
 
+// Normalização específica para linguagem de WhatsApp usada somente pela camada de IA/intenção.
+// Não altera o texto original armazenado nem respostas estruturadas de cadastro/triagem.
+const ALIASES_MENSAGEM_CLIENTE_IA = new Map([
+    ['obg', 'obrigado'], ['obgd', 'obrigado'], ['obrigdo', 'obrigado'], ['brigado', 'obrigado'], ['brigada', 'obrigada'],
+    ['vlw', 'valeu'], ['valew', 'valeu'], ['flw', 'falou'], ['blz', 'beleza'],
+    ['msg', 'mensagem'], ['msgs', 'mensagens'], ['mensg', 'mensagem'], ['mens', 'mensagem'],
+    ['adv', 'advogado'], ['advs', 'advogados'], ['advg', 'advogado'], ['advog', 'advogado'],
+    ['vc', 'voce'], ['vcs', 'voces'], ['cê', 'voce'], ['ce', 'voce'],
+    ['tb', 'tambem'], ['tbm', 'tambem'], ['tmb', 'tambem'],
+    ['pf', 'por favor'], ['pfv', 'por favor'], ['pff', 'por favor'],
+    ['q', 'que'], ['pq', 'porque'], ['pqe', 'porque'], ['pk', 'porque'],
+    ['n', 'nao'], ['nn', 'nao'], ['s', 'sim'],
+    ['hj', 'hoje'], ['agr', 'agora'], ['ctt', 'contato'],
+    ['dr', 'doutor'], ['dra', 'doutora']
+]);
+
+function normalizarMensagemClienteIA(texto = '') {
+    const base = normalizarTexto(texto)
+        .replace(/([a-z])\1{2,}/g, '$1$1')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!base) return '';
+
+    const saida = [];
+    for (const token of base.split(/\s+/).filter(Boolean)) {
+        const alias = ALIASES_MENSAGEM_CLIENTE_IA.get(token);
+        if (alias) saida.push(...String(alias).split(/\s+/));
+        else saida.push(token);
+    }
+    return saida.join(' ').replace(/\s+/g, ' ').trim();
+}
+
 // -----------------------------------------------------------------------------
 // HUMANIZAÇÃO CONTEXTUAL DAS RESPOSTAS AUTOMÁTICAS
 // -----------------------------------------------------------------------------
@@ -3085,7 +3118,7 @@ function saudacaoAtualEscritorio(data = new Date()) {
 }
 
 function detectarCortesiaMensagem(texto = '') {
-    const valor = normalizarTexto(texto)
+    const valor = normalizarMensagemClienteIA(texto)
         .replace(/[!?.,;:]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
@@ -3491,7 +3524,7 @@ const STOPWORDS_IA = new Set([
 
 function tokensRelevantes(texto = '') {
     return [...new Set(
-        normalizarTexto(texto)
+        normalizarMensagemClienteIA(texto)
             .replace(/[^a-z0-9\s]/g, ' ')
             .split(/\s+/)
             .filter(token => token.length >= 3 && !STOPWORDS_IA.has(token))
@@ -3596,7 +3629,7 @@ function bonusCorrespondenciaLocalKnowledge(texto = '', item = {}) {
 
     // Intenção institucional de equipe: continua sendo apenas mecanismo de busca.
     // O conteúdo factual da resposta vem exclusivamente do item aprovado localizado.
-    const q = normalizarTexto(texto);
+    const q = normalizarMensagemClienteIA(texto);
     const titulo = normalizarTexto(item?.pergunta || '');
     const perguntaEquipe = /\b(?:trabalha|atua|faz parte|equipe|advogad[oa]|profissional)\b/.test(q);
     const itemEquipe = /\b(?:equipe|advogad[oa]|profissional|socios|sócios)\b/.test(`${titulo} ${corpus.slice(0, 1200)}`);
@@ -3606,7 +3639,7 @@ function bonusCorrespondenciaLocalKnowledge(texto = '', item = {}) {
 }
 
 function pontuarItemKnowledge(texto, item) {
-    const mensagem = normalizarTexto(texto);
+    const mensagem = normalizarMensagemClienteIA(texto);
     const pergunta = normalizarTexto(item?.pergunta || '');
     const resposta = normalizarTexto(item?.resposta || '');
     const palavrasChave = (Array.isArray(item?.palavrasChave) ? item.palavrasChave : [])
@@ -3745,8 +3778,10 @@ async function selecionarKnowledgeSemantico(texto, items = []) {
 
     const prompt = `Você é um mecanismo de busca semântica interno de um escritório de advocacia.
 
-PERGUNTA DO CLIENTE:
+PERGUNTA DO CLIENTE (ORIGINAL):
 ${JSON.stringify(String(texto || '').slice(0, 1800))}
+VERSÃO NORMALIZADA DE ABREVIAÇÕES/ERROS COMUNS:
+${JSON.stringify(normalizarMensagemClienteIA(texto).slice(0, 1800))}
 
 ÍNDICE COMPLETO DA BASE DE CONHECIMENTO ATIVA:
 ${indice}
@@ -4525,7 +4560,7 @@ async function responderComKnowledgeWeb(texto, candidatos = []) {
 }
 
 function chaveLacunaKnowledge(texto = '') {
-    const normalizado = normalizarTexto(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 700);
+    const normalizado = normalizarMensagemClienteIA(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 700);
     return normalizado ? crypto.createHash('sha256').update(normalizado).digest('hex') : '';
 }
 
@@ -4560,7 +4595,7 @@ function possuiSinalDeEncerramento(texto = '') {
 }
 
 function possuiSinalDePergunta(texto = '') {
-    const valor = normalizarTexto(texto);
+    const valor = normalizarMensagemClienteIA(texto);
     if (!valor) return false;
     if (texto.includes('?')) return true;
 
@@ -4574,7 +4609,7 @@ function possuiSinalDePergunta(texto = '') {
 }
 
 function detectarPedidoAtendimentoHumano(texto = '') {
-    let valor = normalizarTexto(texto)
+    let valor = normalizarMensagemClienteIA(texto)
         .replace(/[^a-z0-9\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
@@ -4627,7 +4662,7 @@ function detectarPedidoAtendimentoHumano(texto = '') {
 }
 
 function parecePedidoHumanoAmbiguo(texto = '') {
-    const valor = normalizarTexto(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const valor = normalizarMensagemClienteIA(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
     if (!valor || valor.length > 260) return false;
     const alvo = /\b(?:adv|advogado|advogada|advogad|atendente|atendimento|humano|alguem|pessoa|dr|dra|doutor|doutora|especialista|profissional)\b/.test(valor);
     const intencao = /\b(?:quero|preciso|necessito|gostaria|queria|falar|conversar|contato|chamar|chama|atender|urgente|agora|ajuda)\b/.test(valor);
@@ -4691,23 +4726,123 @@ function entradaEstruturadaDoFluxo(ticket, texto = '') {
     return ['1', '2', 'sim', 'nao', 'não', 's', 'n'].includes(valor);
 }
 
+function escaparControlesInvalidosJson(texto = '') {
+    let saida = '';
+    let emString = false;
+    let escapado = false;
+    for (const ch of String(texto || '')) {
+        if (escapado) {
+            saida += ch;
+            escapado = false;
+            continue;
+        }
+        if (ch === '\\') {
+            saida += ch;
+            if (emString) escapado = true;
+            continue;
+        }
+        if (ch === '"') {
+            emString = !emString;
+            saida += ch;
+            continue;
+        }
+        if (emString) {
+            if (ch === '\n') { saida += '\\n'; continue; }
+            if (ch === '\r') { saida += '\\r'; continue; }
+            if (ch === '\t') { saida += '\\t'; continue; }
+            if (ch.charCodeAt(0) < 32) { saida += ' '; continue; }
+        }
+        saida += ch;
+    }
+    return saida;
+}
+
+function extrairPrimeiroObjetoJsonBalanceado(texto = '') {
+    const valor = String(texto || '');
+    let inicio = -1;
+    let nivel = 0;
+    let emString = false;
+    let escapado = false;
+    for (let i = 0; i < valor.length; i++) {
+        const ch = valor[i];
+        if (escapado) { escapado = false; continue; }
+        if (ch === '\\' && emString) { escapado = true; continue; }
+        if (ch === '"') { emString = !emString; continue; }
+        if (emString) continue;
+        if (ch === '{') {
+            if (inicio < 0) inicio = i;
+            nivel += 1;
+        } else if (ch === '}' && inicio >= 0) {
+            nivel -= 1;
+            if (nivel === 0) return valor.slice(inicio, i + 1);
+        }
+    }
+    if (inicio >= 0) {
+        const fim = valor.lastIndexOf('}');
+        if (fim > inicio) return valor.slice(inicio, fim + 1);
+    }
+    return '';
+}
+
+function tentarParseJsonIA(candidato = '', profundidade = 0) {
+    if (!candidato || profundidade > 2) return null;
+    const base = String(candidato).trim();
+    const tentativas = [];
+    const adicionar = (valor) => {
+        valor = String(valor || '').trim();
+        if (valor && !tentativas.includes(valor)) tentativas.push(valor);
+    };
+
+    adicionar(base);
+    adicionar(base.replace(/,\s*([}\]])/g, '$1'));
+    adicionar(escaparControlesInvalidosJson(base));
+    adicionar(escaparControlesInvalidosJson(base).replace(/,\s*([}\]])/g, '$1'));
+
+    for (const tentativa of tentativas) {
+        try {
+            const parsed = JSON.parse(tentativa);
+            if (typeof parsed === 'string' && /[\[{]/.test(parsed)) {
+                const interno = tentarParseJsonIA(parsed, profundidade + 1);
+                if (interno !== null) return interno;
+            }
+            return parsed;
+        } catch (_) {}
+    }
+    return null;
+}
+
 function extrairJsonIA(raw = '') {
-    const limpo = String(raw)
+    const limpo = String(raw || '')
+        .replace(/^\uFEFF/, '')
         .trim()
-        .replace(/^```json\s*/i, '')
-        .replace(/^```\s*/i, '')
-        .replace(/```$/i, '')
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/```\s*$/i, '')
         .trim();
 
-    const inicio = limpo.indexOf('{');
-    const fim = limpo.lastIndexOf('}');
-    if (inicio === -1 || fim === -1 || fim <= inicio) return null;
+    if (!limpo) return null;
 
-    try {
-        return JSON.parse(limpo.slice(inicio, fim + 1));
-    } catch (_) {
-        return null;
+    const direto = tentarParseJsonIA(limpo);
+    if (direto !== null) return direto;
+
+    const objeto = extrairPrimeiroObjetoJsonBalanceado(limpo);
+    if (objeto) {
+        const parsed = tentarParseJsonIA(objeto);
+        if (parsed !== null) return parsed;
     }
+
+    // Alguns modelos eventualmente devolvem um objeto JSON escapado como texto.
+    if (/\\"[A-Za-zÀ-ÿ0-9_]+\\"\s*:/.test(limpo)) {
+        const desescapado = limpo
+            .replace(/\\"/g, '"')
+            .replace(/\\\\n/g, '\\n')
+            .replace(/\\\\r/g, '\\r')
+            .replace(/\\\\t/g, '\\t');
+        const objetoDesescapado = extrairPrimeiroObjetoJsonBalanceado(desescapado) || desescapado;
+        const parsed = tentarParseJsonIA(objetoDesescapado);
+        if (parsed !== null) return parsed;
+    }
+
+    return null;
 }
 
 async function mensagemRetomadaFluxo(ticket) {
@@ -8992,6 +9127,35 @@ function pesoStatusDocumentoIA(status = '') {
     return ({ concluida: 7, erro: 6, nao_suportado: 6, processando_ia: 5, baixando: 4, na_fila: 3, analisando: 2 }[status] || 1);
 }
 
+function normalizarDocumentoIAPersistido(doc = {}) {
+    if (!doc || typeof doc !== 'object') return doc || {};
+    const resumoAtual = String(doc.resumoExecutivo || '').trim();
+    const pareceJsonBruto = resumoAtual.startsWith('{') || resumoAtual.startsWith('```') || /[\"]tipoDocumento[\"]\s*:/.test(resumoAtual);
+    if (!pareceJsonBruto) return doc;
+
+    const parsed = extrairJsonIA(resumoAtual);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return doc;
+
+    const normalizado = normalizarAnaliseDocumentoIA(parsed, '');
+    const temEstrutura = !!(
+        parsed.tipoDocumento || parsed.resumoExecutivo || parsed.pontosRelevantes || parsed.partesPessoas ||
+        parsed.datasValores || parsed.obrigacoesPrazos || parsed.alertasAdvogado || parsed.informacoesNaoIdentificadas
+    );
+    if (!temEstrutura) return doc;
+
+    return {
+        ...doc,
+        tipoDocumento: normalizado.tipoDocumento || doc.tipoDocumento || 'Não identificado',
+        resumoExecutivo: normalizado.resumoExecutivo || doc.resumoExecutivo || null,
+        partesPessoas: normalizado.partesPessoas.length ? normalizado.partesPessoas : (Array.isArray(doc.partesPessoas) ? doc.partesPessoas : []),
+        pontosRelevantes: normalizado.pontosRelevantes.length ? normalizado.pontosRelevantes : (Array.isArray(doc.pontosRelevantes) ? doc.pontosRelevantes : []),
+        datasValores: normalizado.datasValores.length ? normalizado.datasValores : (Array.isArray(doc.datasValores) ? doc.datasValores : []),
+        obrigacoesPrazos: normalizado.obrigacoesPrazos.length ? normalizado.obrigacoesPrazos : (Array.isArray(doc.obrigacoesPrazos) ? doc.obrigacoesPrazos : []),
+        alertasAdvogado: normalizado.alertasAdvogado.length ? normalizado.alertasAdvogado : (Array.isArray(doc.alertasAdvogado) ? doc.alertasAdvogado : []),
+        informacoesNaoIdentificadas: normalizado.informacoesNaoIdentificadas.length ? normalizado.informacoesNaoIdentificadas : (Array.isArray(doc.informacoesNaoIdentificadas) ? doc.informacoesNaoIdentificadas : [])
+    };
+}
+
 function mesclarDocumentosIATicket(ticket = {}, historico = {}, { detalhado = true } = {}) {
     const docsAtivos = Array.isArray(ticket.documentosIA) ? ticket.documentosIA : [];
     const docsHistorico = Array.isArray(historico.documentosIA) ? historico.documentosIA : [];
@@ -9010,12 +9174,14 @@ function mesclarDocumentosIATicket(ticket = {}, historico = {}, { detalhado = tr
         .sort((a, b) => Number(b?.recebidoEm || 0) - Number(a?.recebidoEm || 0))
         .slice(0, DOCUMENT_AI_MAX_ITEMS)
         .map(doc => {
+            const docExibicao = detalhado ? normalizarDocumentoIAPersistido(doc) : doc;
             if (!detalhado) {
                 return {
-                    messageId: doc?.messageId || null,
-                    statusAnalise: doc?.statusAnalise || 'analisando'
+                    messageId: docExibicao?.messageId || null,
+                    statusAnalise: docExibicao?.statusAnalise || 'analisando'
                 };
             }
+            doc = docExibicao;
 
             return {
                 id: doc?.id || null,
