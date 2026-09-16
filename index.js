@@ -784,7 +784,7 @@ let knowledgeWebCache = { pages: [], loadedAt: 0 };
 const KNOWLEDGE_WEB_CACHE_TTL_MS = 45 * 1000;
 const KNOWLEDGE_WEB_MAX_PAGES = 100;
 const KNOWLEDGE_WEB_DEFAULT_PAGES = 30;
-const KNOWLEDGE_WEB_DISCOVERY_VERSION = 2;
+const KNOWLEDGE_WEB_DISCOVERY_VERSION = 3;
 const KNOWLEDGE_WEB_MAX_HTML_BYTES = 1_500_000;
 const KNOWLEDGE_WEB_MAX_TEXT_CHARS_PER_PAGE = 18000;
 const KNOWLEDGE_WEB_MAX_CANDIDATES = 4;
@@ -3815,74 +3815,41 @@ async function descobrirUrlsSitemapKnowledgeWeb(urlBase, origemPermitida, limite
 
 async function sincronizarFonteKnowledgeWeb(source) {
     if (!knowledgeWebPagesColl || !knowledgeWebSourcesColl) throw new Error('Fontes web ainda não estão disponíveis.');
-    const inicial = await validarUrlPublicaKnowledgeWeb(source.url);
-    const origem = inicial.origin;
-    const limite = Math.max(1, Math.min(KNOWLEDGE_WEB_MAX_PAGES, Number(source.maxPages || KNOWLEDGE_WEB_DEFAULT_PAGES)));
-    const visitadas = new Set();
+
+    const urlsBrutas = Array.isArray(source.urls) && source.urls.length
+        ? source.urls
+        : [source.url].filter(Boolean);
+    const urlsAutorizadas = [];
+    const vistos = new Set();
+    for (const valor of urlsBrutas) {
+        if (urlsAutorizadas.length >= KNOWLEDGE_WEB_MAX_PAGES) break;
+        const validada = await validarUrlPublicaKnowledgeWeb(valor);
+        const canonica = urlCanonicaKnowledgeWeb(validada.toString(), validada) || validada.toString();
+        if (!vistos.has(canonica)) {
+            vistos.add(canonica);
+            urlsAutorizadas.push(canonica);
+        }
+    }
+    if (!urlsAutorizadas.length) throw new Error('Informe ao menos uma página pública para sincronizar.');
+
     const paginas = [];
     const erros = [];
-    const ignoradas = [];
-    const urlsPrincipais = new Set([urlCanonicaKnowledgeWeb(inicial.toString(), inicial) || inicial.toString()]);
-
-    // A home é a autoridade principal para descobrir o que o público realmente vê.
-    // Primeiro lemos a navegação visível; o sitemap entra somente como fallback.
-    let homeBaixada = null;
-    try {
-        homeBaixada = await baixarPaginaKnowledgeWeb(inicial.toString());
-        const homeCanonical = urlCanonicaKnowledgeWeb(homeBaixada.url, inicial) || homeBaixada.url;
-        urlsPrincipais.add(homeCanonical);
-        const linksMenu = extrairLinksNavegacaoPrincipalKnowledgeWeb(homeBaixada.html, homeBaixada.url, origem);
-        linksMenu.slice(0, Math.max(limite * 2, 30)).forEach(url => urlsPrincipais.add(url));
-    } catch (err) {
-        erros.push(`${inicial.toString()}: ${String(err?.message || err).slice(0, 180)}`);
-    }
-
-    // Se o menu não puder ser identificado (tema JS, markup incomum etc.), usa sitemap
-    // com filtro de relevância e profundidade, evitando posts, arquivos e páginas técnicas.
-    if (urlsPrincipais.size <= 1) {
-        const urlsSitemap = await descobrirUrlsSitemapKnowledgeWeb(inicial.toString(), origem, Math.min(limite * 3, KNOWLEDGE_WEB_MAX_PAGES)).catch(() => []);
-        urlsSitemap
-            .filter(url => urlPrincipalElegivelKnowledgeWeb(url, origem))
-            .sort((a,b) => pontuarUrlPrincipalKnowledgeWeb(b, origem) - pontuarUrlPrincipalKnowledgeWeb(a, origem))
-            .slice(0, limite)
-            .forEach(url => urlsPrincipais.add(url));
-    }
-
-    const fila = [...urlsPrincipais]
-        .filter(Boolean)
-        .sort((a,b) => pontuarUrlPrincipalKnowledgeWeb(b, origem) - pontuarUrlPrincipalKnowledgeWeb(a, origem))
-        .map(url => ({ url }));
-
-    while (fila.length && paginas.length < limite) {
-        const atual = fila.shift();
-        const canonical = urlCanonicaKnowledgeWeb(atual.url, inicial);
-        if (!canonical || visitadas.has(canonical)) continue;
-        visitadas.add(canonical);
-        const motivo = motivoUrlDescartadaKnowledgeWeb(canonical, origem);
-        if (motivo) { ignoradas.push({ url: canonical, motivo }); continue; }
-        if (!urlPrincipalElegivelKnowledgeWeb(canonical, origem)) { ignoradas.push({ url: canonical, motivo: 'baixa_relevancia' }); continue; }
-
+    for (const urlAutorizada of urlsAutorizadas) {
         try {
-            const baixada = homeBaixada && canonical === (urlCanonicaKnowledgeWeb(homeBaixada.url, inicial) || homeBaixada.url)
-                ? homeBaixada
-                : await baixarPaginaKnowledgeWeb(canonical);
-            const finalCanonical = urlCanonicaKnowledgeWeb(baixada.url, inicial) || baixada.url;
-            const motivoFinal = motivoUrlDescartadaKnowledgeWeb(finalCanonical, origem);
-            if (motivoFinal || !urlPrincipalElegivelKnowledgeWeb(finalCanonical, origem)) {
-                ignoradas.push({ url: finalCanonical, motivo: motivoFinal || 'baixa_relevancia' });
-                continue;
-            }
+            const baixada = await baixarPaginaKnowledgeWeb(urlAutorizada);
             const texto = htmlParaTextoKnowledgeWeb(baixada.html);
             if (texto.length < 120) {
-                ignoradas.push({ url: finalCanonical, motivo: 'conteudo_insuficiente' });
+                erros.push(`${urlAutorizada}: conteúdo textual insuficiente.`);
                 continue;
             }
-            const titulo = extrairTituloKnowledgeWeb(baixada.html, new URL(baixada.url).pathname || source.nome || 'Página');
+            const finalCanonical = urlCanonicaKnowledgeWeb(baixada.url, urlAutorizada) || baixada.url;
+            const titulo = extrairTituloKnowledgeWeb(baixada.html, new URL(finalCanonical).pathname || source.nome || 'Página');
             paginas.push({
                 sourceId: source._id,
-                sourceName: source.nome || inicial.hostname,
+                sourceName: source.nome || new URL(finalCanonical).hostname,
                 url: finalCanonical,
-                title: titulo || source.nome || inicial.hostname,
+                requestedUrl: urlAutorizada,
+                title: titulo || source.nome || new URL(finalCanonical).hostname,
                 text: texto,
                 contentHash: crypto.createHash('sha256').update(texto).digest('hex'),
                 fetchedAt: Date.now(),
@@ -3891,11 +3858,11 @@ async function sincronizarFonteKnowledgeWeb(source) {
                 discoveryVersion: KNOWLEDGE_WEB_DISCOVERY_VERSION
             });
         } catch (err) {
-            erros.push(`${canonical}: ${String(err?.message || err).slice(0, 180)}`);
+            erros.push(`${urlAutorizada}: ${String(err?.message || err).slice(0, 180)}`);
         }
     }
 
-    if (!paginas.length) throw new Error(erros[0] || 'Nenhuma página institucional principal pôde ser importada deste endereço.');
+    if (!paginas.length) throw new Error(erros[0] || 'Nenhuma das páginas informadas pôde ser importada.');
     const agora = Date.now();
     const urlsAtuais = [...new Set(paginas.map(p => p.url))];
     for (const pagina of paginas) {
@@ -3905,8 +3872,6 @@ async function sincronizarFonteKnowledgeWeb(source) {
             { upsert: true }
         );
     }
-    // Qualquer página capturada pela estratégia antiga (posts, comentários, query strings etc.)
-    // deixa de participar imediatamente das sugestões após uma nova sincronização.
     await knowledgeWebPagesColl.updateMany(
         { sourceId: source._id, url: { $nin: urlsAtuais } },
         { $set: { ativo: false, principal: false, updatedAt: agora } }
@@ -3914,13 +3879,16 @@ async function sincronizarFonteKnowledgeWeb(source) {
     await knowledgeWebSourcesColl.updateOne(
         { _id: source._id },
         { $set: {
+            urls: urlsAutorizadas,
+            url: urlsAutorizadas[0],
+            maxPages: urlsAutorizadas.length,
             lastSyncAt: agora,
-            lastSyncStatus: 'ok',
+            lastSyncStatus: erros.length && paginas.length < urlsAutorizadas.length ? 'parcial' : 'ok',
             pageCount: paginas.length,
-            ignoredPageCount: ignoradas.length,
+            ignoredPageCount: 0,
             discoveryVersion: KNOWLEDGE_WEB_DISCOVERY_VERSION,
             principalUrls: urlsAtuais,
-            lastError: erros.slice(0, 3).join(' | '),
+            lastError: erros.slice(0, 5).join(' | '),
             webSummary: '',
             webPagesAnalysis: [],
             knowledgeSuggestions: [],
@@ -3931,7 +3899,7 @@ async function sincronizarFonteKnowledgeWeb(source) {
         } }
     );
     invalidarCacheKnowledgeWeb();
-    return { pageCount: paginas.length, ignoredPageCount: ignoradas.length, warnings: erros.length };
+    return { pageCount: paginas.length, requestedPageCount: urlsAutorizadas.length, ignoredPageCount: 0, warnings: erros.length };
 }
 
 function normalizarSugestaoKnowledgeWeb(item = {}, source = {}, index = 0, pagina = {}) {
@@ -4017,42 +3985,24 @@ async function gerarSugestoesKnowledgeWeb(source) {
     if (!knowledgeWebPagesColl || !knowledgeWebSourcesColl) throw new Error('Fontes web ainda não estão disponíveis.');
     if (!geminiModel) throw new Error('A IA não está disponível para gerar sugestões do site.');
 
-    const limite = Math.max(1, Math.min(KNOWLEDGE_WEB_MAX_PAGES, Number(source.maxPages || KNOWLEDGE_WEB_DEFAULT_PAGES)));
     const pages = await knowledgeWebPagesColl.find(
         { sourceId: source._id, ativo: { $ne: false }, principal: true, discoveryVersion: KNOWLEDGE_WEB_DISCOVERY_VERSION },
         { projection: { _id: 1, title: 1, url: 1, text: 1, fetchedAt: 1, principal: 1 } }
-    ).sort({ url: 1 }).limit(limite).toArray();
-    if (!pages.length) throw new Error('Sincronize novamente o site para identificar apenas as páginas principais do menu público.');
-
-    const analisesPorUrl = new Map();
-    const tamanhoLote = 4;
-    for (let i = 0; i < pages.length; i += tamanhoLote) {
-        const lote = pages.slice(i, i + tamanhoLote);
-        try {
-            const retorno = await analisarLotePaginasKnowledgeWeb(source, lote);
-            lote.forEach((page, idx) => {
-                const exato = retorno.find(item => String(item?.url || '').trim() === String(page.url || '').trim());
-                const item = exato || retorno[idx] || null;
-                if (item) analisesPorUrl.set(String(page.url || ''), { ...item, url: String(page.url || '') });
-            });
-        } catch (err) {
-            console.warn(`[IA] Falha ao analisar lote de páginas da fonte ${source.nome || source._id}:`, err?.message || err);
-            // Se um lote falhar, tenta cada página isoladamente para não perder a análise das demais.
-            for (const page of lote) {
-                try {
-                    const retornoIndividual = await analisarLotePaginasKnowledgeWeb(source, [page]);
-                    if (retornoIndividual[0]) analisesPorUrl.set(String(page.url || ''), { ...retornoIndividual[0], url: String(page.url || '') });
-                } catch (erroPagina) {
-                    console.warn(`[IA] Falha ao analisar página ${page.url}:`, erroPagina?.message || erroPagina);
-                }
-            }
-        }
-    }
+    ).sort({ url: 1 }).limit(KNOWLEDGE_WEB_MAX_PAGES).toArray();
+    if (!pages.length) throw new Error('Sincronize as páginas informadas antes de gerar sugestões.');
 
     const sugestoes = [];
     const webPagesAnalysis = [];
-    pages.forEach((page, pageIndex) => {
-        const analise = analisesPorUrl.get(String(page.url || '')) || {};
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+        const page = pages[pageIndex];
+        let analise = {};
+        try {
+            // Uma página por chamada: impede a IA de combinar/comparar conteúdos de URLs diferentes.
+            const retorno = await analisarLotePaginasKnowledgeWeb(source, [page]);
+            analise = retorno?.[0] || {};
+        } catch (err) {
+            console.warn(`[IA] Falha ao analisar página ${page.url}:`, err?.message || err);
+        }
         const resumoPagina = String(analise?.resumoPagina || '').trim().slice(0, 900) || resumoPaginaFallbackKnowledgeWeb(page);
         const sugestoesPagina = (Array.isArray(analise?.sugestoes) ? analise.sugestoes : [])
             .map((item, index) => normalizarSugestaoKnowledgeWeb(item, source, pageIndex * 10 + index, page))
@@ -4068,11 +4018,11 @@ async function gerarSugestoesKnowledgeWeb(source) {
             suggestionsCount: sugestoesPagina.length,
             generatedAt: Date.now()
         });
-    });
+    }
 
     const agora = Date.now();
     const totalComSugestoes = webPagesAnalysis.filter(item => item.suggestionsCount > 0).length;
-    const webSummary = `${pages.length} página${pages.length === 1 ? '' : 's'} analisada${pages.length === 1 ? '' : 's'} individualmente. ${totalComSugestoes} página${totalComSugestoes === 1 ? '' : 's'} ${totalComSugestoes === 1 ? 'gerou' : 'geraram'} sugestões para revisão.`;
+    const webSummary = `${pages.length} página${pages.length === 1 ? '' : 's'} autorizada${pages.length === 1 ? '' : 's'} analisada${pages.length === 1 ? '' : 's'} separadamente. ${totalComSugestoes} ${totalComSugestoes === 1 ? 'gerou' : 'geraram'} sugestões para revisão.`;
 
     await knowledgeWebSourcesColl.updateOne(
         { _id: source._id },
@@ -4219,6 +4169,28 @@ function possuiSinalDePergunta(texto = '') {
         || /^(?:dr|dra|doutor|doutora)\b.*\b(?:trabalha|atende|atua|faz parte)\b/.test(valor);
 }
 
+function detectarPedidoAtendimentoHumano(texto = '') {
+    const valor = normalizarTexto(texto)
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!valor) return { solicitado: false, urgente: false };
+
+    const negado = /\b(?:nao|nem|dispenso)\s+(?:quero|preciso|gostaria).{0,30}\b(?:advogad[oa]|atendente|humano|pessoa)\b/.test(valor);
+    if (negado) return { solicitado: false, urgente: false };
+
+    const pediuPessoa = [
+        /\b(?:quero|preciso|gostaria|posso|poderia)\s+(?:falar|conversar|ser atendid[oa])\s+(?:com\s+)?(?:um\s+|uma\s+)?(?:advogad[oa]|atendente|pessoa|humano)\b/,
+        /\b(?:falar|conversar)\s+(?:com\s+)?(?:um\s+|uma\s+)?(?:advogad[oa]|atendente|pessoa|humano|dr|dra|doutor|doutora)\b/,
+        /\b(?:chama|chamar|chame|quero)\s+(?:um\s+|uma\s+)?(?:advogad[oa]|atendente|pessoa)\b/,
+        /\b(?:atendimento|suporte)\s+(?:humano|com\s+advogad[oa])\b/,
+        /\b(?:advogad[oa]|atendente)\s+(?:por favor|pf|urgente)\b/
+    ].some(regex => regex.test(valor));
+
+    const urgente = /\b(?:urgente|urgencia|emergencia|o quanto antes|agora)\b/.test(valor);
+    return { solicitado: pediuPessoa, urgente };
+}
+
 function entradaEstruturadaDoFluxo(ticket, texto = '') {
     const valor = normalizarTexto(texto);
 
@@ -4318,6 +4290,13 @@ async function analisarMensagemComIA(texto, ticket) {
         return { acao: 'ENCERRAR', origem: 'regra' };
     }
 
+    // Pedido de contato humano é uma intenção operacional, não uma pergunta de conhecimento.
+    // Portanto não consulta a Base e nunca deve cair em "não encontrei essa informação".
+    const pedidoHumano = detectarPedidoAtendimentoHumano(texto);
+    if (pedidoHumano.solicitado) {
+        return { acao: 'ATENDIMENTO_HUMANO', origem: 'regra', urgente: pedidoHumano.urgente === true };
+    }
+
     const atendimentoHumanoAtivo = ticket.status === 'em_atendimento_humano';
     const cortesia = detectarCortesiaMensagem(texto);
 
@@ -4364,7 +4343,7 @@ async function analisarMensagemComIA(texto, ticket) {
             return {
                 acao: 'SEM_BASE',
                 origem: 'sem_base',
-                resposta: 'Ainda não encontrei essa informação na nossa base com segurança. Posso registrar sua dúvida para que a equipe confirme para você.'
+                resposta: 'Não tenho essa informação cadastrada na base no momento. Vou deixar sua dúvida registrada para a equipe verificar.'
             };
         }
         return null;
@@ -4382,7 +4361,7 @@ async function analisarMensagemComIA(texto, ticket) {
             return {
                 acao: 'SEM_BASE',
                 origem: 'sem_base',
-                resposta: 'Ainda não encontrei essa informação na nossa base com segurança. Posso registrar sua dúvida para que a equipe confirme para você.'
+                resposta: 'Não tenho essa informação cadastrada na base no momento. Vou deixar sua dúvida registrada para a equipe verificar.'
             };
         }
         return null;
@@ -4454,7 +4433,7 @@ REGRAS OBRIGATÓRIAS:
             return {
                 acao: 'SEM_BASE',
                 origem: 'sem_base',
-                resposta: 'Ainda não encontrei essa informação na nossa base com segurança. Posso registrar sua dúvida para que a equipe confirme para você.'
+                resposta: 'Não tenho essa informação cadastrada na base no momento. Vou deixar sua dúvida registrada para a equipe verificar.'
             };
         }
         return null;
@@ -4470,7 +4449,7 @@ REGRAS OBRIGATÓRIAS:
             return {
                 acao: 'SEM_BASE',
                 origem: 'sem_base',
-                resposta: 'Ainda não encontrei essa informação na nossa base com segurança. Posso registrar sua dúvida para que a equipe confirme para você.'
+                resposta: 'Não tenho essa informação cadastrada na base no momento. Vou deixar sua dúvida registrada para a equipe verificar.'
             };
         }
         return null;
@@ -4526,6 +4505,35 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
 
     if (analiseIA.acao === 'ENCERRAR') {
         await encerrarTicketPorCliente(ticket, jid, mensagemCliente);
+        return true;
+    }
+
+    if (analiseIA.acao === 'ATENDIMENTO_HUMANO') {
+        const jaComEquipe = ticket?.status === 'aguardando_especialista' || ticket?.status === 'em_atendimento_humano' || ticket?.paused === true;
+        if (jaComEquipe) {
+            return true;
+        }
+
+        const agora = Date.now();
+        const urgente = analiseIA.urgente === true;
+        await Promise.allSettled([
+            ticketsColl.updateOne(
+                { _id: ticket._id },
+                { $set: { solicitouAtendimentoHumanoEm: agora, pedidoAtendimentoUrgente: urgente, lastActivity: agora } }
+            ),
+            atualizarHistorico(ticket.ticketNumber, {
+                solicitouAtendimentoHumanoEm: agora,
+                pedidoAtendimentoUrgente: urgente,
+                mensagemPedidoHumano: String(mensagemCliente || '').trim().slice(0, 1200)
+            })
+        ]);
+
+        await encaminharParaEspecialista(
+            ticket,
+            jid,
+            'Claro. Vou deixar seu atendimento com a equipe. Se ainda não enviou os detalhes, pode me contar brevemente o assunto por aqui.',
+            { mensagemCliente, tipo: urgente ? 'pedido_atendimento_humano_urgente' : 'pedido_atendimento_humano' }
+        );
         return true;
     }
 
@@ -4592,7 +4600,12 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
     }
 
     if (analiseIA.acao === 'SEM_BASE') {
-        const retomada = await mensagemRetomadaFluxo(ticket);
+        const precisaRetomarEtapa = !!(
+            ticket?.aguardandoOpcao || ticket?.aguardandoPerguntaFluxo || ticket?.aguardandoDetalhes ||
+            ticket?.aguardandoDetalhesForaHorario || ticket?.aguardandoCadastroCliente || ticket?.aguardandoNomeCadastro ||
+            ticket?.aguardandoCPFCadastro || ticket?.aguardandoWhatsappCadastro
+        );
+        const retomada = precisaRetomarEtapa ? await mensagemRetomadaFluxo(ticket) : '';
         const cortesia = detectarCortesiaMensagem(mensagemCliente);
         const prefixo = cortesia.saudacao ? `${cortesia.saudacao}!\n\n` : '';
         const resposta = String(analiseIA.resposta || '').trim();
@@ -5927,7 +5940,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             ? await analisarMensagemComIA(texto, ticket)
             : null;
 
-        if (['ENCERRAR', 'CORTESIA', 'SEM_BASE'].includes(analiseIAPrevia?.acao)) {
+        if (['ENCERRAR', 'CORTESIA', 'SEM_BASE', 'ATENDIMENTO_HUMANO'].includes(analiseIAPrevia?.acao)) {
             await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia, texto);
             return;
         }
@@ -5988,6 +6001,32 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                 console.warn('[Chat] Falha ao registrar primeira mensagem do ticket:', err?.message || err);
             });
             dispararAnaliseArquivo(ticket);
+
+            // Se o primeiro contato já pedir uma pessoa/advogado, não força o cliente a
+            // passar pelo menu. É uma intenção operacional e independe da Base de Conhecimento.
+            const pedidoHumanoInicial = detectarPedidoAtendimentoHumano(texto);
+            if (pedidoHumanoInicial.solicitado) {
+                const agoraPedido = Date.now();
+                await Promise.allSettled([
+                    ticketsColl.updateOne(
+                        { _id: ticket._id },
+                        { $set: { solicitouAtendimentoHumanoEm: agoraPedido, pedidoAtendimentoUrgente: pedidoHumanoInicial.urgente === true, lastActivity: agoraPedido } }
+                    ),
+                    atualizarHistorico(ticket.ticketNumber, {
+                        solicitouAtendimentoHumanoEm: agoraPedido,
+                        pedidoAtendimentoUrgente: pedidoHumanoInicial.urgente === true,
+                        mensagemPedidoHumano: String(texto || '').trim().slice(0, 1200)
+                    })
+                ]);
+                await encaminharParaEspecialista(
+                    ticket,
+                    rawJid,
+                    'Claro. Vou deixar seu atendimento com a equipe. Se ainda não enviou os detalhes, pode me contar brevemente o assunto por aqui.',
+                    { mensagemCliente: texto, tipo: pedidoHumanoInicial.urgente ? 'pedido_atendimento_humano_urgente' : 'pedido_atendimento_humano' }
+                );
+                console.log(`[Ticket ${ticket.ticketNumber}] Novo atendimento encaminhado diretamente à equipe por solicitação do cliente.`);
+                return;
+            }
 
             const recepcaoEnviada = await sendBotMsg(rawJid, {
                 text: await mensagemRecepcao(cliente, ticket.ticketNumber, texto)
@@ -10536,11 +10575,22 @@ REGRAS OBRIGATÓRIAS:
     }
 });
 
+function normalizarUrlsFonteWebKnowledge(valor, existente = null) {
+    let entradas = [];
+    if (Array.isArray(valor)) entradas = valor;
+    else if (typeof valor === 'string') entradas = valor.split(/\r?\n|,/g);
+    else if (Array.isArray(existente?.urls) && existente.urls.length) entradas = existente.urls;
+    else if (existente?.url) entradas = [existente.url];
+    return [...new Set(entradas.map(v => String(v || '').trim()).filter(Boolean))].slice(0, KNOWLEDGE_WEB_MAX_PAGES);
+}
+
 function documentoFonteWebKnowledge(body = {}, existente = null) {
+    const urls = normalizarUrlsFonteWebKnowledge(body.urls ?? body.url, existente);
     return {
         nome: String(body.nome ?? existente?.nome ?? '').trim().slice(0, 140),
-        url: String(body.url ?? existente?.url ?? '').trim().slice(0, 1800),
-        maxPages: Math.max(1, Math.min(KNOWLEDGE_WEB_MAX_PAGES, Number(body.maxPages ?? existente?.maxPages ?? KNOWLEDGE_WEB_DEFAULT_PAGES) || KNOWLEDGE_WEB_DEFAULT_PAGES)),
+        urls,
+        url: String(urls[0] || '').trim().slice(0, 1800),
+        maxPages: urls.length || 1,
         ativo: body.ativo !== undefined ? body.ativo !== false : existente?.ativo !== false
     };
 }
@@ -10554,7 +10604,7 @@ app.get('/api/knowledgeWebSources', async (req, res) => {
             if (Number(item.discoveryVersion || 0) >= KNOWLEDGE_WEB_DISCOVERY_VERSION) return item;
             return {
                 ...item,
-                webSummary: item.lastSyncAt ? 'Esta fonte precisa ser sincronizada novamente para filtrar apenas as páginas principais do site.' : (item.webSummary || ''),
+                webSummary: item.lastSyncAt ? 'Esta fonte precisa ser revisada e sincronizada novamente usando apenas as páginas informadas manualmente.' : (item.webSummary || ''),
                 webPagesAnalysis: [],
                 knowledgeSuggestions: [],
                 suggestionsStatus: item.lastSyncAt ? 'requer_ressincronizacao' : item.suggestionsStatus
@@ -10569,9 +10619,12 @@ app.post('/api/knowledgeWebSources', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
     try {
         const doc = documentoFonteWebKnowledge(req.body || {});
-        if (!doc.nome || !doc.url) return res.status(400).json({ erro: 'Informe um nome e a URL do site.' });
-        const url = await validarUrlPublicaKnowledgeWeb(doc.url);
-        doc.url = url.toString();
+        if (!doc.nome || !doc.urls.length) return res.status(400).json({ erro: 'Informe um nome e ao menos uma página pública.' });
+        const urlsValidadas = [];
+        for (const valor of doc.urls) urlsValidadas.push((await validarUrlPublicaKnowledgeWeb(valor)).toString());
+        doc.urls = [...new Set(urlsValidadas)];
+        doc.url = doc.urls[0];
+        doc.maxPages = doc.urls.length;
         const agora = Date.now();
         const result = await knowledgeWebSourcesColl.insertOne({ ...doc, pageCount: 0, lastSyncStatus: 'nunca', webSummary: '', webPagesAnalysis: [], knowledgeSuggestions: [], principalUrls: [], discoveryVersion: 0, ignoredPageCount: 0, suggestionsStatus: 'nunca', suggestionsGeneratedAt: null, suggestionsError: '', createdAt: agora, updatedAt: agora });
         invalidarCacheKnowledgeWeb();
@@ -10589,10 +10642,14 @@ app.put('/api/knowledgeWebSources/:id', async (req, res) => {
         const existente = await knowledgeWebSourcesColl.findOne({ _id: id });
         if (!existente) return res.status(404).json({ erro: 'Fonte não encontrada.' });
         const doc = documentoFonteWebKnowledge(req.body || {}, existente);
-        if (!doc.nome || !doc.url) return res.status(400).json({ erro: 'Informe um nome e a URL do site.' });
-        const url = await validarUrlPublicaKnowledgeWeb(doc.url);
-        doc.url = url.toString();
-        const mudouUrl = doc.url !== existente.url;
+        if (!doc.nome || !doc.urls.length) return res.status(400).json({ erro: 'Informe um nome e ao menos uma página pública.' });
+        const urlsValidadas = [];
+        for (const valor of doc.urls) urlsValidadas.push((await validarUrlPublicaKnowledgeWeb(valor)).toString());
+        doc.urls = [...new Set(urlsValidadas)];
+        doc.url = doc.urls[0];
+        doc.maxPages = doc.urls.length;
+        const urlsExistentes = normalizarUrlsFonteWebKnowledge(existente?.urls || existente?.url);
+        const mudouUrl = JSON.stringify(doc.urls) !== JSON.stringify(urlsExistentes);
         await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { ...doc, ...(mudouUrl ? { pageCount: 0, ignoredPageCount: 0, discoveryVersion: 0, principalUrls: [], lastSyncStatus: 'nunca', lastSyncAt: null, lastError: '', webSummary: '', webPagesAnalysis: [], knowledgeSuggestions: [], suggestionsStatus: 'nunca', suggestionsGeneratedAt: null, suggestionsError: '' } : {}), updatedAt: Date.now() } });
         if (mudouUrl) await knowledgeWebPagesColl.deleteMany({ sourceId: id });
         invalidarCacheKnowledgeWeb();
