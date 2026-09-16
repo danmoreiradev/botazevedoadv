@@ -789,12 +789,6 @@ const KNOWLEDGE_WEB_MAX_TEXT_CHARS_PER_PAGE = 18000;
 const KNOWLEDGE_WEB_MAX_CANDIDATES = 4;
 
 
-// Conhecimento institucional dinâmico. Diferente da base jurídica/FAQ, estas
-// informações vêm do próprio sistema e podem ser respondidas sem o Gemini inventar fatos.
-// Ex.: "Dr. Pedro trabalha aqui?" consulta somente profissionais ativos cadastrados.
-const INTERNAL_TEAM_CACHE_TTL_MS = 30 * 1000;
-let internalTeamCache = { items: [], loadedAt: 0 };
-
 // Cache das opções de atendimento. O MongoDB passa a ser a fonte de verdade do menu.
 const MENU_CACHE_TTL_MS = 30 * 1000;
 let menuOptionsCache = { items: [], loadedAt: 0 };
@@ -3380,192 +3374,6 @@ function invalidarCacheKnowledgeWeb() {
     knowledgeWebCache = { pages: [], loadedAt: 0 };
 }
 
-function invalidarCacheEquipeInterna() {
-    internalTeamCache = { items: [], loadedAt: 0 };
-}
-
-async function carregarEquipeInternaAtiva() {
-    if (!userLoginColl) return [];
-
-    const agora = Date.now();
-    if (internalTeamCache.loadedAt && (agora - internalTeamCache.loadedAt) < INTERNAL_TEAM_CACHE_TTL_MS) {
-        return internalTeamCache.items;
-    }
-
-    const itens = await userLoginColl.find(
-        { ativo: { $ne: false } },
-        { projection: { nome: 1, assinatura: 1, role: 1, oab: 1 } }
-    ).sort({ nome: 1 }).toArray();
-
-    const profissionais = itens
-        .map(item => ({
-            id: String(item._id || ''),
-            nome: String(item.nome || '').trim(),
-            assinatura: String(item.assinatura || assinaturaPadraoUsuario(item.nome || '')).trim(),
-            role: normalizarPapelUsuario(item.role),
-            oab: String(item.oab || '').trim()
-        }))
-        .filter(item => item.nome);
-
-    internalTeamCache = { items: profissionais, loadedAt: agora };
-    return profissionais;
-}
-
-const TERMOS_GENERICOS_EQUIPE = new Set([
-    'dr', 'dra', 'doutor', 'doutora', 'advogado', 'advogada', 'advogados', 'advogadas',
-    'trabalha', 'trabalham', 'aqui', 'ai', 'escritorio', 'equipe', 'time', 'faz', 'parte',
-    'atende', 'atendem', 'atua', 'atuam', 'especialista', 'especialistas', 'tem', 'existe',
-    'conhece', 'conhecem', 'contato', 'telefone', 'celular', 'email', 'whatsapp', 'pessoal',
-    'qual', 'quais', 'quem', 'onde', 'como', 'ele', 'ela', 'voces', 'vcs', 'daqui', 'dai'
-]);
-
-function tokensConsultaEquipe(texto = '') {
-    return normalizarTexto(texto)
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter(Boolean);
-}
-
-function tipoConsultaEquipe(texto = '') {
-    const valor = ` ${normalizarTexto(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()} `;
-    if (!valor.trim()) return null;
-
-    const falaDeProfissional = /\b(dr|dra|doutor|doutora|advogado|advogada|profissional)\b/.test(valor);
-    const falaDeEquipe = /\b(equipe|time|escritorio|advogados|advogadas)\b/.test(valor);
-    const contato = /\b(telefone|celular|whatsapp|email|e-mail|contato pessoal)\b/.test(valor) && (falaDeProfissional || falaDeEquipe);
-    if (contato) return 'contato';
-
-    const lista = /\b(quem (?:trabalha|faz parte)|quais (?:sao )?(?:os )?(?:advogados|profissionais)|quem (?:sao )?(?:os )?(?:advogados|profissionais)|equipe do escritorio|time do escritorio)\b/.test(valor);
-    if (lista) return 'lista';
-
-    const atuacao = /\b(atende|atendem|atua|atuam|especialista|especialidade|area de atuacao)\b/.test(valor) && (falaDeProfissional || /\b[a-z]{3,}\b/.test(valor));
-    if (atuacao) return 'atuacao';
-
-    const presenca = /\b(trabalha aqui|trabalha ai|trabalha com voces|trabalha com vcs|trabalha no escritorio|trabalha nesse escritorio|faz parte da equipe|faz parte do escritorio|e da equipe|e daqui|e do escritorio|tem o dr|tem a dra|tem doutor|tem doutora|conhece o dr|conhece a dra|quem e o dr|quem e a dra)\b/.test(valor)
-        || (falaDeProfissional && /\b(trabalha|faz parte|tem|existe|conhece)\b/.test(valor));
-    if (presenca) return 'presenca';
-
-    return null;
-}
-
-function pontuarProfissionalNaConsulta(texto = '', profissional = {}) {
-    const consultaTokens = tokensConsultaEquipe(texto);
-    const conjuntoConsulta = new Set(consultaTokens);
-    const nomeNormalizado = normalizarTexto(profissional.nome || '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    const assinaturaNormalizada = normalizarTexto(profissional.assinatura || '').replace(/\b(?:dr|dra|doutor|doutora|dr\(a\))\.?\b/g, ' ').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    const nomeTokens = [...new Set(`${nomeNormalizado} ${assinaturaNormalizada}`.split(/\s+/).filter(Boolean))];
-    if (!nomeTokens.length) return 0;
-
-    const consultaNormalizada = ` ${consultaTokens.join(' ')} `;
-    let score = 0;
-    if (nomeNormalizado && consultaNormalizada.includes(` ${nomeNormalizado} `)) score += 100;
-
-    nomeTokens.forEach((token, index) => {
-        if (token.length < 2) return;
-        if (conjuntoConsulta.has(token)) {
-            score += index === 0 ? 24 : 14;
-            return;
-        }
-        if (token.length >= 4) {
-            const achouFuzzy = consultaTokens.some(q => q.length >= 4 && distanciaEdicaoLimitada(q, token, 1) <= 1);
-            if (achouFuzzy) score += index === 0 ? 14 : 8;
-        }
-    });
-
-    if (/\b(?:dr|dra|doutor|doutora)\b/.test(normalizarTexto(texto)) && score > 0) score += 4;
-    return score;
-}
-
-function nomeExibicaoProfissional(profissional = {}) {
-    const assinatura = String(profissional.assinatura || '').trim();
-    if (assinatura && !/^dr\(a\)\.?\s*$/i.test(assinatura)) return assinatura;
-    return String(profissional.nome || 'Profissional').trim();
-}
-
-async function responderConsultaEquipeInterna(texto = '') {
-    const tipo = tipoConsultaEquipe(texto);
-    if (!tipo) return null;
-
-    let profissionais = [];
-    try {
-        profissionais = await carregarEquipeInternaAtiva();
-    } catch (err) {
-        console.warn('[IA interna] Falha ao consultar profissionais ativos:', err?.message || err);
-        return null;
-    }
-    if (!profissionais.length) return null;
-
-    if (tipo === 'lista') {
-        const nomes = profissionais.slice(0, 8).map(nomeExibicaoProfissional).filter(Boolean);
-        if (!nomes.length) return null;
-        const complemento = profissionais.length > nomes.length ? ` e mais ${profissionais.length - nomes.length} profissional(is)` : '';
-        return {
-            acao: 'RESPONDER_SISTEMA',
-            origem: 'equipe_interna',
-            resposta: `Nossa equipe cadastrada atualmente inclui ${nomes.join(', ')}${complemento}. Se quiser confirmar um profissional específico, pode me dizer o nome.`
-        };
-    }
-
-    const ranqueados = profissionais
-        .map(item => ({ item, score: pontuarProfissionalNaConsulta(texto, item) }))
-        .filter(item => item.score >= 12)
-        .sort((a, b) => b.score - a.score);
-
-    const melhorScore = ranqueados[0]?.score || 0;
-    const melhores = ranqueados.filter(item => item.score >= Math.max(12, melhorScore - 3));
-
-    if (tipo === 'contato') {
-        return {
-            acao: 'RESPONDER_SISTEMA',
-            origem: 'equipe_interna',
-            resposta: 'Por privacidade, não compartilho telefone, WhatsApp ou e-mail pessoal dos profissionais. Você pode deixar sua mensagem por aqui que ela fica registrada no atendimento.'
-        };
-    }
-
-    if (melhores.length > 1) {
-        return {
-            acao: 'RESPONDER_SISTEMA',
-            origem: 'equipe_interna',
-            resposta: 'Encontrei mais de um profissional com esse nome na nossa equipe. Se você me disser o sobrenome, eu confirmo para você.'
-        };
-    }
-
-    const profissional = melhores[0]?.item || null;
-    if (tipo === 'atuacao') {
-        if (profissional) {
-            return {
-                acao: 'RESPONDER_SISTEMA',
-                origem: 'equipe_interna',
-                resposta: `Posso confirmar que ${nomeExibicaoProfissional(profissional)} faz parte da nossa equipe, mas não tenho uma área de atuação individual cadastrada para responder essa parte com segurança.`
-            };
-        }
-        return {
-            acao: 'SEM_BASE',
-            origem: 'equipe_interna',
-            resposta: 'Não consegui identificar com segurança qual profissional você quis dizer. Se me informar o nome completo, eu tento confirmar para você.'
-        };
-    }
-
-    if (profissional) {
-        return {
-            acao: 'RESPONDER_SISTEMA',
-            origem: 'equipe_interna',
-            resposta: `Sim. ${nomeExibicaoProfissional(profissional)} faz parte da nossa equipe.`
-        };
-    }
-
-    const nomesPossiveis = tokensConsultaEquipe(texto).filter(token => token.length >= 3 && !TERMOS_GENERICOS_EQUIPE.has(token));
-    if (nomesPossiveis.length) {
-        return {
-            acao: 'RESPONDER_SISTEMA',
-            origem: 'equipe_interna',
-            resposta: 'Não encontrei esse nome entre os profissionais ativos cadastrados aqui. Mas temos outros advogados da equipe que podem analisar o seu caso e direcionar o atendimento. Se quiser, me conte brevemente o assunto e eu continuo por aqui.'
-        };
-    }
-
-    return null;
-}
-
 const STOPWORDS_IA = new Set([
     'a', 'o', 'as', 'os', 'um', 'uma', 'uns', 'umas', 'de', 'da', 'do', 'das', 'dos',
     'e', 'ou', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'sem', 'que', 'se',
@@ -3724,10 +3532,10 @@ async function obterCandidatosKnowledge(texto) {
 // -----------------------------------------------------------------------------
 // FONTES WEB DA BASE DE CONHECIMENTO
 // -----------------------------------------------------------------------------
-// O site nunca é consultado ao vivo durante a conversa com o cliente. O painel
-// sincroniza páginas públicas previamente autorizadas e salva apenas o texto no
-// MongoDB. A IA consulta essa cópia local, o que torna a resposta rápida, auditável
-// e previsível. A base manual aprovada continua tendo prioridade sobre conteúdo web.
+// O site nunca responde diretamente ao cliente. O painel sincroniza páginas públicas
+// autorizadas, salva o texto no MongoDB e usa esse material somente para GERAR SUGESTÕES
+// de novos conhecimentos. Apenas após aprovação humana e inclusão em knowledge_base o
+// conteúdo pode participar do atendimento automático.
 function ipPrivadoKnowledgeWeb(ip = '') {
     const valor = String(ip || '').toLowerCase();
     const versao = net.isIP(valor);
@@ -3924,10 +3732,121 @@ async function sincronizarFonteKnowledgeWeb(source) {
     );
     await knowledgeWebSourcesColl.updateOne(
         { _id: source._id },
-        { $set: { lastSyncAt: agora, lastSyncStatus: 'ok', pageCount: paginas.length, lastError: erros.slice(0, 3).join(' | '), updatedAt: agora } }
+        { $set: {
+            lastSyncAt: agora,
+            lastSyncStatus: 'ok',
+            pageCount: paginas.length,
+            lastError: erros.slice(0, 3).join(' | '),
+            webSummary: '',
+            knowledgeSuggestions: [],
+            suggestionsGeneratedAt: null,
+            suggestionsStatus: geminiModel ? 'aguardando' : 'indisponivel',
+            suggestionsError: '',
+            updatedAt: agora
+        } }
     );
     invalidarCacheKnowledgeWeb();
     return { pageCount: paginas.length, warnings: erros.length };
+}
+
+function normalizarSugestaoKnowledgeWeb(item = {}, source = {}, index = 0) {
+    const pergunta = String(item?.pergunta || item?.titulo || '').trim().slice(0, 500);
+    const resposta = String(item?.resposta || '').trim().slice(0, 5000);
+    if (!pergunta || !resposta) return null;
+    const idBase = `${String(source?._id || 'site')}:${pergunta}:${resposta.slice(0, 160)}:${index}`;
+    return {
+        id: crypto.createHash('sha256').update(idBase).digest('hex').slice(0, 24),
+        pergunta,
+        resposta,
+        palavrasChave: normalizarPalavrasChaveKnowledge(item?.palavrasChave || item?.palavrasChaveSugeridas || []),
+        variacoesPergunta: normalizarVariacoesKnowledge(item?.variacoesPergunta || []),
+        fonteUrls: [...new Set((Array.isArray(item?.fonteUrls) ? item.fonteUrls : []).map(v => String(v || '').trim()).filter(Boolean))].slice(0, 6),
+        status: 'pendente',
+        geradoEm: Date.now()
+    };
+}
+
+async function gerarSugestoesKnowledgeWeb(source) {
+    if (!knowledgeWebPagesColl || !knowledgeWebSourcesColl) throw new Error('Fontes web ainda não estão disponíveis.');
+    if (!geminiModel) throw new Error('A IA não está disponível para gerar sugestões do site.');
+
+    const pages = await knowledgeWebPagesColl.find(
+        { sourceId: source._id, ativo: { $ne: false } },
+        { projection: { title: 1, url: 1, text: 1, fetchedAt: 1 } }
+    ).sort({ fetchedAt: -1 }).limit(Math.min(KNOWLEDGE_WEB_MAX_PAGES, Number(source.maxPages || KNOWLEDGE_WEB_DEFAULT_PAGES))).toArray();
+    if (!pages.length) throw new Error('Sincronize o site antes de gerar sugestões.');
+
+    let totalChars = 0;
+    const partes = [];
+    for (const pagina of pages) {
+        if (totalChars >= 52000) break;
+        const trecho = String(pagina.text || '').trim().slice(0, Math.min(6000, Math.max(0, 52000 - totalChars)));
+        if (!trecho) continue;
+        totalChars += trecho.length;
+        partes.push(`PÁGINA: ${String(pagina.title || 'Sem título').slice(0, 220)}
+URL: ${pagina.url}
+CONTEÚDO:
+${trecho}`);
+    }
+    if (!partes.length) throw new Error('Não há conteúdo textual suficiente para gerar sugestões.');
+
+    const contexto = partes.join('\n\n---\n\n');
+    const prompt = `Você auxilia a construir uma BASE DE CONHECIMENTO aprovada para atendimento jurídico por WhatsApp.
+
+A seguir há conteúdo extraído de um site previamente autorizado pelo usuário. Sua tarefa NÃO é publicar nada automaticamente. Gere somente sugestões que um humano irá revisar antes de inserir na base.
+
+FONTE: ${JSON.stringify(source.nome || source.url || 'Site')}
+
+CONTEÚDO SINCRONIZADO:
+${contexto}
+
+Retorne SOMENTE JSON válido neste formato:
+{
+  "resumoFonte":"resumo objetivo do que o site efetivamente informa",
+  "sugestoes":[
+    {
+      "pergunta":"título/pergunta principal",
+      "resposta":"resposta padrão humana para WhatsApp",
+      "palavrasChave":["..."],
+      "variacoesPergunta":["..."],
+      "fonteUrls":["..."]
+    }
+  ]
+}
+
+REGRAS OBRIGATÓRIAS:
+1. Use EXCLUSIVAMENTE fatos contidos no conteúdo sincronizado. Não utilize conhecimento geral, memória do modelo ou inferências externas.
+2. Não invente nomes, profissionais, áreas, prazos, leis, valores, resultados, serviços ou garantias.
+3. Ignore menus, rodapés repetitivos, cookies, política de privacidade e conteúdo puramente técnico do site quando não forem úteis ao atendimento.
+4. Gere de 3 a 10 sugestões realmente úteis, agrupando conteúdos redundantes.
+5. Cada resposta deve ser humana, clara, profissional e curta, adequada a WhatsApp, preferencialmente em 1 a 3 parágrafos.
+6. Preserve ressalvas e limites presentes na fonte. Nunca prometa resultado.
+7. Gere palavras-chave e variações apenas para facilitar a localização semântica; elas não podem acrescentar fatos.
+8. Em fonteUrls use apenas URLs presentes no conteúdo fornecido e relacionadas à sugestão.
+9. O resumoFonte deve ter no máximo 1.200 caracteres e explicar os principais assuntos realmente encontrados.`;
+
+    const result = await geminiModel.generateContent(prompt);
+    const parsed = extrairJsonIA((await result.response).text());
+    const sugestoes = (Array.isArray(parsed?.sugestoes) ? parsed.sugestoes : [])
+        .map((item, index) => normalizarSugestaoKnowledgeWeb(item, source, index))
+        .filter(Boolean)
+        .slice(0, 10);
+    const resumoFonte = String(parsed?.resumoFonte || '').trim().slice(0, 1200);
+    if (!sugestoes.length && !resumoFonte) throw new Error('A IA não encontrou conteúdo suficiente para sugerir conhecimentos.');
+
+    const agora = Date.now();
+    await knowledgeWebSourcesColl.updateOne(
+        { _id: source._id },
+        { $set: {
+            webSummary: resumoFonte,
+            knowledgeSuggestions: sugestoes,
+            suggestionsGeneratedAt: agora,
+            suggestionsStatus: 'ok',
+            suggestionsError: '',
+            updatedAt: agora
+        } }
+    );
+    return { resumoFonte, sugestoes, suggestionsCount: sugestoes.length, generatedAt: agora };
 }
 
 async function carregarKnowledgeWebPages() {
@@ -4169,12 +4088,9 @@ async function analisarMensagemComIA(texto, ticket) {
         return { acao: 'CORTESIA', origem: 'regra', cortesia };
     }
 
-    // Conhecimento institucional dinâmico: perguntas objetivas sobre profissionais
-    // ativos são respondidas com dados do próprio sistema, sem depender da FAQ e sem invenção.
-    if (!atendimentoHumanoAtivo) {
-        const respostaSistema = await responderConsultaEquipeInterna(texto);
-        if (respostaSistema) return respostaSistema;
-    }
+    // V31: informações institucionais, nomes de profissionais e demais fatos do escritório
+    // NÃO são mais obtidos de usuários ou de outros dados internos do sistema. Para o BOT,
+    // a única fonte factual de conhecimento é a Base de Conhecimento aprovada.
 
     // Respostas das perguntas sequenciais são dados do caso e não devem ser consumidas pela IA.
     if (entradaEstruturadaDoFluxo(ticket, texto)) return null;
@@ -4195,24 +4111,10 @@ async function analisarMensagemComIA(texto, ticket) {
     const sinalEncerramento = possuiSinalDeEncerramento(texto);
     const sinalPergunta = possuiSinalDePergunta(texto);
 
-    // A base manual aprovada é sempre a primeira fonte. Somente quando ela não cobre
-    // a pergunta consultamos as páginas previamente sincronizadas do site.
-    if (!sinalEncerramento && sinalPergunta && !candidatos.length) {
-        try {
-            const candidatosWeb = await obterCandidatosKnowledgeWeb(texto);
-            const respostaWeb = await responderComKnowledgeWeb(texto, candidatosWeb);
-            if (respostaWeb?.resposta) {
-                return {
-                    acao: 'RESPONDER_SITE',
-                    origem: 'site_sincronizado',
-                    resposta: respostaWeb.resposta,
-                    confianca: respostaWeb.confianca
-                };
-            }
-        } catch (err) {
-            console.warn('[IA] Falha ao consultar fontes web:', err?.message || err);
-        }
-    }
+    // V31: páginas sincronizadas do site NÃO respondem diretamente ao cliente.
+    // O site serve apenas para gerar sugestões que um usuário humano poderá aprovar e
+    // transformar em itens da Base de Conhecimento. Enquanto não houver aprovação,
+    // o conteúdo web não participa do atendimento automático.
 
     // Perguntas reais nunca devem ficar sem qualquer retorno. Se nenhuma fonte aprovada
     // responder com segurança, registramos a lacuna sem recorrer ao conhecimento geral.
@@ -4449,7 +4351,7 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
         return true;
     }
 
-    if (analiseIA.acao === 'RESPONDER_SISTEMA' || analiseIA.acao === 'RESPONDER_SITE' || analiseIA.acao === 'SEM_BASE') {
+    if (analiseIA.acao === 'SEM_BASE') {
         const retomada = await mensagemRetomadaFluxo(ticket);
         const cortesia = detectarCortesiaMensagem(mensagemCliente);
         const prefixo = cortesia.saudacao ? `${cortesia.saudacao}!\n\n` : '';
@@ -5785,7 +5687,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             ? await analisarMensagemComIA(texto, ticket)
             : null;
 
-        if (['ENCERRAR', 'CORTESIA', 'RESPONDER_SISTEMA', 'RESPONDER_SITE', 'SEM_BASE'].includes(analiseIAPrevia?.acao)) {
+        if (['ENCERRAR', 'CORTESIA', 'SEM_BASE'].includes(analiseIAPrevia?.acao)) {
             await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia, texto);
             return;
         }
@@ -7163,7 +7065,6 @@ app.post('/api/users', async (req, res) => {
         const salvo = { ...documento, _id: result.insertedId };
         delete salvo.passwordHash;
         delete salvo.passwordSalt;
-        invalidarCacheEquipeInterna();
         io.emit('panel_users_updated', { action: 'created', id: String(result.insertedId) });
 
         // O cadastro não depende do WhatsApp. A mensagem é uma cortesia pós-cadastro:
@@ -7219,7 +7120,6 @@ app.put('/api/users/:id', async (req, res) => {
         if (String(req.session.panelUser?.id || '') === String(existente._id)) {
             req.session.panelUser = sessaoPublicaDaConta(salvo);
         }
-        invalidarCacheEquipeInterna();
         io.emit('panel_users_updated', { action: 'updated', id: String(existente._id) });
         res.json({ ok: true, user: { ...sessaoPublicaDaConta(salvo), ativo: salvo.ativo !== false } });
     } catch (err) {
@@ -7242,7 +7142,6 @@ app.delete('/api/users/:id', async (req, res) => {
             if (adminsAtivos <= 1) return res.status(409).json({ erro: 'É necessário manter ao menos um administrador ativo.' });
         }
         await userLoginColl.deleteOne({ _id: existente._id });
-        invalidarCacheEquipeInterna();
         io.emit('panel_users_updated', { action: 'deleted', id: String(existente._id) });
         res.json({ ok: true });
     } catch (err) {
@@ -10425,7 +10324,7 @@ app.post('/api/knowledgeWebSources', async (req, res) => {
         const url = await validarUrlPublicaKnowledgeWeb(doc.url);
         doc.url = url.toString();
         const agora = Date.now();
-        const result = await knowledgeWebSourcesColl.insertOne({ ...doc, pageCount: 0, lastSyncStatus: 'nunca', createdAt: agora, updatedAt: agora });
+        const result = await knowledgeWebSourcesColl.insertOne({ ...doc, pageCount: 0, lastSyncStatus: 'nunca', webSummary: '', knowledgeSuggestions: [], suggestionsStatus: 'nunca', suggestionsGeneratedAt: null, suggestionsError: '', createdAt: agora, updatedAt: agora });
         invalidarCacheKnowledgeWeb();
         res.status(201).json({ ok: true, id: String(result.insertedId) });
     } catch (err) {
@@ -10445,7 +10344,7 @@ app.put('/api/knowledgeWebSources/:id', async (req, res) => {
         const url = await validarUrlPublicaKnowledgeWeb(doc.url);
         doc.url = url.toString();
         const mudouUrl = doc.url !== existente.url;
-        await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { ...doc, ...(mudouUrl ? { pageCount: 0, lastSyncStatus: 'nunca', lastSyncAt: null, lastError: '' } : {}), updatedAt: Date.now() } });
+        await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { ...doc, ...(mudouUrl ? { pageCount: 0, lastSyncStatus: 'nunca', lastSyncAt: null, lastError: '', webSummary: '', knowledgeSuggestions: [], suggestionsStatus: 'nunca', suggestionsGeneratedAt: null, suggestionsError: '' } : {}), updatedAt: Date.now() } });
         if (mudouUrl) await knowledgeWebPagesColl.deleteMany({ sourceId: id });
         invalidarCacheKnowledgeWeb();
         res.json({ ok: true });
@@ -10480,13 +10379,66 @@ app.post('/api/knowledgeWebSources/:id/sync', async (req, res) => {
         if (!source) return res.status(404).json({ erro: 'Fonte não encontrada.' });
         await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { lastSyncStatus: 'sincronizando', updatedAt: Date.now() } });
         const resultado = await sincronizarFonteKnowledgeWeb(source);
-        io.emit('knowledge_web_updated', { sourceId: String(id), pageCount: resultado.pageCount, syncedAt: Date.now() });
-        res.json({ ok: true, ...resultado });
+        let sugestoesResultado = null;
+        let sugestoesErro = '';
+        if (geminiModel) {
+            try {
+                sugestoesResultado = await gerarSugestoesKnowledgeWeb(source);
+            } catch (erroSugestoes) {
+                sugestoesErro = String(erroSugestoes?.message || erroSugestoes).slice(0, 1000);
+                await knowledgeWebSourcesColl.updateOne(
+                    { _id: id },
+                    { $set: { suggestionsStatus: 'erro', suggestionsError: sugestoesErro, updatedAt: Date.now() } }
+                ).catch(() => {});
+            }
+        }
+        io.emit('knowledge_web_updated', { sourceId: String(id), pageCount: resultado.pageCount, suggestionsCount: sugestoesResultado?.suggestionsCount || 0, syncedAt: Date.now() });
+        res.json({ ok: true, ...resultado, suggestionsCount: sugestoesResultado?.suggestionsCount || 0, suggestionsError: sugestoesErro || null });
     } catch (err) {
         if (id && knowledgeWebSourcesColl) {
             await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { lastSyncStatus: 'erro', lastError: String(err?.message || err).slice(0, 1000), updatedAt: Date.now() } }).catch(() => {});
         }
         res.status(400).json({ erro: err?.message || 'Não foi possível sincronizar o site.' });
+    }
+});
+
+app.post('/api/knowledgeWebSources/:id/generate-suggestions', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    try {
+        const id = new ObjectId(String(req.params.id || ''));
+        const source = await knowledgeWebSourcesColl.findOne({ _id: id });
+        if (!source) return res.status(404).json({ erro: 'Fonte não encontrada.' });
+        await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { suggestionsStatus: 'gerando', suggestionsError: '', updatedAt: Date.now() } });
+        const resultado = await gerarSugestoesKnowledgeWeb(source);
+        io.emit('knowledge_web_updated', { sourceId: String(id), suggestionsCount: resultado.suggestionsCount, suggestionsGeneratedAt: resultado.generatedAt });
+        res.json({ ok: true, ...resultado });
+    } catch (err) {
+        const idRaw = String(req.params.id || '');
+        if (ObjectId.isValid(idRaw)) {
+            await knowledgeWebSourcesColl.updateOne(
+                { _id: new ObjectId(idRaw) },
+                { $set: { suggestionsStatus: 'erro', suggestionsError: String(err?.message || err).slice(0, 1000), updatedAt: Date.now() } }
+            ).catch(() => {});
+        }
+        res.status(400).json({ erro: err?.message || 'Não foi possível gerar sugestões do site.' });
+    }
+});
+
+app.post('/api/knowledgeWebSources/:id/suggestions/:suggestionId/status', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    try {
+        const id = new ObjectId(String(req.params.id || ''));
+        const suggestionId = String(req.params.suggestionId || '').trim();
+        const status = ['pendente', 'adicionado', 'ignorado'].includes(String(req.body?.status || '')) ? String(req.body.status) : 'pendente';
+        const result = await knowledgeWebSourcesColl.updateOne(
+            { _id: id, 'knowledgeSuggestions.id': suggestionId },
+            { $set: { 'knowledgeSuggestions.$.status': status, 'knowledgeSuggestions.$.statusUpdatedAt': Date.now(), updatedAt: Date.now() } }
+        );
+        if (!result.matchedCount) return res.status(404).json({ erro: 'Sugestão não encontrada.' });
+        io.emit('knowledge_web_updated', { sourceId: String(id), suggestionId, status });
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(400).json({ erro: 'Não foi possível atualizar a sugestão.' });
     }
 });
 
