@@ -2506,20 +2506,84 @@ async function sendBotMsg(jid, content) {
     }
 }
 
-async function pilotoInterativoLiberadoParaJid(jid) {
-    if (!WA_INTERACTIVE_ENABLED || !WA_INTERACTIVE_TEST_TARGETS.size) return false;
-    if (WA_INTERACTIVE_TEST_TARGETS.has('*')) return true;
+async function pilotoInterativoLiberadoParaJid(jid, ticket = null) {
+    if (!WA_INTERACTIVE_ENABLED) {
+        return false;
+    }
+    if (!WA_INTERACTIVE_TEST_TARGETS.size) {
+        console.warn('[WA Interactive] Piloto habilitado, mas nenhum número de teste foi configurado.');
+        return false;
+    }
+    if (WA_INTERACTIVE_TEST_TARGETS.has('*')) {
+        console.log(`[WA Interactive] ${ticket?.ticketNumber || '-'} liberado por wildcard (*).`);
+        return true;
+    }
+
+    const candidatos = new Set();
+    const adicionarNumero = valor => {
+        const digitos = String(valor || '').replace(/\D/g, '');
+        if (!digitos) return;
+        if (digitos.length === 10 || digitos.length === 11) candidatos.add(`55${digitos}`);
+        if (digitos.length >= 12 && digitos.length <= 15) candidatos.add(digitos);
+    };
+
+    const adicionarFonte = valor => {
+        if (valor === null || valor === undefined) return;
+        if (Array.isArray(valor)) return valor.forEach(adicionarFonte);
+        const texto = String(valor || '').trim();
+        const jidFonte = normalizarJid(texto);
+        const pn = numeroDePnJid(jidFonte);
+        if (pn) adicionarNumero(pn);
+        else if (!texto.includes('@lid')) adicionarNumero(texto);
+    };
 
     const jidNormalizado = String(normalizarJid(jid) || jid || '').toLowerCase();
-    if (jidNormalizado && WA_INTERACTIVE_TEST_TARGETS.has(jidNormalizado)) return true;
+    adicionarFonte(jidNormalizado);
 
-    let numero = numeroDePnJid(jidNormalizado);
-    if (!numero && jidNormalizado.endsWith('@lid')) {
-        const resolvido = await resolverPnDeLids(jidNormalizado).catch(() => null);
-        numero = resolvido?.numero || null;
+    if (ticket) {
+        adicionarFonte(ticket.numeroReal);
+        adicionarFonte(ticket.whatsappNumbers);
+        adicionarFonte(ticket.identificadores);
+        adicionarFonte(ticket.lastRawJid);
+        try { adicionarNumero(whatsappDoTicket(ticket)); } catch (_) {}
     }
-    if (!numero) return false;
-    return WA_INTERACTIVE_TEST_TARGETS.has(String(numero).replace(/\D/g, ''));
+
+    // Em contas Multi-Device, a conversa pode chegar somente por @lid. Tentamos
+    // converter esse identificador para PN, mas não dependemos exclusivamente disso:
+    // os números persistidos no ticket também participam da validação.
+    const fontesLid = [jidNormalizado, ticket?.lastRawJid, ...(Array.isArray(ticket?.identificadores) ? ticket.identificadores : [])];
+    const resolvido = await resolverPnDeLids(fontesLid).catch(err => {
+        console.warn(`[WA Interactive] ${ticket?.ticketNumber || '-'} falha ao resolver LID para PN:`, err?.message || err);
+        return null;
+    });
+    if (resolvido?.numero) adicionarNumero(resolvido.numero);
+
+    const aliasesNumero = numero => {
+        const base = String(numero || '').replace(/\D/g, '');
+        const aliases = new Set(base ? [base] : []);
+        // Compatibilidade Brasil: algumas contas antigas aparecem internamente sem o
+        // nono dígito. Mantemos a comparação restrita ao mesmo DDI/DDD e telefone.
+        if (base.startsWith('55') && base.length === 13 && base[4] === '9') {
+            aliases.add(base.slice(0, 4) + base.slice(5));
+        } else if (base.startsWith('55') && base.length === 12) {
+            aliases.add(base.slice(0, 4) + '9' + base.slice(4));
+        }
+        return aliases;
+    };
+
+    const alvosExpandidos = new Set();
+    WA_INTERACTIVE_TEST_TARGETS.forEach(alvo => aliasesNumero(alvo).forEach(v => alvosExpandidos.add(v)));
+    const candidatosExpandidos = new Set();
+    candidatos.forEach(c => aliasesNumero(c).forEach(v => candidatosExpandidos.add(v)));
+
+    const permitido = [...candidatosExpandidos].some(c => alvosExpandidos.has(c));
+    const mascarar = valor => {
+        const s = String(valor || '');
+        if (s.length <= 4) return s || '-';
+        return `${s.slice(0, 4)}••••${s.slice(-4)}`;
+    };
+    console.log(`[WA Interactive] Elegibilidade ${ticket?.ticketNumber || '-'}: ${permitido ? 'LIBERADO' : 'BLOQUEADO'} | jid=${jidNormalizado || '-'} | candidatos=${[...candidatos].map(mascarar).join(', ') || 'nenhum'} | alvos=${[...WA_INTERACTIVE_TEST_TARGETS].map(mascarar).join(', ')}`);
+    return permitido;
 }
 
 function criarNosAdicionaisInteracaoPiloto(nomeFluxo = 'quick_reply') {
@@ -2540,8 +2604,8 @@ function criarNosAdicionaisInteracaoPiloto(nomeFluxo = 'quick_reply') {
     ];
 }
 
-async function enviarQuickRepliesPiloto(jid, { texto = '', footer = '', opcoes = [] } = {}) {
-    if (!(await pilotoInterativoLiberadoParaJid(jid))) return null;
+async function enviarQuickRepliesPiloto(jid, { texto = '', footer = '', opcoes = [], ticket = null } = {}) {
+    if (!(await pilotoInterativoLiberadoParaJid(jid, ticket))) return null;
     if (!sock?.user || typeof sock.relayMessage !== 'function') throw new Error('WhatsApp não conectado para mensagem interativa.');
     if (!proto?.Message?.InteractiveMessage || typeof generateWAMessageFromContent !== 'function') {
         throw new Error('A versão atual do Baileys não expõe suporte de baixo nível a InteractiveMessage.');
@@ -2596,7 +2660,6 @@ async function enviarQuickRepliesPiloto(jid, { texto = '', footer = '', opcoes =
 }
 
 async function sendBotQuickReplyPiloto(jid, config = {}) {
-    if (!(await pilotoInterativoLiberadoParaJid(jid))) return false;
     const textoRegistro = String(config?.texto || '').trim();
     const inicio = Date.now();
     try {
@@ -2621,7 +2684,7 @@ async function sendBotQuickReplyPiloto(jid, config = {}) {
     }
 }
 
-async function enviarPerguntaCadastroClientePiloto(jid, prefixo = '') {
+async function enviarPerguntaCadastroClientePiloto(jid, prefixo = '', ticket = null) {
     const prefixoLimpo = String(prefixo || '').trim();
     const pergunta = 'Se quiser, posso deixar seu cadastro pronto para facilitar os próximos contatos com o escritório. Deseja se cadastrar?';
     const textoInterativo = [prefixoLimpo, pergunta].filter(Boolean).join('\n\n');
@@ -2632,7 +2695,8 @@ async function enviarPerguntaCadastroClientePiloto(jid, prefixo = '') {
         opcoes: [
             { id: 'aj_cadastro_sim', texto: 'Sim' },
             { id: 'aj_cadastro_nao', texto: 'Não' }
-        ]
+        ],
+        ticket
     });
 
     if (enviadoInterativo) return true;
@@ -2813,7 +2877,13 @@ const WA_INTERACTIVE_TEST_TARGETS = new Set(
         .split(',')
         .map(v => String(v || '').trim())
         .filter(Boolean)
-        .map(v => v === '*' ? '*' : (v.includes('@') ? String(normalizarJid(v) || v).toLowerCase() : v.replace(/\D/g, '')))
+        .map(v => {
+            if (v === '*') return '*';
+            if (v.includes('@')) return String(normalizarJid(v) || v).toLowerCase();
+            let digitos = v.replace(/\D/g, '');
+            if (digitos.length === 10 || digitos.length === 11) digitos = `55${digitos}`;
+            return digitos;
+        })
         .filter(Boolean)
 );
 const WA_INTERACTIVE_PILOT_FOOTER = 'Você também pode responder 1 para Sim ou 2 para Não.';
@@ -2828,7 +2898,7 @@ const WA_INTERACTIVE_REPLY_LABELS = new Map([
 
 if (WA_INTERACTIVE_ENABLED) {
     if (WA_INTERACTIVE_TEST_TARGETS.size) {
-        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}.`);
+        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}. Diagnóstico de elegibilidade ativo.`);
     } else {
         console.warn('[WA Interactive] WA_INTERACTIVE_ENABLED=true, mas WA_INTERACTIVE_TEST_NUMBERS está vazio. O piloto permanecerá inativo por segurança.');
     }
@@ -6195,7 +6265,7 @@ async function concluirTriagemEAvancar(ticket, jid, mensagemCliente = '') {
         mensagemBase: `Obrigado. Já deixei essas informações registradas no ticket *${ticket.ticketNumber}*.`
     });
 
-    await enviarPerguntaCadastroClientePiloto(jid, confirmacaoTriagem);
+    await enviarPerguntaCadastroClientePiloto(jid, confirmacaoTriagem, ticket);
 
     atualizarHistorico(ticket.ticketNumber, {
         status: 'aguardando_cadastro',
@@ -6993,7 +7063,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             });
 
             ticket.aguardandoCadastroCliente = true;
-            await enviarPerguntaCadastroClientePiloto(rawJid, confirmacaoForaHorario);
+            await enviarPerguntaCadastroClientePiloto(rawJid, confirmacaoForaHorario, ticket);
 
             atualizarHistorico(ticket.ticketNumber, {
                 status: 'aguardando_cadastro',
@@ -7272,7 +7342,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             });
 
             ticket.aguardandoCadastroCliente = true;
-            await enviarPerguntaCadastroClientePiloto(rawJid, confirmacaoRelato);
+            await enviarPerguntaCadastroClientePiloto(rawJid, confirmacaoRelato, ticket);
 
             atualizarHistorico(ticket.ticketNumber, {
                 status: 'aguardando_cadastro'
@@ -7294,7 +7364,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             }
 
             if (!respostaPositiva(texto)) {
-                await enviarPerguntaCadastroClientePiloto(rawJid, 'Para eu seguir, escolha uma das opções abaixo.');
+                await enviarPerguntaCadastroClientePiloto(rawJid, 'Para eu seguir, escolha uma das opções abaixo.', ticket);
                 return;
             }
 
