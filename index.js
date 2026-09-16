@@ -221,9 +221,9 @@ function extrairTextoMensagemWhatsApp(msg, { paraFluxo = false } = {}) {
     if (!interativa) return '';
 
     if (paraFluxo) {
-        const canonical = WA_INTERACTIVE_REPLY_MAP.get(interativa.id);
+        const canonical = WA_INTERACTIVE_REPLY_MAP.get(interativa.id) || interpretarIdInterativoParaFluxo(interativa.id);
         if (canonical) {
-            console.log(`[WA Interactive] Resposta do piloto recebida: ${interativa.id} -> ${canonical}.`);
+            console.log(`[WA Interactive] Resposta interativa recebida: ${interativa.id} -> ${canonical}.`);
             return canonical;
         }
         return interativa.texto || interativa.id || '';
@@ -2606,7 +2606,7 @@ function criarNosAdicionaisInteracaoPiloto(nomeFluxo = 'mixed') {
     ];
 }
 
-async function enviarQuickRepliesPiloto(jid, { texto = '', footer = '', opcoes = [], ticket = null } = {}) {
+async function enviarQuickRepliesPiloto(jid, { texto = '', footer = '', opcoes = [], ticket = null, tituloBotao = 'Escolher opção' } = {}) {
     if (!(await pilotoInterativoLiberadoParaJid(jid, ticket))) return null;
     if (!sock?.user || typeof sock.relayMessage !== 'function') throw new Error('WhatsApp não conectado para mensagem interativa.');
     if (!proto?.Message?.InteractiveMessage || typeof generateWAMessageFromContent !== 'function') {
@@ -2616,24 +2616,40 @@ async function enviarQuickRepliesPiloto(jid, { texto = '', footer = '', opcoes =
     const botoes = (Array.isArray(opcoes) ? opcoes : [])
         .map(opcao => ({
             id: String(opcao?.id || '').trim(),
-            texto: String(opcao?.texto || '').trim()
+            texto: String(opcao?.texto || '').trim(),
+            descricao: String(opcao?.descricao || '').trim()
         }))
         .filter(opcao => opcao.id && opcao.texto)
-        .slice(0, 3);
-    if (!botoes.length) throw new Error('Nenhuma opção interativa válida.');
+        .slice(0, 20);
+    if (botoes.length < 2) throw new Error('A seleção interativa precisa de pelo menos duas opções.');
+
+    const nativeButtons = botoes.length <= 3
+        ? botoes.map(opcao => ({
+            name: 'quick_reply',
+            buttonParamsJson: JSON.stringify({ display_text: opcao.texto, id: opcao.id })
+        }))
+        : [{
+            name: 'single_select',
+            buttonParamsJson: JSON.stringify({
+                title: String(tituloBotao || 'Escolher opção').trim().slice(0, 24),
+                sections: [{
+                    title: 'Opções disponíveis',
+                    rows: botoes.map(opcao => ({
+                        header: '',
+                        title: opcao.texto.slice(0, 72),
+                        description: opcao.descricao.slice(0, 72),
+                        id: opcao.id
+                    }))
+                }]
+            })
+        }];
 
     const interactiveMessage = proto.Message.InteractiveMessage.fromObject({
         body: { text: String(texto || '').trim() },
         footer: footer ? { text: String(footer).trim() } : undefined,
         header: { hasMediaAttachment: false },
         nativeFlowMessage: {
-            buttons: botoes.map(opcao => ({
-                name: 'quick_reply',
-                buttonParamsJson: JSON.stringify({
-                    display_text: opcao.texto,
-                    id: opcao.id
-                })
-            })),
+            buttons: nativeButtons,
             messageParamsJson: ''
         }
     });
@@ -2671,10 +2687,10 @@ async function sendBotQuickReplyPiloto(jid, config = {}) {
         registrarMensagemAutomaticaChat(jid, sent, { text: textoRegistro }).catch(err => {
             console.warn('[Chat] Falha ao registrar mensagem interativa automática:', err?.message || err);
         });
-        console.log(`[WA Interactive] Piloto BOTÕES Native Flow v9/mixed enviado para ${normalizarJid(jid) || jid} em ${Date.now() - inicio}ms | id=${id || '-'}.`);
+        console.log(`[WA Interactive] Seleção Native Flow v9/mixed enviada para ${normalizarJid(jid) || jid} em ${Date.now() - inicio}ms | id=${id || '-'}.`);
         return true;
     } catch (err) {
-        console.warn(`[WA Interactive] Falha no piloto para ${normalizarJid(jid) || jid}; usando fallback textual:`, err?.message || err);
+        console.warn(`[WA Interactive] Falha na seleção interativa para ${normalizarJid(jid) || jid}; usando fallback textual:`, err?.message || err);
         return false;
     } finally {
         if (sock?.sendPresenceUpdate) Promise.resolve(sock.sendPresenceUpdate('paused', jid)).catch(() => {});
@@ -2739,6 +2755,75 @@ async function enviarPerguntaCadastroClientePiloto(jid, prefixo = '', ticket = n
     const fallback = [prefixoLimpo, PERGUNTA_CADASTRO_CLIENTE].filter(Boolean).join('\n\n');
     await sendBotMsg(jid, { text: fallback });
     return false;
+}
+
+async function enviarMenuPrincipalInterativo(jid, { prefixo = '', ticket = null } = {}) {
+    const opcoes = await carregarMenuOpcoes();
+    const prefixoLimpo = String(prefixo || '').trim();
+    const textoInterativo = [prefixoLimpo, 'Para direcionarmos corretamente, selecione uma das opções abaixo:'].filter(Boolean).join('\n\n');
+    const escolhas = opcoes.map((item, index) => {
+        const emoji = String(item?.emoji || '').trim();
+        return {
+            id: `aj_menu_${index + 1}`,
+            texto: `${emoji ? `${emoji} ` : ''}${String(item?.titulo || `Opção ${index + 1}`).trim()}`,
+            descricao: String(item?.area || '').trim()
+        };
+    });
+
+    const enviado = await sendBotQuickReplyPiloto(jid, {
+        texto: textoInterativo,
+        footer: 'Você também pode responder digitando o número da opção.',
+        opcoes: escolhas,
+        tituloBotao: 'Escolher área',
+        ticket
+    });
+    if (enviado) return true;
+
+    const menuTexto = await gerarMenuTexto();
+    await sendBotMsg(jid, {
+        text: [prefixoLimpo, `Para direcionarmos corretamente, escolha uma das opções abaixo e envie apenas o número:\n\n${menuTexto}`].filter(Boolean).join('\n\n')
+    });
+    return false;
+}
+
+async function enviarPerguntaTriagemInterativa(jid, pergunta, { prefixo = '', ticket = null } = {}) {
+    const prefixoLimpo = String(prefixo || '').trim();
+    const perguntaTexto = String(pergunta?.texto || '').trim();
+    const aceitas = Array.isArray(pergunta?.respostasAceitas) ? pergunta.respostasAceitas.filter(Boolean) : [];
+
+    if (!perguntaTexto) return false;
+    if (aceitas.length < 2) {
+        await sendBotMsg(jid, { text: [prefixoLimpo, perguntaTexto].filter(Boolean).join('\n\n') });
+        return false;
+    }
+
+    const enviado = await sendBotQuickReplyPiloto(jid, {
+        texto: [prefixoLimpo, perguntaTexto].filter(Boolean).join('\n\n'),
+        footer: 'Você também pode digitar a resposta ou o número da opção.',
+        opcoes: aceitas.slice(0, 20).map((resposta, index) => ({
+            id: `aj_triagem_${index + 1}`,
+            texto: String(resposta).trim()
+        })),
+        tituloBotao: 'Escolher resposta',
+        ticket
+    });
+    if (enviado) return true;
+
+    const fallback = `${perguntaTexto}\n\n${aceitas.map((item, index) => `${numeroComEmoji(index + 1)} ${item}`).join('\n')}`;
+    await sendBotMsg(jid, { text: [prefixoLimpo, fallback].filter(Boolean).join('\n\n') });
+    return false;
+}
+
+function resolverRespostaTriagemInterativa(ticket, texto = '') {
+    const match = String(texto || '').trim().match(/^__AJ_TRIAGEM_(\d{1,3})__$/);
+    if (!match) return String(texto || '').trim();
+    const pergunta = perguntaAtualDoTicket(ticket);
+    const aceitas = Array.isArray(pergunta?.respostasAceitas) ? pergunta.respostasAceitas.filter(Boolean) : [];
+    const indice = Number.parseInt(match[1], 10) - 1;
+    if (!Number.isInteger(indice) || indice < 0 || indice >= aceitas.length) return '';
+    const resposta = String(aceitas[indice] || '').trim();
+    console.log(`[WA Interactive] Resposta de triagem convertida: opção ${indice + 1} -> ${resposta}.`);
+    return resposta;
 }
 
 async function processarAtualizacaoPollPiloto(key = {}, update = {}) {
@@ -2981,16 +3066,26 @@ const WA_INTERACTIVE_REPLY_LABELS = new Map([
     ['aj_cadastro_sim', 'Sim'],
     ['aj_cadastro_nao', 'Não']
 ]);
-// V43: último piloto sem dependência externa para botões reais. Usa
-// InteractiveMessage direto + binary nodes native_flow v=9/name=mixed.
-// O suporte a Poll permanece no arquivo apenas para compatibilidade/reversão,
-// mas o cadastro volta a testar quick_reply nativo.
+
+function interpretarIdInterativoParaFluxo(id = '') {
+    const valor = String(id || '').trim();
+    if (!valor) return '';
+    const menu = valor.match(/^aj_menu_(\d{1,3})$/i);
+    if (menu) return menu[1];
+    const triagem = valor.match(/^aj_triagem_(\d{1,3})$/i);
+    if (triagem) return `__AJ_TRIAGEM_${triagem[1]}__`;
+    return '';
+}
+
+// V44: componente único de seleção Native Flow v9/mixed.
+// 2/3 opções usam quick_reply; 4+ opções usam single_select.
+// Digitação permanece compatível e qualquer falha cai no texto tradicional.
 const WA_INTERACTIVE_POLL_HANDLED = new Set();
 const WA_INTERACTIVE_POLL_TITLE = 'Deseja se cadastrar?';
 
 if (WA_INTERACTIVE_ENABLED) {
     if (WA_INTERACTIVE_TEST_TARGETS.size) {
-        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}. BOTÕES Native Flow v9/mixed ativos no cadastro.`);
+        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}. seleções Native Flow v9/mixed ativas em menu, triagem fechada e cadastro.`);
     } else {
         console.warn('[WA Interactive] WA_INTERACTIVE_ENABLED=true, mas WA_INTERACTIVE_TEST_NUMBERS está vazio. O piloto permanecerá inativo por segurança.');
     }
@@ -3116,10 +3211,18 @@ function validarRespostaDaPergunta(pergunta, texto = '', isMedia = false, { most
         };
     }
 
-    const recebida = normalizarRespostaParaValidacao(texto);
-    const encontrou = aceitas.some(item => normalizarRespostaParaValidacao(item) === recebida);
+    const textoLimpo = String(texto || '').trim();
+    if (/^\d{1,3}$/.test(textoLimpo)) {
+        const indice = Number.parseInt(textoLimpo, 10) - 1;
+        if (Number.isInteger(indice) && indice >= 0 && indice < aceitas.length) {
+            return { valida: true, respostaNormalizada: String(aceitas[indice]) };
+        }
+    }
 
-    if (encontrou) return { valida: true };
+    const recebida = normalizarRespostaParaValidacao(textoLimpo);
+    const encontrada = aceitas.find(item => normalizarRespostaParaValidacao(item) === recebida);
+
+    if (encontrada) return { valida: true, respostaNormalizada: String(encontrada) };
 
     return {
         valida: false,
@@ -6080,28 +6183,30 @@ async function gerarNumeroTicket() {
     };
 }
 
-async function mensagemRecepcao(cliente, ticketNumber, mensagemCliente = '') {
-    const menuTexto = await gerarMenuTexto();
+async function mensagemRecepcao(cliente, ticketNumber, mensagemCliente = '', { incluirMenu = true } = {}) {
+    const menuTexto = incluirMenu ? await gerarMenuTexto() : '';
     const saudacao = saudacaoContextualDaMensagem(mensagemCliente);
 
     if (cliente) {
         const nomeSaudacao = primeiroNome(cliente.nome || cliente.nomeCompleto || '');
-        return `${saudacao}${nomeSaudacao ? `, ${nomeSaudacao}` : ''}! Que bom falar com você novamente. 👋
+        const base = `${saudacao}${nomeSaudacao ? `, ${nomeSaudacao}` : ''}! Que bom falar com você novamente. 👋
 
-Abrimos o ticket *${ticketNumber}* para este atendimento.
+Abrimos o ticket *${ticketNumber}* para este atendimento.`;
+        return incluirMenu ? `${base}
 
 Para direcionarmos corretamente, escolha uma das opções abaixo e envie apenas o número:
 
-${menuTexto}`;
+${menuTexto}` : base;
     }
 
-    return `${saudacao}! Seja bem-vindo à *Azevedo & Juvencio Advogados*. 👋
+    const base = `${saudacao}! Seja bem-vindo à *Azevedo & Juvencio Advogados*. 👋
 
-Abrimos o ticket *${ticketNumber}* para acompanhar seu atendimento.
+Abrimos o ticket *${ticketNumber}* para acompanhar seu atendimento.`;
+    return incluirMenu ? `${base}
 
 Para começarmos, escolha uma das opções abaixo e envie apenas o número:
 
-${menuTexto}`;
+${menuTexto}` : base;
 }
 
 async function registrarTicketHistorico(ticket) {
@@ -6703,7 +6808,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
     const inicioProcessamentoMensagem = Date.now();
     const isMe = !!msg.key?.fromMe;
     const conteudoEntrada = conteudoMensagemDesembrulhado(msg);
-    const texto = String(extrairTextoMensagemWhatsApp(msg, { paraFluxo: true }) || '').trim();
+    let texto = String(extrairTextoMensagemWhatsApp(msg, { paraFluxo: true }) || '').trim();
     const isMedia = !!extrairMidiaAnalisavel(msg);
     const chaveFila = chaveFilaContato(msg, rawJid);
     let liberarFilaContato = null;
@@ -6767,6 +6872,10 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
         if (ticket && !ticket.ticketNumber) {
             await ticketsColl.deleteOne({ _id: ticket._id });
             ticket = null;
+        }
+
+        if (ticket && /^__AJ_TRIAGEM_\d{1,3}__$/.test(texto)) {
+            texto = resolverRespostaTriagemInterativa(ticket, texto);
         }
 
         // Mensagem enviada manualmente pelo escritório.
@@ -7055,11 +7164,11 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                 ]);
             }
 
-            const recepcaoBase = await mensagemRecepcao(cliente, ticket.ticketNumber, texto);
+            const recepcaoBase = await mensagemRecepcao(cliente, ticket.ticketNumber, texto, { incluirMenu: false });
             const recepcaoTexto = pedidoHumanoInicial.solicitado
                 ? `Entendi. Para direcionar você ao profissional adequado, preciso primeiro que siga o fluxo abaixo.\n\n${recepcaoBase}`
                 : recepcaoBase;
-            const recepcaoEnviada = await sendBotMsg(rawJid, { text: recepcaoTexto });
+            const recepcaoEnviada = await enviarMenuPrincipalInterativo(rawJid, { prefixo: recepcaoTexto, ticket });
 
             // A recepção já contém a saudação do atendimento. Marcamos isso no ticket
             // para que nenhuma rotina posterior trate uma etapa do fluxo como nova abertura.
@@ -7169,9 +7278,9 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             const opcaoSelecionada = await buscarOpcaoMenu(texto);
 
             if (!opcaoSelecionada) {
-                const menuTexto = await gerarMenuTexto();
-                await sendBotMsg(rawJid, {
-                    text: `Por favor, digite apenas o número da opção desejada:\n\n${menuTexto}`
+                await enviarMenuPrincipalInterativo(rawJid, {
+                    prefixo: 'Não consegui identificar essa opção. Escolha uma das alternativas abaixo.',
+                    ticket
                 });
                 return;
             }
@@ -7215,9 +7324,9 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                     respostasTriagem: []
                 }).catch(err => console.warn('[Histórico] Falha ao registrar seleção de menu:', err?.message || err));
 
-                const primeiraPergunta = formatarPerguntaParaEnvio(perguntasFluxo[0]);
-                await sendBotMsg(rawJid, {
-                    text: respostaArea ? `${respostaArea}\n\n${primeiraPergunta}` : primeiraPergunta
+                await enviarPerguntaTriagemInterativa(rawJid, perguntasFluxo[0], {
+                    prefixo: respostaArea,
+                    ticket: { ...ticket, perguntasFluxo, indicePerguntaFluxo: 0 }
                 });
                 return;
             }
@@ -7272,8 +7381,9 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             }
 
             if (!texto && !isMedia) {
-                await sendBotMsg(rawJid, {
-                    text: `Para continuar, responda à pergunta abaixo:\n\n${formatarPerguntaParaEnvio(perguntaAtual)}`
+                await enviarPerguntaTriagemInterativa(rawJid, perguntaAtual, {
+                    prefixo: 'Para continuar, responda à pergunta abaixo:',
+                    ticket
                 });
                 return;
             }
@@ -7294,7 +7404,8 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                 const novaTentativaInvalida = tentativasInvalidasAtuais + 1;
                 const mostrarOpcoes = novaTentativaInvalida >= EXIBIR_OPCOES_APOS_TENTATIVAS_INVALIDAS;
 
-                // A lista só é exibida quando o cliente já errou o número configurado de vezes.
+                // Quando a pergunta possui respostas fechadas, reapresentamos a seleção
+                // imediatamente. No fallback textual, as opções também ficam visíveis desde já.
                 if (mostrarOpcoes) {
                     validacaoResposta = validarRespostaDaPergunta(
                         perguntaAtual,
@@ -7304,7 +7415,15 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                     );
                 }
 
-                await sendBotMsg(rawJid, { text: validacaoResposta.mensagem });
+                const aceitasPergunta = Array.isArray(perguntaAtual?.respostasAceitas) ? perguntaAtual.respostasAceitas.filter(Boolean) : [];
+                if (aceitasPergunta.length >= 2) {
+                    await enviarPerguntaTriagemInterativa(rawJid, perguntaAtual, {
+                        prefixo: 'Não consegui identificar essa resposta. Escolha uma das opções abaixo ou digite a resposta correspondente.',
+                        ticket
+                    });
+                } else {
+                    await sendBotMsg(rawJid, { text: validacaoResposta.mensagem });
+                }
                 await ticketsColl.updateOne(
                     { _id: ticket._id },
                     {
@@ -7329,7 +7448,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                 perguntaId: perguntaAtual.id,
                 pergunta: perguntaAtual.texto,
                 respostasAceitas: Array.isArray(perguntaAtual.respostasAceitas) ? perguntaAtual.respostasAceitas : [],
-                resposta: texto || `[${tipoResposta} recebido]`,
+                resposta: validacaoResposta.respostaNormalizada || texto || `[${tipoResposta} recebido]`,
                 tipo: tipoResposta,
                 respondidaEm: Date.now()
             };
@@ -7382,7 +7501,8 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             }).catch(err => console.warn('[Histórico] Falha ao registrar etapa da triagem:', err?.message || err));
 
             if (temProximaPergunta) {
-                await sendBotMsg(rawJid, { text: formatarPerguntaParaEnvio(perguntas[proximoIndice]) });
+                const ticketAtualizadoInteracao = { ...ticket, perguntasFluxo: perguntas, indicePerguntaFluxo: proximoIndice };
+                await enviarPerguntaTriagemInterativa(rawJid, perguntas[proximoIndice], { ticket: ticketAtualizadoInteracao });
                 return;
             }
 
@@ -7662,7 +7782,6 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
         // Estado de segurança: se o ticket existir mas não estiver em nenhum passo válido,
         // mantém a conversa simples e não cria um segundo ticket por engano.
         console.warn(`[Ticket ${ticket.ticketNumber}] Estado não reconhecido. Reiniciando menu do mesmo ticket.`);
-        const menuTextoSeguranca = await gerarMenuTexto();
         await ticketsColl.updateOne(
             { _id: ticket._id },
             {
@@ -7682,10 +7801,9 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
                 }
             }
         );
-        await sendBotMsg(rawJid, {
-            text: `Vamos continuar pelo ticket *${ticket.ticketNumber}*. Escolha uma opção:
-
-${menuTextoSeguranca}`
+        await enviarMenuPrincipalInterativo(rawJid, {
+            prefixo: `Vamos continuar pelo ticket *${ticket.ticketNumber}*.`,
+            ticket: { ...ticket, aguardandoOpcao: true }
         });
     } catch (err) {
         console.error('Erro interno no atendimento:', err);
