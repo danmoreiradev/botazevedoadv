@@ -26,6 +26,15 @@ let genAI = null;
 let geminiModel = null;
 let apiKeysColl;
 
+function normalizarNomeModeloGemini(nome, fallback) {
+    const valor = String(nome || '').trim();
+    // Modelos que já causaram 404/retirada neste projeto são migrados automaticamente,
+    // inclusive quando ainda estiverem definidos em variáveis de ambiente da hospedagem.
+    if (!valor) return fallback;
+    if (['gemini-2.5-flash-lite', 'gemini-3.1-flash-lite-preview'].includes(valor)) return fallback;
+    return valor;
+}
+
 // -----------------------------------------------------------------------------
 // LEITURA AUTOMÁTICA DE DOCUMENTOS / ARQUIVOS COM GEMINI
 // -----------------------------------------------------------------------------
@@ -47,9 +56,14 @@ const DOCUMENT_AI_PROMPT_VERSION = 'aj-doc-v2';
 // Apenas uma análise pesada por vez. O WhatsApp continua respondendo normalmente,
 // porque a fila roda em paralelo ao fluxo de atendimento.
 const DOCUMENT_AI_MAX_CONCURRENCY = 1;
-const DOCUMENT_AI_GEMINI_MAX_ATTEMPTS = 3;
-const DOCUMENT_AI_RETRY_BASE_DELAY_MS = 1200;
+const DOCUMENT_AI_GEMINI_MAX_ATTEMPTS = Math.max(3, Math.min(7, Number(process.env.DOCUMENT_AI_GEMINI_MAX_ATTEMPTS || 5)));
+const DOCUMENT_AI_RETRY_BASE_DELAY_MS = Math.max(500, Number(process.env.DOCUMENT_AI_RETRY_BASE_DELAY_MS || 1000));
 const DOCUMENT_AI_RETRY_REF_MAX_CHARS = 150_000;
+// Modelos estáveis para leitura multimodal. O documento nunca deve depender de um
+// único modelo: 404 de modelo descontinuado e 503 temporário acionam fallback.
+const DOCUMENT_AI_PREFERRED_MODEL = normalizarNomeModeloGemini(process.env.GEMINI_DOCUMENT_MODEL, 'gemini-3.5-flash-lite');
+const DOCUMENT_AI_FALLBACK_MODELS = String(process.env.GEMINI_DOCUMENT_FALLBACK_MODELS || 'gemini-3.6-flash,gemini-3.1-flash-lite')
+    .split(',').map(v => v.trim()).filter(Boolean);
 
 let documentAIActiveJobs = 0;
 const documentAIQueue = [];
@@ -341,28 +355,45 @@ function statusHttpErroDocumentoIA(err) {
     }
 
     const texto = String(err?.message || err || '');
-    const match = texto.match(/\[(429|500|502|503|504)\b/i) || texto.match(/\b(429|500|502|503|504)\b/);
+    const match = texto.match(/\[(404|408|429|500|502|503|504)\b/i) || texto.match(/\b(404|408|429|500|502|503|504)\b/);
     return match ? Number(match[1]) : null;
 }
 
 function erroDocumentoIATemporario(err) {
     const status = statusHttpErroDocumentoIA(err);
-    if ([429, 500, 502, 503, 504].includes(status)) return true;
+    if ([408, 429, 500, 502, 503, 504].includes(status)) return true;
 
     return /(high demand|service unavailable|temporar|resource exhausted|rate limit|too many requests|overload|fetch failed|econnreset|etimedout|socket hang up)/i
         .test(String(err?.message || err || ''));
 }
 
 function erroDocumentoIADownloadIrrecuperavel(err) {
-    return /(media.*not found|arquivo.*não.*encontr|message.*not found|mídia.*expir|media.*expired|404)/i
+    return /(media.*not found|arquivo.*não.*encontr|message.*not found|mídia.*expir|media.*expired|gone|not-authorized|forbidden)/i
         .test(String(err?.message || err || ''));
 }
 
-function descreverErroDocumentoIA(err, { temRetryRef = false } = {}) {
+function erroModeloGeminiIndisponivel(err) {
+    const status = statusHttpErroDocumentoIA(err);
+    const texto = String(err?.message || err || '');
+    return status === 404 && /(model|models\/|no longer available|not found|deprecated|update your code|latest features)/i.test(texto);
+}
+
+function descreverErroDocumentoIA(err, { temRetryRef = false, etapa = 'ia' } = {}) {
     const status = statusHttpErroDocumentoIA(err);
     const texto = String(err?.message || err || '');
     const temporario = erroDocumentoIATemporario(err);
-    const downloadIrrecuperavel = erroDocumentoIADownloadIrrecuperavel(err);
+    // Um 404 da API do Gemini NÃO significa que a mídia do WhatsApp expirou.
+    // Só classificamos como mídia irrecuperável quando o erro ocorreu no download.
+    const downloadIrrecuperavel = etapa === 'download' && (status === 404 || erroDocumentoIADownloadIrrecuperavel(err));
+
+    if (erroModeloGeminiIndisponivel(err)) {
+        return {
+            codigo: 'GEMINI_MODELO_INDISPONIVEL',
+            temporario: false,
+            podeReprocessar: !!temRetryRef,
+            mensagem: 'O modelo de IA configurado não está mais disponível. O sistema tentou modelos alternativos; você pode gerar a leitura novamente após atualizar o serviço.'
+        };
+    }
 
     if (status === 503 || /high demand|service unavailable|overload/i.test(texto)) {
         return {
@@ -370,6 +401,17 @@ function descreverErroDocumentoIA(err, { temRetryRef = false } = {}) {
             temporario: true,
             podeReprocessar: !!temRetryRef,
             mensagem: 'A IA está temporariamente sobrecarregada. O sistema já realizou novas tentativas automáticas. Tente gerar a leitura novamente em alguns instantes.'
+        };
+    }
+
+    if (status === 408 || /timed out|timeout/i.test(texto)) {
+        return {
+            codigo: etapa === 'download' ? 'WHATSAPP_TIMEOUT_MIDIA' : 'GEMINI_TIMEOUT',
+            temporario: true,
+            podeReprocessar: !!temRetryRef,
+            mensagem: etapa === 'download'
+                ? 'O WhatsApp demorou para disponibilizar o arquivo. Tente gerar a leitura novamente em alguns instantes.'
+                : 'A IA demorou para responder. Tente gerar a leitura novamente em alguns instantes.'
         };
     }
 
@@ -409,29 +451,69 @@ function descreverErroDocumentoIA(err, { temRetryRef = false } = {}) {
 }
 
 async function gerarConteudoDocumentoComRetry(partesEntrada) {
+    if (!genAI) throw new Error('A IA não está configurada.');
+
+    const nomes = [];
+    const vistos = new Set();
+    const adicionar = (nome) => {
+        nome = String(nome || '').trim();
+        if (!nome || vistos.has(nome)) return;
+        vistos.add(nome);
+        nomes.push(nome);
+    };
+    adicionar(DOCUMENT_AI_PREFERRED_MODEL);
+    DOCUMENT_AI_FALLBACK_MODELS.forEach(adicionar);
+
     let ultimoErro = null;
     let tentativasExecutadas = 0;
+    const modelosTentados = [];
 
-    for (let tentativa = 1; tentativa <= DOCUMENT_AI_GEMINI_MAX_ATTEMPTS; tentativa++) {
-        tentativasExecutadas = tentativa;
+    for (const nomeModelo of nomes) {
+        if (tentativasExecutadas >= DOCUMENT_AI_GEMINI_MAX_ATTEMPTS) break;
+        let modelo = null;
         try {
-            const resultado = await geminiModel.generateContent(partesEntrada);
-            return { resultado, tentativas: tentativa };
+            modelo = genAI.getGenerativeModel({ model: nomeModelo }, { apiVersion: 'v1beta' });
         } catch (err) {
             ultimoErro = err;
-            const deveTentarNovamente = erroDocumentoIATemporario(err) && tentativa < DOCUMENT_AI_GEMINI_MAX_ATTEMPTS;
-            if (!deveTentarNovamente) break;
+            continue;
+        }
 
-            const atraso = (DOCUMENT_AI_RETRY_BASE_DELAY_MS * (2 ** (tentativa - 1))) + Math.floor(Math.random() * 350);
-            console.warn(`[Documentos IA] Gemini indisponível na tentativa ${tentativa}/${DOCUMENT_AI_GEMINI_MAX_ATTEMPTS}. Nova tentativa em ${atraso}ms.`);
-            await esperarDocumentoIA(atraso);
+        modelosTentados.push(nomeModelo);
+        // Até duas tentativas por modelo para falhas transitórias; erro 404 de modelo
+        // troca imediatamente para o próximo fallback.
+        for (let tentativaModelo = 1; tentativaModelo <= 2 && tentativasExecutadas < DOCUMENT_AI_GEMINI_MAX_ATTEMPTS; tentativaModelo++) {
+            tentativasExecutadas += 1;
+            try {
+                const resultado = await modelo.generateContent(partesEntrada);
+                return {
+                    resultado,
+                    tentativas: tentativasExecutadas,
+                    modelo: nomeModelo,
+                    modelosTentados
+                };
+            } catch (err) {
+                ultimoErro = err;
+                if (erroModeloGeminiIndisponivel(err)) {
+                    console.warn(`[Documentos IA] Modelo ${nomeModelo} indisponível/retirado. Tentando fallback.`);
+                    break;
+                }
+
+                const temporario = erroDocumentoIATemporario(err);
+                const aindaPodeTentar = temporario && tentativaModelo < 2 && tentativasExecutadas < DOCUMENT_AI_GEMINI_MAX_ATTEMPTS;
+                if (!aindaPodeTentar) break;
+
+                const atraso = (DOCUMENT_AI_RETRY_BASE_DELAY_MS * (2 ** Math.max(0, tentativaModelo - 1))) + Math.floor(Math.random() * 350);
+                console.warn(`[Documentos IA] ${nomeModelo} indisponível na tentativa ${tentativaModelo}. Nova tentativa em ${atraso}ms.`);
+                await esperarDocumentoIA(atraso);
+            }
         }
     }
 
     try {
         ultimoErro.documentAITentativas = tentativasExecutadas;
+        ultimoErro.documentAIModelosTentados = modelosTentados;
     } catch (_) {}
-    throw ultimoErro || new Error('Falha desconhecida ao consultar o Gemini.');
+    throw ultimoErro || new Error('Falha desconhecida ao consultar os modelos Gemini.');
 }
 
 function normalizarAnaliseDocumentoIA(parsed, textoFallback = '') {
@@ -622,6 +704,7 @@ async function processarArquivoRecebidoComIA(ticket, msg, { reprocessar = false 
             erro: null,
             erroCodigo: null,
             erroTemporario: null,
+            podeReprocessar: false,
             ...(retryRef ? { retryRef } : {})
         });
     }
@@ -671,6 +754,7 @@ async function processarArquivoRecebidoComIA(ticket, msg, { reprocessar = false 
 
     await enfileirarTrabalhoDocumentoIA(async () => {
         let buffer = null;
+        let etapaAnalise = 'download';
 
         try {
             await atualizarDocumentoIA(ticket, messageId, {
@@ -703,6 +787,7 @@ async function processarArquivoRecebidoComIA(ticket, msg, { reprocessar = false 
                 statusAnalise: 'processando_ia',
                 erro: null
             });
+            etapaAnalise = 'ia';
 
             const prompt = montarPromptAnaliseDocumento(ticket, media);
             const partesEntrada = [{ text: prompt }];
@@ -728,7 +813,7 @@ async function processarArquivoRecebidoComIA(ticket, msg, { reprocessar = false 
             // necessário já está em partesEntrada.
             buffer = null;
 
-            const { resultado, tentativas } = await gerarConteudoDocumentoComRetry(partesEntrada);
+            const { resultado, tentativas, modelo } = await gerarConteudoDocumentoComRetry(partesEntrada);
             const resposta = await resultado.response;
             const textoResposta = String(resposta.text() || '').trim();
             const parsed = extrairJsonIA(textoResposta);
@@ -739,21 +824,24 @@ async function processarArquivoRecebidoComIA(ticket, msg, { reprocessar = false 
                 statusAnalise: 'concluida',
                 analisadoEm: Date.now(),
                 tentativasGemini: tentativas,
+                modeloGemini: modelo || DOCUMENT_AI_PREFERRED_MODEL,
                 erro: null,
                 erroCodigo: null,
-                erroTemporario: null
+                erroTemporario: null,
+                podeReprocessar: false
             });
 
-            console.log(`[Ticket ${ticket.ticketNumber}] Arquivo ${media.nomeArquivo} analisado pelo Gemini em ${tentativas} tentativa(s).`);
+            console.log(`[Ticket ${ticket.ticketNumber}] Arquivo ${media.nomeArquivo} analisado com ${modelo || 'Gemini'} em ${tentativas} tentativa(s).`);
         } catch (err) {
             console.error(`[Ticket ${ticket.ticketNumber}] Falha na análise de arquivo com Gemini:`, err?.message || err);
-            const erroTratado = descreverErroDocumentoIA(err, { temRetryRef: !!retryRef });
+            const erroTratado = descreverErroDocumentoIA(err, { temRetryRef: !!retryRef, etapa: etapaAnalise });
 
             await atualizarDocumentoIA(ticket, messageId, {
                 statusAnalise: 'erro',
                 erro: erroTratado.mensagem,
                 erroCodigo: erroTratado.codigo,
                 erroTemporario: erroTratado.temporario,
+                podeReprocessar: erroTratado.podeReprocessar === true,
                 tentativasGemini: Number(err?.documentAITentativas || DOCUMENT_AI_GEMINI_MAX_ATTEMPTS),
                 analisadoEm: Date.now()
             });
@@ -780,12 +868,12 @@ const KNOWLEDGE_MAX_ITEMS = 200;
 const KNOWLEDGE_MAX_CANDIDATES = 6;
 const KNOWLEDGE_SEMANTIC_FALLBACK_ITEMS = 20;
 // Consultas da Base não podem depender de um único modelo preview. Usamos um
-// modelo estável como primeira opção, retry curto e fallback para outros modelos.
+// modelo estável atual como primeira opção, retry curto e fallback para outros modelos.
 const KNOWLEDGE_AI_MAX_ATTEMPTS = Math.max(2, Math.min(5, Number(process.env.KNOWLEDGE_AI_MAX_ATTEMPTS || 3)));
 const KNOWLEDGE_AI_RETRY_BASE_MS = Math.max(350, Number(process.env.KNOWLEDGE_AI_RETRY_BASE_MS || 700));
 const KNOWLEDGE_AI_TIMEOUT_MS = Math.max(5000, Number(process.env.KNOWLEDGE_AI_TIMEOUT_MS || 14000));
-const KNOWLEDGE_AI_PREFERRED_MODEL = String(process.env.GEMINI_KNOWLEDGE_MODEL || 'gemini-2.5-flash-lite').trim();
-const KNOWLEDGE_AI_FALLBACK_MODELS = String(process.env.GEMINI_KNOWLEDGE_FALLBACK_MODELS || 'gemini-2.5-flash,gemini-3.1-flash-lite-preview')
+const KNOWLEDGE_AI_PREFERRED_MODEL = normalizarNomeModeloGemini(process.env.GEMINI_KNOWLEDGE_MODEL, 'gemini-3.5-flash-lite');
+const KNOWLEDGE_AI_FALLBACK_MODELS = String(process.env.GEMINI_KNOWLEDGE_FALLBACK_MODELS || 'gemini-3.6-flash,gemini-3.1-flash-lite')
     .split(',').map(v => v.trim()).filter(Boolean);
 let knowledgeCache = { items: [], loadedAt: 0 };
 let knowledgeWebCache = { pages: [], loadedAt: 0 };
@@ -802,8 +890,8 @@ const KNOWLEDGE_WEB_MAX_CANDIDATES = 4;
 const KNOWLEDGE_WEB_AI_MAX_ATTEMPTS = Math.max(2, Math.min(6, Number(process.env.KNOWLEDGE_WEB_AI_MAX_ATTEMPTS || 4)));
 const KNOWLEDGE_WEB_AI_RETRY_BASE_MS = Math.max(500, Number(process.env.KNOWLEDGE_WEB_AI_RETRY_BASE_MS || 1200));
 const KNOWLEDGE_WEB_AI_TIMEOUT_MS = Math.max(8000, Number(process.env.KNOWLEDGE_WEB_AI_TIMEOUT_MS || 30000));
-const KNOWLEDGE_WEB_AI_PREFERRED_MODEL = String(process.env.GEMINI_KNOWLEDGE_WEB_MODEL || 'gemini-2.5-flash-lite').trim();
-const KNOWLEDGE_WEB_AI_FALLBACK_MODELS = String(process.env.GEMINI_KNOWLEDGE_WEB_FALLBACK_MODELS || 'gemini-2.5-flash')
+const KNOWLEDGE_WEB_AI_PREFERRED_MODEL = normalizarNomeModeloGemini(process.env.GEMINI_KNOWLEDGE_WEB_MODEL, 'gemini-3.5-flash-lite');
+const KNOWLEDGE_WEB_AI_FALLBACK_MODELS = String(process.env.GEMINI_KNOWLEDGE_WEB_FALLBACK_MODELS || 'gemini-3.6-flash,gemini-3.1-flash-lite')
     .split(',').map(v => v.trim()).filter(Boolean);
 
 
@@ -6027,7 +6115,7 @@ async function startBotInterno() {
         
         if (geminiKeyDoc && geminiKeyDoc.chave) {
             genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
-            const geminiPrimaryModelName = String(process.env.GEMINI_PRIMARY_MODEL || 'gemini-2.5-flash-lite').trim();
+            const geminiPrimaryModelName = normalizarNomeModeloGemini(process.env.GEMINI_PRIMARY_MODEL, 'gemini-3.5-flash-lite');
             geminiModel = genAI.getGenerativeModel(
                 { model: geminiPrimaryModelName },
                 { apiVersion: 'v1beta' }
@@ -8952,9 +9040,12 @@ function mesclarDocumentosIATicket(ticket = {}, historico = {}, { detalhado = tr
                 erroCodigo: doc?.erroCodigo || null,
                 erroTemporario: doc?.erroTemporario === true,
                 tentativasGemini: Number(doc?.tentativasGemini || 0),
+                modeloGemini: doc?.modeloGemini || null,
                 tentativasManuais: Number(doc?.tentativasManuais || 0),
                 reprocessadoEm: doc?.reprocessadoEm || null,
-                podeReprocessar: doc?.statusAnalise === 'erro' && !!doc?.retryRef
+                podeReprocessar: doc?.statusAnalise === 'erro' && (
+                    typeof doc?.podeReprocessar === 'boolean' ? doc.podeReprocessar : !!doc?.retryRef
+                )
             };
         });
 }
