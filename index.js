@@ -6,7 +6,9 @@ const {
     initAuthCreds,
     jidNormalizedUser,
     downloadMediaMessage,
-    makeCacheableSignalKeyStore
+    makeCacheableSignalKeyStore,
+    proto,
+    generateWAMessageFromContent
 } = require('@whiskeysockets/baileys');
 const { MongoClient, ObjectId } = require('mongodb');
 const express = require('express');
@@ -154,6 +156,79 @@ function conteudoMensagemDesembrulhado(msg) {
     }
 
     return conteudo || {};
+}
+
+function extrairRespostaInterativaWhatsApp(msg) {
+    const conteudo = conteudoMensagemDesembrulhado(msg);
+    let id = '';
+    let texto = '';
+    let tipo = '';
+
+    if (conteudo.buttonsResponseMessage) {
+        id = String(conteudo.buttonsResponseMessage.selectedButtonId || '').trim();
+        texto = String(conteudo.buttonsResponseMessage.selectedDisplayText || '').trim();
+        tipo = 'button';
+    } else if (conteudo.listResponseMessage) {
+        id = String(conteudo.listResponseMessage.singleSelectReply?.selectedRowId || '').trim();
+        texto = String(
+            conteudo.listResponseMessage.title ||
+            conteudo.listResponseMessage.description ||
+            ''
+        ).trim();
+        tipo = 'list';
+    } else if (conteudo.templateButtonReplyMessage) {
+        id = String(conteudo.templateButtonReplyMessage.selectedId || '').trim();
+        texto = String(conteudo.templateButtonReplyMessage.selectedDisplayText || '').trim();
+        tipo = 'template';
+    } else if (conteudo.interactiveResponseMessage?.nativeFlowResponseMessage) {
+        const native = conteudo.interactiveResponseMessage.nativeFlowResponseMessage;
+        tipo = String(native.name || 'native_flow').trim();
+        const paramsRaw = String(native.paramsJson || '').trim();
+        if (paramsRaw) {
+            try {
+                const params = JSON.parse(paramsRaw);
+                id = String(
+                    params?.id || params?.selected_id || params?.selectedId ||
+                    params?.row_id || params?.rowId || params?.button_id || params?.buttonId || ''
+                ).trim();
+                texto = String(
+                    params?.display_text || params?.displayText || params?.title || params?.text || ''
+                ).trim();
+            } catch (_) {
+                // Resposta inválida não quebra o fluxo; o texto tradicional continua funcionando.
+            }
+        }
+    }
+
+    if (!id && !texto) return null;
+    return { id, texto, tipo };
+}
+
+function extrairTextoMensagemWhatsApp(msg, { paraFluxo = false } = {}) {
+    const conteudo = conteudoMensagemDesembrulhado(msg);
+    const textoPadrao = String(
+        conteudo.conversation ||
+        conteudo.extendedTextMessage?.text ||
+        conteudo.imageMessage?.caption ||
+        conteudo.videoMessage?.caption ||
+        conteudo.documentMessage?.caption ||
+        ''
+    ).trim();
+    if (textoPadrao) return textoPadrao;
+
+    const interativa = extrairRespostaInterativaWhatsApp(msg);
+    if (!interativa) return '';
+
+    if (paraFluxo) {
+        const canonical = WA_INTERACTIVE_REPLY_MAP.get(interativa.id);
+        if (canonical) {
+            console.log(`[WA Interactive] Resposta do piloto recebida: ${interativa.id} -> ${canonical}.`);
+            return canonical;
+        }
+        return interativa.texto || interativa.id || '';
+    }
+
+    return interativa.texto || WA_INTERACTIVE_REPLY_LABELS.get(interativa.id) || interativa.id || '';
 }
 
 function mimePorExtensao(nomeArquivo = '') {
@@ -1791,12 +1866,7 @@ async function registrarMensagemChat(documento = {}) {
 function dadosMensagemChatWhatsApp(msg) {
     const conteudo = conteudoMensagemDesembrulhado(msg);
     const texto = limitarTextoChat(
-        conteudo.conversation ||
-        conteudo.extendedTextMessage?.text ||
-        conteudo.imageMessage?.caption ||
-        conteudo.videoMessage?.caption ||
-        conteudo.documentMessage?.caption ||
-        '',
+        extrairTextoMensagemWhatsApp(msg, { paraFluxo: false }),
         CHAT_MAX_TEXT_CHARS
     );
     const media = extrairMidiaAnalisavel(msg);
@@ -2436,6 +2506,142 @@ async function sendBotMsg(jid, content) {
     }
 }
 
+async function pilotoInterativoLiberadoParaJid(jid) {
+    if (!WA_INTERACTIVE_ENABLED || !WA_INTERACTIVE_TEST_TARGETS.size) return false;
+    if (WA_INTERACTIVE_TEST_TARGETS.has('*')) return true;
+
+    const jidNormalizado = String(normalizarJid(jid) || jid || '').toLowerCase();
+    if (jidNormalizado && WA_INTERACTIVE_TEST_TARGETS.has(jidNormalizado)) return true;
+
+    let numero = numeroDePnJid(jidNormalizado);
+    if (!numero && jidNormalizado.endsWith('@lid')) {
+        const resolvido = await resolverPnDeLids(jidNormalizado).catch(() => null);
+        numero = resolvido?.numero || null;
+    }
+    if (!numero) return false;
+    return WA_INTERACTIVE_TEST_TARGETS.has(String(numero).replace(/\D/g, ''));
+}
+
+function criarNosAdicionaisInteracaoPiloto(nomeFluxo = 'quick_reply') {
+    // Native Flow em 1:1 pode exigir os nós de negócio/bot para renderização em
+    // clientes recentes do WhatsApp. Se a versão do Baileys ignorar esses nós, o
+    // relay ainda pode falhar e o chamador cairá no fallback textual.
+    return [
+        {
+            tag: 'biz',
+            attrs: {},
+            content: [{
+                tag: 'interactive',
+                attrs: { type: 'native_flow', v: '1' },
+                content: [{ tag: 'native_flow', attrs: { name: nomeFluxo } }]
+            }]
+        },
+        { tag: 'bot', attrs: { biz_bot: '1' } }
+    ];
+}
+
+async function enviarQuickRepliesPiloto(jid, { texto = '', footer = '', opcoes = [] } = {}) {
+    if (!(await pilotoInterativoLiberadoParaJid(jid))) return null;
+    if (!sock?.user || typeof sock.relayMessage !== 'function') throw new Error('WhatsApp não conectado para mensagem interativa.');
+    if (!proto?.Message?.InteractiveMessage || typeof generateWAMessageFromContent !== 'function') {
+        throw new Error('A versão atual do Baileys não expõe suporte de baixo nível a InteractiveMessage.');
+    }
+
+    const botoes = (Array.isArray(opcoes) ? opcoes : [])
+        .map(opcao => ({
+            id: String(opcao?.id || '').trim(),
+            texto: String(opcao?.texto || '').trim()
+        }))
+        .filter(opcao => opcao.id && opcao.texto)
+        .slice(0, 3);
+    if (!botoes.length) throw new Error('Nenhuma opção interativa válida.');
+
+    const interactiveMessage = proto.Message.InteractiveMessage.fromObject({
+        body: { text: String(texto || '').trim() },
+        footer: footer ? { text: String(footer).trim() } : undefined,
+        header: { hasMediaAttachment: false },
+        nativeFlowMessage: {
+            buttons: botoes.map(opcao => ({
+                name: 'quick_reply',
+                buttonParamsJson: JSON.stringify({
+                    display_text: opcao.texto,
+                    id: opcao.id
+                })
+            })),
+            messageParamsJson: ''
+        }
+    });
+
+    const mensagem = generateWAMessageFromContent(
+        jid,
+        {
+            viewOnceMessage: {
+                message: {
+                    messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
+                    interactiveMessage
+                }
+            }
+        },
+        { userJid: sock.user.id }
+    );
+
+    return executarEnvioSerializadoPorJid(jid, async () => {
+        await sock.relayMessage(jid, mensagem.message, {
+            messageId: mensagem.key.id,
+            additionalNodes: criarNosAdicionaisInteracaoPiloto('quick_reply')
+        });
+        guardarMensagemEnviadaBaileys(mensagem);
+        return mensagem;
+    });
+}
+
+async function sendBotQuickReplyPiloto(jid, config = {}) {
+    if (!(await pilotoInterativoLiberadoParaJid(jid))) return false;
+    const textoRegistro = String(config?.texto || '').trim();
+    const inicio = Date.now();
+    try {
+        if (sock?.sendPresenceUpdate) Promise.resolve(sock.sendPresenceUpdate('composing', jid)).catch(() => {});
+        const sent = await enviarQuickRepliesPiloto(jid, config);
+        if (!sent) return false;
+        const id = sent?.key?.id;
+        if (id) {
+            botMessageIds.add(id);
+            setTimeout(() => botMessageIds.delete(id), 60 * 1000);
+        }
+        registrarMensagemAutomaticaChat(jid, sent, { text: textoRegistro }).catch(err => {
+            console.warn('[Chat] Falha ao registrar mensagem interativa automática:', err?.message || err);
+        });
+        console.log(`[WA Interactive] Piloto quick_reply enviado para ${normalizarJid(jid) || jid} em ${Date.now() - inicio}ms.`);
+        return true;
+    } catch (err) {
+        console.warn(`[WA Interactive] Falha no piloto para ${normalizarJid(jid) || jid}; usando fallback textual:`, err?.message || err);
+        return false;
+    } finally {
+        if (sock?.sendPresenceUpdate) Promise.resolve(sock.sendPresenceUpdate('paused', jid)).catch(() => {});
+    }
+}
+
+async function enviarPerguntaCadastroClientePiloto(jid, prefixo = '') {
+    const prefixoLimpo = String(prefixo || '').trim();
+    const pergunta = 'Se quiser, posso deixar seu cadastro pronto para facilitar os próximos contatos com o escritório. Deseja se cadastrar?';
+    const textoInterativo = [prefixoLimpo, pergunta].filter(Boolean).join('\n\n');
+
+    const enviadoInterativo = await sendBotQuickReplyPiloto(jid, {
+        texto: textoInterativo,
+        footer: WA_INTERACTIVE_PILOT_FOOTER,
+        opcoes: [
+            { id: 'aj_cadastro_sim', texto: 'Sim' },
+            { id: 'aj_cadastro_nao', texto: 'Não' }
+        ]
+    });
+
+    if (enviadoInterativo) return true;
+
+    const fallback = [prefixoLimpo, PERGUNTA_CADASTRO_CLIENTE].filter(Boolean).join('\n\n');
+    await sendBotMsg(jid, { text: fallback });
+    return false;
+}
+
 function validarCPF(cpf) {
     cpf = cpf.replace(/[^\d]+/g, ''); // Remove tudo que não for número
     if (cpf === '' || cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
@@ -2592,6 +2798,41 @@ Para localizarmos o atendimento, informe:
 Se precisar enviar algum documento, pode anexar por aqui.`
     }
 ];
+
+// -----------------------------------------------------------------------------
+// PILOTO DE RESPOSTAS INTERATIVAS DO WHATSAPP
+// -----------------------------------------------------------------------------
+// Segurança do piloto:
+// - desligado por padrão;
+// - pode ser liberado apenas para números específicos;
+// - o fluxo textual 1/2 continua válido em todos os casos;
+// - qualquer falha de geração/relay cai automaticamente no texto tradicional.
+const WA_INTERACTIVE_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env.WA_INTERACTIVE_ENABLED || 'false').trim());
+const WA_INTERACTIVE_TEST_TARGETS = new Set(
+    String(process.env.WA_INTERACTIVE_TEST_NUMBERS || '')
+        .split(',')
+        .map(v => String(v || '').trim())
+        .filter(Boolean)
+        .map(v => v === '*' ? '*' : (v.includes('@') ? String(normalizarJid(v) || v).toLowerCase() : v.replace(/\D/g, '')))
+        .filter(Boolean)
+);
+const WA_INTERACTIVE_PILOT_FOOTER = 'Você também pode responder 1 para Sim ou 2 para Não.';
+const WA_INTERACTIVE_REPLY_MAP = new Map([
+    ['aj_cadastro_sim', '1'],
+    ['aj_cadastro_nao', '2']
+]);
+const WA_INTERACTIVE_REPLY_LABELS = new Map([
+    ['aj_cadastro_sim', 'Sim'],
+    ['aj_cadastro_nao', 'Não']
+]);
+
+if (WA_INTERACTIVE_ENABLED) {
+    if (WA_INTERACTIVE_TEST_TARGETS.size) {
+        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}.`);
+    } else {
+        console.warn('[WA Interactive] WA_INTERACTIVE_ENABLED=true, mas WA_INTERACTIVE_TEST_NUMBERS está vazio. O piloto permanecerá inativo por segurança.');
+    }
+}
 
 const PERGUNTA_CADASTRO_CLIENTE = `Se quiser, posso deixar seu cadastro pronto para facilitar os próximos contatos com o escritório. Deseja se cadastrar?
 
@@ -5954,11 +6195,7 @@ async function concluirTriagemEAvancar(ticket, jid, mensagemCliente = '') {
         mensagemBase: `Obrigado. Já deixei essas informações registradas no ticket *${ticket.ticketNumber}*.`
     });
 
-    await sendBotMsg(jid, {
-        text: `${confirmacaoTriagem}
-
-${PERGUNTA_CADASTRO_CLIENTE}`
-    });
+    await enviarPerguntaCadastroClientePiloto(jid, confirmacaoTriagem);
 
     atualizarHistorico(ticket.ticketNumber, {
         status: 'aguardando_cadastro',
@@ -6304,14 +6541,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
     const inicioProcessamentoMensagem = Date.now();
     const isMe = !!msg.key?.fromMe;
     const conteudoEntrada = conteudoMensagemDesembrulhado(msg);
-    const textoRaw =
-        conteudoEntrada.conversation ||
-        conteudoEntrada.extendedTextMessage?.text ||
-        conteudoEntrada.imageMessage?.caption ||
-        conteudoEntrada.videoMessage?.caption ||
-        conteudoEntrada.documentMessage?.caption ||
-        '';
-    const texto = String(textoRaw || '').trim();
+    const texto = String(extrairTextoMensagemWhatsApp(msg, { paraFluxo: true }) || '').trim();
     const isMedia = !!extrairMidiaAnalisavel(msg);
     const chaveFila = chaveFilaContato(msg, rawJid);
     let liberarFilaContato = null;
@@ -6763,9 +6993,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             });
 
             ticket.aguardandoCadastroCliente = true;
-            await sendBotMsg(rawJid, {
-                text: `${confirmacaoForaHorario}\n\n${PERGUNTA_CADASTRO_CLIENTE}`
-            });
+            await enviarPerguntaCadastroClientePiloto(rawJid, confirmacaoForaHorario);
 
             atualizarHistorico(ticket.ticketNumber, {
                 status: 'aguardando_cadastro',
@@ -7044,9 +7272,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             });
 
             ticket.aguardandoCadastroCliente = true;
-            await sendBotMsg(rawJid, {
-                text: `${confirmacaoRelato}\n\n${PERGUNTA_CADASTRO_CLIENTE}`
-            });
+            await enviarPerguntaCadastroClientePiloto(rawJid, confirmacaoRelato);
 
             atualizarHistorico(ticket.ticketNumber, {
                 status: 'aguardando_cadastro'
@@ -7068,9 +7294,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             }
 
             if (!respostaPositiva(texto)) {
-                await sendBotMsg(rawJid, {
-                    text: `Para eu seguir, escolha uma das opções abaixo:\n\n1️⃣ Sim\n2️⃣ Não`
-                });
+                await enviarPerguntaCadastroClientePiloto(rawJid, 'Para eu seguir, escolha uma das opções abaixo.');
                 return;
             }
 
