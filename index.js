@@ -779,6 +779,14 @@ const KNOWLEDGE_CACHE_TTL_MS = 60 * 1000;
 const KNOWLEDGE_MAX_ITEMS = 200;
 const KNOWLEDGE_MAX_CANDIDATES = 6;
 const KNOWLEDGE_SEMANTIC_FALLBACK_ITEMS = 20;
+// Consultas da Base não podem depender de um único modelo preview. Usamos um
+// modelo estável como primeira opção, retry curto e fallback para outros modelos.
+const KNOWLEDGE_AI_MAX_ATTEMPTS = Math.max(2, Math.min(5, Number(process.env.KNOWLEDGE_AI_MAX_ATTEMPTS || 3)));
+const KNOWLEDGE_AI_RETRY_BASE_MS = Math.max(350, Number(process.env.KNOWLEDGE_AI_RETRY_BASE_MS || 700));
+const KNOWLEDGE_AI_TIMEOUT_MS = Math.max(5000, Number(process.env.KNOWLEDGE_AI_TIMEOUT_MS || 14000));
+const KNOWLEDGE_AI_PREFERRED_MODEL = String(process.env.GEMINI_KNOWLEDGE_MODEL || 'gemini-2.5-flash-lite').trim();
+const KNOWLEDGE_AI_FALLBACK_MODELS = String(process.env.GEMINI_KNOWLEDGE_FALLBACK_MODELS || 'gemini-2.5-flash,gemini-3.1-flash-lite-preview')
+    .split(',').map(v => v.trim()).filter(Boolean);
 let knowledgeCache = { items: [], loadedAt: 0 };
 let knowledgeWebCache = { pages: [], loadedAt: 0 };
 const KNOWLEDGE_WEB_CACHE_TTL_MS = 45 * 1000;
@@ -3388,7 +3396,9 @@ const STOPWORDS_IA = new Set([
     'a', 'o', 'as', 'os', 'um', 'uma', 'uns', 'umas', 'de', 'da', 'do', 'das', 'dos',
     'e', 'ou', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'sem', 'que', 'se',
     'eu', 'me', 'meu', 'minha', 'voce', 'voces', 'isso', 'isto', 'essa', 'esse', 'como',
-    'qual', 'quais', 'quando', 'onde', 'porque', 'pra', 'pro', 'tem', 'ter', 'ser', 'esta'
+    'qual', 'quais', 'quando', 'onde', 'porque', 'pra', 'pro', 'tem', 'ter', 'ser', 'esta',
+    'aqui', 'ai', 'la', 'dr', 'dra', 'doutor', 'doutora', 'sr', 'sra', 'saber', 'gostaria',
+    'queria', 'quero', 'pode', 'podem'
 ]);
 
 function tokensRelevantes(texto = '') {
@@ -3398,6 +3408,113 @@ function tokensRelevantes(texto = '') {
             .split(/\s+/)
             .filter(token => token.length >= 3 && !STOPWORDS_IA.has(token))
     )];
+}
+
+function tokensCorpusKnowledge(item = {}) {
+    const partes = [
+        item?.pergunta || '',
+        item?.resposta || '',
+        ...(Array.isArray(item?.palavrasChave) ? item.palavrasChave : []),
+        ...(Array.isArray(item?.variacoesPergunta) ? item.variacoesPergunta : [])
+    ];
+    return normalizarTexto(partes.join(' '))
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function ngramsKnowledge(tokens = [], tamanho = 2) {
+    const saida = [];
+    for (let i = 0; i <= tokens.length - tamanho; i++) {
+        const trecho = tokens.slice(i, i + tamanho);
+        if (trecho.length === tamanho) saida.push(trecho.join(' '));
+    }
+    return saida;
+}
+
+function distanciaLevenshteinKnowledge(a = '', b = '', limite = 2) {
+    a = String(a); b = String(b);
+    if (a === b) return 0;
+    if (!a || !b) return Math.max(a.length, b.length);
+    if (Math.abs(a.length - b.length) > limite) return limite + 1;
+    const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        const cur = [i];
+        let menor = cur[0];
+        for (let j = 1; j <= b.length; j++) {
+            cur[j] = Math.min(
+                cur[j - 1] + 1,
+                prev[j] + 1,
+                prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+            );
+            menor = Math.min(menor, cur[j]);
+        }
+        if (menor > limite) return limite + 1;
+        for (let j = 0; j <= b.length; j++) prev[j] = cur[j];
+    }
+    return prev[b.length];
+}
+
+function bonusCorrespondenciaLocalKnowledge(texto = '', item = {}) {
+    const queryTokens = tokensRelevantes(texto).filter(t => t.length >= 3);
+    if (!queryTokens.length) return { bonus: 0, forte: false, motivos: [] };
+
+    const corpus = tokensCorpusKnowledge(item);
+    if (!corpus) return { bonus: 0, forte: false, motivos: [] };
+    const corpusTokens = [...new Set(corpus.split(/\s+/).filter(Boolean))];
+    const corpusSet = new Set(corpusTokens);
+    let bonus = 0;
+    let forte = false;
+    const motivos = [];
+
+    // Nomes próprios e expressões de duas/três palavras são um sinal muito mais
+    // confiável do que uma palavra-chave isolada. Ex.: "Pedro Azevedo" presente
+    // no conteúdo aprovado da Base deve localizar "Equipe" mesmo sem Gemini.
+    const tri = ngramsKnowledge(queryTokens, 3);
+    const bi = ngramsKnowledge(queryTokens, 2);
+    const triExato = tri.find(frase => corpus.includes(frase));
+    const biExato = bi.find(frase => corpus.includes(frase));
+    if (triExato) {
+        bonus += 105;
+        forte = true;
+        motivos.push(`frase:${triExato}`);
+    } else if (biExato) {
+        bonus += 78;
+        forte = true;
+        motivos.push(`frase:${biExato}`);
+    }
+
+    let exatos = 0;
+    let aproximados = 0;
+    for (const token of queryTokens) {
+        if (corpusSet.has(token)) {
+            exatos += 1;
+            continue;
+        }
+        if (token.length >= 5) {
+            const candidato = corpusTokens.find(ct => ct.length >= 5 && distanciaLevenshteinKnowledge(token, ct, 1) <= 1);
+            if (candidato) aproximados += 1;
+        }
+    }
+
+    const cobertura = exatos / Math.max(1, queryTokens.length);
+    if (exatos >= 2) bonus += exatos * 9;
+    if (aproximados) bonus += aproximados * 4;
+    if (cobertura >= 0.60 && exatos >= 2) {
+        bonus += 24;
+        forte = true;
+        motivos.push(`cobertura:${Math.round(cobertura * 100)}%`);
+    }
+
+    // Intenção institucional de equipe: continua sendo apenas mecanismo de busca.
+    // O conteúdo factual da resposta vem exclusivamente do item aprovado localizado.
+    const q = normalizarTexto(texto);
+    const titulo = normalizarTexto(item?.pergunta || '');
+    const perguntaEquipe = /\b(?:trabalha|atua|faz parte|equipe|advogad[oa]|profissional)\b/.test(q);
+    const itemEquipe = /\b(?:equipe|advogad[oa]|profissional|socios|sócios)\b/.test(`${titulo} ${corpus.slice(0, 1200)}`);
+    if (perguntaEquipe && itemEquipe && exatos >= 1) bonus += 18;
+
+    return { bonus, forte, motivos };
 }
 
 function pontuarItemKnowledge(texto, item) {
@@ -3439,6 +3556,9 @@ function pontuarItemKnowledge(texto, item) {
         else if (tokensResposta.has(token)) score += 1.25;
     }
 
+    const local = bonusCorrespondenciaLocalKnowledge(texto, item);
+    score += local.bonus;
+
     // A prioridade apenas desempata itens semanticamente aderentes.
     if (score > 0) score += prioridade * 0.35;
     return score;
@@ -3467,6 +3587,58 @@ async function carregarKnowledgeBase() {
 function limitarTextoIndiceKnowledge(valor = '', max = 420) {
     const texto = String(valor || '').replace(/\s+/g, ' ').trim();
     return texto.length <= max ? texto : `${texto.slice(0, max - 1)}…`;
+}
+
+function modelosKnowledgeBaseIA() {
+    const itens = [];
+    const usados = new Set();
+    const adicionarNome = (nome) => {
+        nome = String(nome || '').trim();
+        if (!nome || usados.has(nome) || !genAI) return;
+        usados.add(nome);
+        try {
+            itens.push({ nome, model: genAI.getGenerativeModel({ model: nome }, { apiVersion: 'v1beta' }) });
+        } catch (_) {}
+    };
+
+    adicionarNome(KNOWLEDGE_AI_PREFERRED_MODEL);
+    KNOWLEDGE_AI_FALLBACK_MODELS.forEach(adicionarNome);
+    // Mantém o modelo global por último caso ele tenha sido configurado de forma customizada.
+    if (geminiModel) itens.push({ nome: 'modelo-principal', model: geminiModel });
+    return itens;
+}
+
+async function gerarConteudoKnowledgeBaseComRetry(prompt) {
+    const modelos = modelosKnowledgeBaseIA();
+    if (!modelos.length) throw new Error('IA da Base indisponível.');
+
+    let ultimoErro = null;
+    let tentativa = 0;
+    for (let mi = 0; mi < modelos.length && tentativa < KNOWLEDGE_AI_MAX_ATTEMPTS; mi++) {
+        const atual = modelos[mi];
+        const tentativasModelo = mi === 0 ? 2 : 1;
+        for (let local = 0; local < tentativasModelo && tentativa < KNOWLEDGE_AI_MAX_ATTEMPTS; local++) {
+            tentativa += 1;
+            try {
+                const timeout = new Promise((_, reject) => setTimeout(
+                    () => reject(new Error('Timeout na consulta da Base de Conhecimento.')),
+                    KNOWLEDGE_AI_TIMEOUT_MS
+                ));
+                const resultado = await Promise.race([atual.model.generateContent(prompt), timeout]);
+                return { resultado, modelo: atual.nome, tentativas: tentativa };
+            } catch (err) {
+                ultimoErro = err;
+                const temporario = erroTemporarioKnowledgeWebIA(err);
+                const inexistente = Number(err?.status || err?.statusCode || 0) === 404 || /not found|not supported/.test(String(err?.message || '').toLowerCase());
+                if (!temporario && !inexistente) throw err;
+                if (tentativa >= KNOWLEDGE_AI_MAX_ATTEMPTS) break;
+                const atraso = KNOWLEDGE_AI_RETRY_BASE_MS * (2 ** Math.min(tentativa - 1, 2)) + Math.floor(Math.random() * 220);
+                console.warn(`[IA Base] Modelo ${atual.nome} indisponível (${tentativa}/${KNOWLEDGE_AI_MAX_ATTEMPTS}). Fallback em ${atraso}ms.`);
+                await new Promise(resolve => setTimeout(resolve, atraso));
+            }
+        }
+    }
+    throw ultimoErro || new Error('Não foi possível consultar a IA da Base.');
 }
 
 async function selecionarKnowledgeSemantico(texto, items = []) {
@@ -3504,8 +3676,8 @@ REGRAS:
 5. Não responda ao cliente e não use conhecimento externo.`;
 
     try {
-        const result = await geminiModel.generateContent(prompt);
-        const parsed = extrairJsonIA((await result.response).text());
+        const { resultado, modelo } = await gerarConteudoKnowledgeBaseComRetry(prompt);
+        const parsed = extrairJsonIA((await resultado.response).text());
         const indices = Array.isArray(parsed?.indices) ? parsed.indices : [];
         const vistos = new Set();
         return indices
@@ -3524,7 +3696,10 @@ async function obterCandidatosKnowledge(texto) {
     if (!items.length) return [];
 
     const ranqueados = items
-        .map(item => ({ ...item, score: pontuarItemKnowledge(texto, item) }))
+        .map(item => {
+            const local = bonusCorrespondenciaLocalKnowledge(texto, item);
+            return { ...item, score: pontuarItemKnowledge(texto, item), localMatchForte: local.forte, localMatchMotivos: local.motivos };
+        })
         .sort((a, b) => b.score - a.score);
 
     const fortes = ranqueados.filter(item => item.score >= 55).slice(0, KNOWLEDGE_MAX_CANDIDATES);
@@ -4490,12 +4665,33 @@ async function analisarMensagemComIA(texto, ticket) {
         return null;
     }
 
+    // Correspondência local forte: não usamos Gemini para decidir algo que a própria
+    // Base já comprova de forma inequívoca. Isso mantém a Base funcionando mesmo durante
+    // indisponibilidade da API e reduz a latência de perguntas com nomes/expressões exatas.
+    const melhorLocal = candidatos[0];
+    const segundoLocal = candidatos[1];
+    const margemLocal = Number(melhorLocal?.score || 0) - Number(segundoLocal?.score || 0);
+    if (
+        sinalPergunta &&
+        melhorLocal?.resposta &&
+        (melhorLocal.localMatchForte === true || Number(melhorLocal.score || 0) >= 88) &&
+        (margemLocal >= 8 || Number(melhorLocal.score || 0) >= 120 || !segundoLocal)
+    ) {
+        console.log(`[IA Base] Resposta local forte: ${String(melhorLocal.pergunta || '').slice(0, 90)} (score ${Number(melhorLocal.score || 0).toFixed(1)}).`);
+        return {
+            acao: 'RESPONDER_BASE',
+            resposta: String(melhorLocal.resposta).trim().slice(0, 3000),
+            origem: 'base_local_forte'
+        };
+    }
+
     // Fallback resiliente: se o Gemini estiver indisponível, uma correspondência exata/forte
     // ainda pode ser respondida diretamente com o conteúdo já aprovado da base.
     if (!geminiModel) {
         const melhor = candidatos[0];
-        if (sinalPergunta && melhor && melhor.score >= 40) {
-            return { acao: 'RESPONDER_BASE', resposta: melhor.resposta, origem: 'fallback_base' };
+        if (sinalPergunta && melhor && (melhor.localMatchForte === true || melhor.score >= 34)) {
+            console.warn(`[IA Base] API indisponível; usando correspondência local aprovada (score ${Number(melhor.score || 0).toFixed(1)}).`);
+            return { acao: 'RESPONDER_BASE', resposta: melhor.resposta, origem: 'fallback_base_local' };
         }
         if (sinalPergunta) {
             registrarLacunaKnowledge(texto, ticket).catch(() => {});
@@ -4541,8 +4737,8 @@ REGRAS OBRIGATÓRIAS:
 8. Em caso de dúvida, prefira NENHUMA.`;
 
     try {
-        const result = await geminiModel.generateContent(prompt);
-        const response = await result.response;
+        const { resultado, modelo } = await gerarConteudoKnowledgeBaseComRetry(prompt);
+        const response = await resultado.response;
         const parsed = extrairJsonIA(response.text());
 
         if (!parsed || !['ENCERRAR', 'RESPONDER_BASE', 'NENHUMA'].includes(parsed.acao)) {
@@ -4582,8 +4778,9 @@ REGRAS OBRIGATÓRIAS:
         console.error('[IA] Erro ao analisar mensagem:', err?.message || err);
 
         const melhor = candidatos[0];
-        if (sinalPergunta && melhor && melhor.score >= 40) {
-            return { acao: 'RESPONDER_BASE', resposta: melhor.resposta, origem: 'fallback_base' };
+        if (sinalPergunta && melhor && (melhor.localMatchForte === true || melhor.score >= 34)) {
+            console.warn(`[IA Base] API indisponível; usando correspondência local aprovada (score ${Number(melhor.score || 0).toFixed(1)}).`);
+            return { acao: 'RESPONDER_BASE', resposta: melhor.resposta, origem: 'fallback_base_local' };
         }
         if (sinalPergunta) {
             registrarLacunaKnowledge(texto, ticket).catch(() => {});
@@ -5768,11 +5965,12 @@ async function startBotInterno() {
         
         if (geminiKeyDoc && geminiKeyDoc.chave) {
             genAI = new GoogleGenerativeAI(geminiKeyDoc.chave);
+            const geminiPrimaryModelName = String(process.env.GEMINI_PRIMARY_MODEL || 'gemini-2.5-flash-lite').trim();
             geminiModel = genAI.getGenerativeModel(
-                { model: "gemini-3.1-flash-lite-preview" },
+                { model: geminiPrimaryModelName },
                 { apiVersion: 'v1beta' }
             );
-            console.log("✅ Sistema Gemini pronto e estável.");
+            console.log(`✅ Sistema Gemini pronto. Modelo principal: ${geminiPrimaryModelName}.`);
         }
 
         const { state, saveCreds } = await useMongoDBAuthState(authColl);
