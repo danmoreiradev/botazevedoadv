@@ -2587,10 +2587,11 @@ async function pilotoInterativoLiberadoParaJid(jid, ticket = null) {
     return permitido;
 }
 
-function criarNosAdicionaisInteracaoPiloto(nomeFluxo = 'quick_reply') {
-    // Native Flow em 1:1 pode exigir os nós de negócio/bot para renderização em
-    // clientes recentes do WhatsApp. Se a versão do Baileys ignorar esses nós, o
-    // relay ainda pode falhar e o chamador cairá no fallback textual.
+function criarNosAdicionaisInteracaoPiloto(nomeFluxo = 'mixed') {
+    // V43: para quick_reply/lista genéricos, implementações atuais que funcionam
+    // sobre WhiskeySockets anunciam o Native Flow como v=9/name=mixed. O pacote
+    // oficial não injeta essa estrutura automaticamente, então fazemos isso apenas
+    // no piloto e sem alterar o restante do socket.
     return [
         {
             tag: 'biz',
@@ -2598,7 +2599,7 @@ function criarNosAdicionaisInteracaoPiloto(nomeFluxo = 'quick_reply') {
             content: [{
                 tag: 'interactive',
                 attrs: { type: 'native_flow', v: '1' },
-                content: [{ tag: 'native_flow', attrs: { name: nomeFluxo } }]
+                content: [{ tag: 'native_flow', attrs: { v: '9', name: nomeFluxo } }]
             }]
         },
         { tag: 'bot', attrs: { biz_bot: '1' } }
@@ -2637,23 +2638,18 @@ async function enviarQuickRepliesPiloto(jid, { texto = '', footer = '', opcoes =
         }
     });
 
+    // O helper moderno envia InteractiveMessage diretamente; embrulhar em
+    // viewOnceMessage pode alterar a classe do stanza e foi removido neste piloto.
     const mensagem = generateWAMessageFromContent(
         jid,
-        {
-            viewOnceMessage: {
-                message: {
-                    messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
-                    interactiveMessage
-                }
-            }
-        },
+        { interactiveMessage },
         { userJid: sock.user.id }
     );
 
     return executarEnvioSerializadoPorJid(jid, async () => {
         await sock.relayMessage(jid, mensagem.message, {
             messageId: mensagem.key.id,
-            additionalNodes: criarNosAdicionaisInteracaoPiloto('quick_reply')
+            additionalNodes: criarNosAdicionaisInteracaoPiloto('mixed')
         });
         guardarMensagemEnviadaBaileys(mensagem);
         return mensagem;
@@ -2675,7 +2671,7 @@ async function sendBotQuickReplyPiloto(jid, config = {}) {
         registrarMensagemAutomaticaChat(jid, sent, { text: textoRegistro }).catch(err => {
             console.warn('[Chat] Falha ao registrar mensagem interativa automática:', err?.message || err);
         });
-        console.log(`[WA Interactive] Piloto quick_reply enviado para ${normalizarJid(jid) || jid} em ${Date.now() - inicio}ms.`);
+        console.log(`[WA Interactive] Piloto BOTÕES Native Flow v9/mixed enviado para ${normalizarJid(jid) || jid} em ${Date.now() - inicio}ms | id=${id || '-'}.`);
         return true;
     } catch (err) {
         console.warn(`[WA Interactive] Falha no piloto para ${normalizarJid(jid) || jid}; usando fallback textual:`, err?.message || err);
@@ -2728,9 +2724,13 @@ async function enviarPerguntaCadastroClientePiloto(jid, prefixo = '', ticket = n
     const pergunta = 'Se quiser, posso deixar seu cadastro pronto para facilitar os próximos contatos com o escritório. Deseja se cadastrar?';
     const textoInterativo = [prefixoLimpo, pergunta].filter(Boolean).join('\n\n');
 
-    const enviadoInterativo = await sendBotPollPiloto(jid, {
+    const enviadoInterativo = await sendBotQuickReplyPiloto(jid, {
         texto: textoInterativo,
-        opcoes: ['Sim', 'Não'],
+        footer: WA_INTERACTIVE_PILOT_FOOTER,
+        opcoes: [
+            { id: 'aj_cadastro_sim', texto: 'Sim' },
+            { id: 'aj_cadastro_nao', texto: 'Não' }
+        ],
         ticket
     });
 
@@ -2981,15 +2981,16 @@ const WA_INTERACTIVE_REPLY_LABELS = new Map([
     ['aj_cadastro_sim', 'Sim'],
     ['aj_cadastro_nao', 'Não']
 ]);
-// V42: o pacote oficial WhiskeySockets rejeitou o Native Flow com ACK 405
-// no ambiente real. O piloto passa a usar Poll, formato documentado pelo Baileys,
-// mantendo o fluxo textual como fallback.
+// V43: último piloto sem dependência externa para botões reais. Usa
+// InteractiveMessage direto + binary nodes native_flow v=9/name=mixed.
+// O suporte a Poll permanece no arquivo apenas para compatibilidade/reversão,
+// mas o cadastro volta a testar quick_reply nativo.
 const WA_INTERACTIVE_POLL_HANDLED = new Set();
 const WA_INTERACTIVE_POLL_TITLE = 'Deseja se cadastrar?';
 
 if (WA_INTERACTIVE_ENABLED) {
     if (WA_INTERACTIVE_TEST_TARGETS.size) {
-        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}. Piloto de seleção via POLL ativo.`);
+        console.log(`[WA Interactive] Piloto habilitado para ${WA_INTERACTIVE_TEST_TARGETS.has('*') ? 'todos os números (*)' : `${WA_INTERACTIVE_TEST_TARGETS.size} alvo(s) de teste`}. BOTÕES Native Flow v9/mixed ativos no cadastro.`);
     } else {
         console.warn('[WA Interactive] WA_INTERACTIVE_ENABLED=true, mas WA_INTERACTIVE_TEST_NUMBERS está vazio. O piloto permanecerá inativo por segurança.');
     }
