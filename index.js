@@ -18,6 +18,8 @@ const { Boom } = require('@hapi/boom');
 const axios = require('axios');
 const session = require('express-session');
 const crypto = require('crypto');
+const dns = require('dns').promises;
+const net = require('net');
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 let genAI = null;
@@ -778,6 +780,14 @@ const KNOWLEDGE_MAX_ITEMS = 200;
 const KNOWLEDGE_MAX_CANDIDATES = 6;
 const KNOWLEDGE_SEMANTIC_FALLBACK_ITEMS = 20;
 let knowledgeCache = { items: [], loadedAt: 0 };
+let knowledgeWebCache = { pages: [], loadedAt: 0 };
+const KNOWLEDGE_WEB_CACHE_TTL_MS = 45 * 1000;
+const KNOWLEDGE_WEB_MAX_PAGES = 30;
+const KNOWLEDGE_WEB_DEFAULT_PAGES = 15;
+const KNOWLEDGE_WEB_MAX_HTML_BYTES = 1_500_000;
+const KNOWLEDGE_WEB_MAX_TEXT_CHARS_PER_PAGE = 18000;
+const KNOWLEDGE_WEB_MAX_CANDIDATES = 4;
+
 
 // Conhecimento institucional dinâmico. Diferente da base jurídica/FAQ, estas
 // informações vêm do próprio sistema e podem ser respondidas sem o Gemini inventar fatos.
@@ -1009,7 +1019,7 @@ function liberarPayloadEntrada(fingerprint) {
     if (fingerprint) inboundPayloadInFlight.delete(fingerprint);
 }
 
-let ticketsColl, authColl, knowledgeColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl, ticketMessagesColl, baileysSentMessagesColl;
+let ticketsColl, authColl, knowledgeColl, knowledgeGapsColl, knowledgeWebSourcesColl, knowledgeWebPagesColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl, ticketMessagesColl, baileysSentMessagesColl;
 
 // -----------------------------------------------------------------------------
 // USUÁRIOS, PERMISSÕES E CHAT DO PAINEL
@@ -3366,6 +3376,9 @@ function clienteQuerEncerrar(texto = '') {
 function invalidarCacheKnowledge() {
     knowledgeCache = { items: [], loadedAt: 0 };
 }
+function invalidarCacheKnowledgeWeb() {
+    knowledgeWebCache = { pages: [], loadedAt: 0 };
+}
 
 function invalidarCacheEquipeInterna() {
     internalTeamCache = { items: [], loadedAt: 0 };
@@ -3546,7 +3559,7 @@ async function responderConsultaEquipeInterna(texto = '') {
         return {
             acao: 'RESPONDER_SISTEMA',
             origem: 'equipe_interna',
-            resposta: 'Não encontrei esse nome entre os profissionais ativos cadastrados no escritório. Se quiser, posso deixar sua dúvida registrada para a equipe confirmar.'
+            resposta: 'Não encontrei esse nome entre os profissionais ativos cadastrados aqui. Mas temos outros advogados da equipe que podem analisar o seu caso e direcionar o atendimento. Se quiser, me conte brevemente o assunto e eu continuo por aqui.'
         };
     }
 
@@ -3576,16 +3589,22 @@ function pontuarItemKnowledge(texto, item) {
     const palavrasChave = (Array.isArray(item?.palavrasChave) ? item.palavrasChave : [])
         .map(normalizarTexto)
         .filter(Boolean);
+    const variacoes = (Array.isArray(item?.variacoesPergunta) ? item.variacoesPergunta : [])
+        .map(normalizarTexto)
+        .filter(Boolean);
     const prioridade = Math.max(1, Math.min(5, Number(item?.prioridade || 3)));
 
     if (!mensagem || !pergunta || item?.ativo === false) return 0;
-    if (mensagem === pergunta) return 120 + prioridade;
-    if (mensagem.includes(pergunta) || pergunta.includes(mensagem)) return 55 + prioridade;
+    if (mensagem === pergunta || variacoes.includes(mensagem)) return 140 + prioridade;
+    if (mensagem.includes(pergunta) || pergunta.includes(mensagem)) return 65 + prioridade;
 
     let score = 0;
+    for (const variacao of variacoes) {
+        if (mensagem.includes(variacao) || variacao.includes(mensagem)) score += 38;
+    }
     for (const chave of palavrasChave) {
-        if (mensagem === chave) score += 30;
-        else if (mensagem.includes(chave)) score += 16;
+        if (mensagem === chave) score += 32;
+        else if (mensagem.includes(chave)) score += 17;
     }
 
     const tokensMensagem = new Set(tokensRelevantes(mensagem));
@@ -3593,14 +3612,16 @@ function pontuarItemKnowledge(texto, item) {
     const tokensPergunta = new Set(tokensRelevantes(pergunta));
     const tokensResposta = new Set(tokensRelevantes(resposta));
     const tokensChave = new Set(palavrasChave.flatMap(tokensRelevantes));
+    const tokensVariacoes = new Set(variacoes.flatMap(tokensRelevantes));
 
     for (const token of tokensMensagem) {
-        if (tokensChave.has(token)) score += 8;
+        if (tokensVariacoes.has(token)) score += 9;
+        else if (tokensChave.has(token)) score += 8;
         else if (tokensPergunta.has(token)) score += 5;
-        else if (tokensResposta.has(token)) score += 1;
+        else if (tokensResposta.has(token)) score += 1.25;
     }
 
-    // A prioridade desempata itens igualmente aderentes; sozinha não torna um item candidato.
+    // A prioridade apenas desempata itens semanticamente aderentes.
     if (score > 0) score += prioridade * 0.35;
     return score;
 }
@@ -3616,27 +3637,404 @@ async function carregarKnowledgeBase() {
     const items = await knowledgeColl
         .find(
             { pergunta: { $type: 'string' }, resposta: { $type: 'string' }, ativo: { $ne: false } },
-            { projection: { pergunta: 1, resposta: 1, palavrasChave: 1, prioridade: 1, ativo: 1, updatedAt: 1 } }
+            { projection: { pergunta: 1, resposta: 1, palavrasChave: 1, variacoesPergunta: 1, prioridade: 1, ativo: 1, updatedAt: 1 } }
         )
         .sort({ prioridade: -1, updatedAt: -1 })
-        .limit(KNOWLEDGE_MAX_ITEMS)
         .toArray();
 
     knowledgeCache = { items, loadedAt: agora };
     return items;
 }
 
+function limitarTextoIndiceKnowledge(valor = '', max = 420) {
+    const texto = String(valor || '').replace(/\s+/g, ' ').trim();
+    return texto.length <= max ? texto : `${texto.slice(0, max - 1)}…`;
+}
+
+async function selecionarKnowledgeSemantico(texto, items = []) {
+    if (!geminiModel || !Array.isArray(items) || !items.length) return [];
+
+    // O índice semântico percorre TODA a base ativa. Palavras-chave ajudam, mas não são
+    // pré-requisito: título, variações e o conteúdo aprovado também são considerados.
+    const indice = items.map((item, idx) => {
+        const variacoes = Array.isArray(item.variacoesPergunta) ? item.variacoesPergunta.slice(0, 10) : [];
+        const chaves = Array.isArray(item.palavrasChave) ? item.palavrasChave.slice(0, 12) : [];
+        return `[${idx + 1}] TÍTULO: ${limitarTextoIndiceKnowledge(item.pergunta, 260)}\n` +
+            `VARIAÇÕES: ${variacoes.length ? variacoes.map(v => limitarTextoIndiceKnowledge(v, 120)).join(' | ') : '(nenhuma)'}\n` +
+            `TERMOS: ${chaves.length ? chaves.join(', ') : '(nenhum)'}\n` +
+            `CONTEÚDO APROVADO (trecho): ${limitarTextoIndiceKnowledge(item.resposta, 1000)}`;
+    }).join('\n\n');
+
+    const prompt = `Você é um mecanismo de busca semântica interno de um escritório de advocacia.
+
+PERGUNTA DO CLIENTE:
+${JSON.stringify(String(texto || '').slice(0, 1800))}
+
+ÍNDICE COMPLETO DA BASE DE CONHECIMENTO ATIVA:
+${indice}
+
+Sua única tarefa é localizar conhecimentos cujo conteúdo aprovado possa responder, total ou parcialmente, ao sentido da pergunta, mesmo que o cliente use sinônimos, abreviações, erros de digitação ou palavras diferentes do cadastro.
+
+Retorne SOMENTE JSON válido:
+{"indices":[1,2],"confianca":0}
+
+REGRAS:
+1. Analise o SIGNIFICADO da pergunta; não exija repetição de palavras-chave.
+2. Os números em indices correspondem aos itens do índice acima. Retorne no máximo 4.
+3. Use somente itens realmente relacionados. Não escolha item apenas porque é prioritário ou recente.
+4. Se nada da base ajudar com segurança, retorne {"indices":[],"confianca":0}.
+5. Não responda ao cliente e não use conhecimento externo.`;
+
+    try {
+        const result = await geminiModel.generateContent(prompt);
+        const parsed = extrairJsonIA((await result.response).text());
+        const indices = Array.isArray(parsed?.indices) ? parsed.indices : [];
+        const vistos = new Set();
+        return indices
+            .map(n => Number(n))
+            .filter(n => Number.isInteger(n) && n >= 1 && n <= items.length && !vistos.has(n) && vistos.add(n))
+            .slice(0, 4)
+            .map(n => ({ ...items[n - 1], score: 25, semanticMatch: true }));
+    } catch (err) {
+        console.warn('[IA] Falha na busca semântica da base:', err?.message || err);
+        return [];
+    }
+}
+
 async function obterCandidatosKnowledge(texto) {
     const items = await carregarKnowledgeBase();
+    if (!items.length) return [];
+
     const ranqueados = items
         .map(item => ({ ...item, score: pontuarItemKnowledge(texto, item) }))
         .sort((a, b) => b.score - a.score);
 
-    // Modo estrito: só enviamos ao roteador itens com aderência real à mensagem.
-    // Isso impede o modelo de escolher uma resposta recente, porém não relacionada.
-    return ranqueados
-        .filter(item => item.score >= 4)
-        .slice(0, KNOWLEDGE_MAX_CANDIDATES);
+    const fortes = ranqueados.filter(item => item.score >= 55).slice(0, KNOWLEDGE_MAX_CANDIDATES);
+    if (fortes.length) return fortes;
+
+    // Sem correspondência lexical forte, fazemos busca semântica sobre a base inteira.
+    // Isso elimina a dependência excessiva de palavras-chave específicas.
+    const semanticos = await selecionarKnowledgeSemantico(texto, items);
+    if (semanticos.length) return semanticos;
+
+    // Se o Gemini estiver temporariamente indisponível, ainda preservamos um fallback lexical.
+    return ranqueados.filter(item => item.score >= 4).slice(0, KNOWLEDGE_MAX_CANDIDATES);
+}
+
+// -----------------------------------------------------------------------------
+// FONTES WEB DA BASE DE CONHECIMENTO
+// -----------------------------------------------------------------------------
+// O site nunca é consultado ao vivo durante a conversa com o cliente. O painel
+// sincroniza páginas públicas previamente autorizadas e salva apenas o texto no
+// MongoDB. A IA consulta essa cópia local, o que torna a resposta rápida, auditável
+// e previsível. A base manual aprovada continua tendo prioridade sobre conteúdo web.
+function ipPrivadoKnowledgeWeb(ip = '') {
+    const valor = String(ip || '').toLowerCase();
+    const versao = net.isIP(valor);
+    if (versao === 4) {
+        const partes = valor.split('.').map(Number);
+        const [a, b] = partes;
+        if (a === 10 || a === 127 || a === 0) return true;
+        if (a === 169 && b === 254) return true;
+        if (a === 172 && b >= 16 && b <= 31) return true;
+        if (a === 192 && b === 168) return true;
+        if (a === 100 && b >= 64 && b <= 127) return true;
+        if (a === 198 && (b === 18 || b === 19)) return true;
+        if (a >= 224) return true;
+        return false;
+    }
+    if (versao === 6) {
+        if (valor === '::1' || valor === '::') return true;
+        if (valor.startsWith('fc') || valor.startsWith('fd') || valor.startsWith('fe8') || valor.startsWith('fe9') || valor.startsWith('fea') || valor.startsWith('feb')) return true;
+        if (valor.startsWith('::ffff:')) return ipPrivadoKnowledgeWeb(valor.slice(7));
+        return false;
+    }
+    return false;
+}
+
+async function validarUrlPublicaKnowledgeWeb(valor = '') {
+    let url;
+    try { url = new URL(String(valor || '').trim()); }
+    catch (_) { throw new Error('Informe uma URL válida, começando com http:// ou https://.'); }
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('A fonte deve usar HTTP ou HTTPS.');
+    if (url.username || url.password) throw new Error('URLs com usuário ou senha não são permitidas.');
+    url.hash = '';
+    const host = String(url.hostname || '').toLowerCase();
+    if (!host || host === 'localhost' || host.endsWith('.local')) throw new Error('Endereço local não pode ser usado como fonte da IA.');
+
+    if (net.isIP(host)) {
+        if (ipPrivadoKnowledgeWeb(host)) throw new Error('Endereços de rede privada não podem ser usados como fonte.');
+    } else {
+        let enderecos = [];
+        try { enderecos = await dns.lookup(host, { all: true, verbatim: true }); }
+        catch (_) { throw new Error('Não foi possível localizar o domínio informado.'); }
+        if (!enderecos.length || enderecos.some(item => ipPrivadoKnowledgeWeb(item.address))) {
+            throw new Error('O domínio informado resolve para uma rede privada ou inválida.');
+        }
+    }
+    return url;
+}
+
+function decodificarEntidadesKnowledgeWeb(texto = '') {
+    const mapa = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+    return String(texto || '')
+        .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n) || 32))
+        .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16) || 32))
+        .replace(/&([a-z]+);/gi, (m, nome) => Object.prototype.hasOwnProperty.call(mapa, nome.toLowerCase()) ? mapa[nome.toLowerCase()] : ' ');
+}
+
+function extrairTituloKnowledgeWeb(html = '', fallback = '') {
+    const match = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    return limitarTextoIndiceKnowledge(decodificarEntidadesKnowledgeWeb(match?.[1] || fallback).replace(/<[^>]+>/g, ' '), 300);
+}
+
+function htmlParaTextoKnowledgeWeb(html = '') {
+    return decodificarEntidadesKnowledgeWeb(
+        String(html || '')
+            .replace(/<!--[\s\S]*?-->/g, ' ')
+            .replace(/<(script|style|noscript|svg|template|iframe)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(p|div|section|article|li|h[1-6]|tr|header|footer|main|nav)>/gi, '\n')
+            .replace(/<[^>]+>/g, ' ')
+    )
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n[ \t]+/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+        .slice(0, KNOWLEDGE_WEB_MAX_TEXT_CHARS_PER_PAGE);
+}
+
+function urlCanonicaKnowledgeWeb(valor, origem) {
+    try {
+        const url = new URL(valor, origem);
+        if (!['http:', 'https:'].includes(url.protocol)) return null;
+        url.hash = '';
+        ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid'].forEach(k => url.searchParams.delete(k));
+        if (/\.(?:jpg|jpeg|png|webp|gif|svg|ico|pdf|docx?|xlsx?|pptx?|zip|rar|7z|mp3|mp4|avi|mov|css|js|xml)(?:$|\?)/i.test(url.pathname + url.search)) return null;
+        return url.toString();
+    } catch (_) { return null; }
+}
+
+function extrairLinksKnowledgeWeb(html = '', paginaUrl = '', origemPermitida = '') {
+    const links = [];
+    const vistos = new Set();
+    const regex = /<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi;
+    let match;
+    while ((match = regex.exec(String(html || ''))) && links.length < 120) {
+        const href = String(match[1] || '').trim();
+        if (!href || /^(?:mailto:|tel:|javascript:|#)/i.test(href)) continue;
+        const normalizada = urlCanonicaKnowledgeWeb(href, paginaUrl);
+        if (!normalizada || vistos.has(normalizada)) continue;
+        try {
+            const url = new URL(normalizada);
+            if (url.origin !== origemPermitida) continue;
+        } catch (_) { continue; }
+        vistos.add(normalizada);
+        links.push(normalizada);
+    }
+    return links;
+}
+
+async function baixarPaginaKnowledgeWeb(urlInicial) {
+    let atual = await validarUrlPublicaKnowledgeWeb(urlInicial);
+    for (let redir = 0; redir <= 4; redir += 1) {
+        const resposta = await axios.get(atual.toString(), {
+            responseType: 'text',
+            timeout: 9000,
+            maxRedirects: 0,
+            maxContentLength: KNOWLEDGE_WEB_MAX_HTML_BYTES,
+            maxBodyLength: KNOWLEDGE_WEB_MAX_HTML_BYTES,
+            validateStatus: status => status >= 200 && status < 400,
+            headers: {
+                'User-Agent': 'AzevedoJuvencio-KnowledgeBot/1.0 (+base-de-conhecimento)',
+                'Accept': 'text/html,text/plain;q=0.9,*/*;q=0.1'
+            }
+        });
+        if (resposta.status >= 300 && resposta.status < 400) {
+            const location = resposta.headers?.location;
+            if (!location) throw new Error(`Redirecionamento inválido em ${atual.hostname}.`);
+            atual = await validarUrlPublicaKnowledgeWeb(new URL(location, atual).toString());
+            continue;
+        }
+        const tipo = String(resposta.headers?.['content-type'] || '').toLowerCase();
+        if (!tipo.includes('text/html') && !tipo.includes('text/plain') && !tipo.includes('application/xhtml')) {
+            throw new Error('A URL não retornou uma página HTML/texto compatível.');
+        }
+        const html = String(resposta.data || '').slice(0, KNOWLEDGE_WEB_MAX_HTML_BYTES);
+        return { url: atual.toString(), html, tipo };
+    }
+    throw new Error('A página possui redirecionamentos demais.');
+}
+
+async function sincronizarFonteKnowledgeWeb(source) {
+    if (!knowledgeWebPagesColl || !knowledgeWebSourcesColl) throw new Error('Fontes web ainda não estão disponíveis.');
+    const inicial = await validarUrlPublicaKnowledgeWeb(source.url);
+    const origem = inicial.origin;
+    const limite = Math.max(1, Math.min(KNOWLEDGE_WEB_MAX_PAGES, Number(source.maxPages || KNOWLEDGE_WEB_DEFAULT_PAGES)));
+    const fila = [{ url: inicial.toString(), depth: 0 }];
+    const visitadas = new Set();
+    const paginas = [];
+    const erros = [];
+
+    while (fila.length && paginas.length < limite) {
+        const atual = fila.shift();
+        const canonical = urlCanonicaKnowledgeWeb(atual.url, inicial);
+        if (!canonical || visitadas.has(canonical)) continue;
+        visitadas.add(canonical);
+        try {
+            const baixada = await baixarPaginaKnowledgeWeb(canonical);
+            const texto = htmlParaTextoKnowledgeWeb(baixada.html);
+            if (texto.length >= 80) {
+                const titulo = extrairTituloKnowledgeWeb(baixada.html, new URL(baixada.url).pathname || source.nome || 'Página');
+                paginas.push({
+                    sourceId: source._id,
+                    sourceName: source.nome || inicial.hostname,
+                    url: baixada.url,
+                    title: titulo || source.nome || inicial.hostname,
+                    text: texto,
+                    contentHash: crypto.createHash('sha256').update(texto).digest('hex'),
+                    fetchedAt: Date.now(),
+                    ativo: source.ativo !== false
+                });
+            }
+            if (atual.depth < 2 && paginas.length < limite) {
+                const links = extrairLinksKnowledgeWeb(baixada.html, baixada.url, origem);
+                for (const link of links) {
+                    if (!visitadas.has(link) && fila.length < limite * 5) fila.push({ url: link, depth: atual.depth + 1 });
+                }
+            }
+        } catch (err) {
+            erros.push(`${canonical}: ${String(err?.message || err).slice(0, 180)}`);
+        }
+    }
+
+    if (!paginas.length) throw new Error(erros[0] || 'Nenhuma página pública pôde ser importada deste endereço.');
+    const agora = Date.now();
+    const urlsAtuais = paginas.map(p => p.url);
+    for (const pagina of paginas) {
+        await knowledgeWebPagesColl.updateOne(
+            { sourceId: source._id, url: pagina.url },
+            { $set: pagina, $setOnInsert: { createdAt: agora } },
+            { upsert: true }
+        );
+    }
+    await knowledgeWebPagesColl.updateMany(
+        { sourceId: source._id, url: { $nin: urlsAtuais } },
+        { $set: { ativo: false, updatedAt: agora } }
+    );
+    await knowledgeWebSourcesColl.updateOne(
+        { _id: source._id },
+        { $set: { lastSyncAt: agora, lastSyncStatus: 'ok', pageCount: paginas.length, lastError: erros.slice(0, 3).join(' | '), updatedAt: agora } }
+    );
+    invalidarCacheKnowledgeWeb();
+    return { pageCount: paginas.length, warnings: erros.length };
+}
+
+async function carregarKnowledgeWebPages() {
+    if (!knowledgeWebSourcesColl || !knowledgeWebPagesColl) return [];
+    const agora = Date.now();
+    if (knowledgeWebCache.loadedAt && (agora - knowledgeWebCache.loadedAt) < KNOWLEDGE_WEB_CACHE_TTL_MS) return knowledgeWebCache.pages;
+    const fontes = await knowledgeWebSourcesColl.find({ ativo: { $ne: false } }, { projection: { _id: 1, nome: 1 } }).toArray();
+    const ids = fontes.map(f => f._id);
+    if (!ids.length) return [];
+    const nomes = new Map(fontes.map(f => [String(f._id), f.nome || 'Site']));
+    const pages = await knowledgeWebPagesColl.find(
+        { sourceId: { $in: ids }, ativo: { $ne: false } },
+        { projection: { sourceId: 1, title: 1, url: 1, text: 1, fetchedAt: 1 } }
+    ).sort({ fetchedAt: -1 }).limit(120).toArray();
+    const result = pages.map(page => ({ ...page, sourceName: nomes.get(String(page.sourceId)) || 'Site' }));
+    knowledgeWebCache = { pages: result, loadedAt: agora };
+    return result;
+}
+
+function pontuarPaginaKnowledgeWeb(texto, pagina = {}) {
+    const mensagem = normalizarTexto(texto);
+    const titulo = normalizarTexto(pagina.title || '');
+    const corpo = normalizarTexto(pagina.text || '');
+    const url = normalizarTexto(pagina.url || '');
+    if (!mensagem || !corpo) return 0;
+    let score = 0;
+    if (titulo && (mensagem.includes(titulo) || titulo.includes(mensagem))) score += 45;
+    const tokens = tokensRelevantes(mensagem);
+    for (const token of tokens) {
+        if (titulo.includes(token)) score += 10;
+        else if (url.includes(token)) score += 7;
+        if (corpo.includes(token)) score += 2;
+    }
+    return score;
+}
+
+async function selecionarPaginasKnowledgeWebSemantico(texto, pages = []) {
+    if (!geminiModel || !pages.length) return [];
+    const ranqueadas = pages.map(p => ({ ...p, score: pontuarPaginaKnowledgeWeb(texto, p) })).sort((a,b) => b.score - a.score);
+    const pool = (ranqueadas.filter(p => p.score > 0).slice(0, 35).length ? ranqueadas.filter(p => p.score > 0).slice(0, 35) : ranqueadas.slice(0, 25));
+    const indice = pool.map((p, i) => `[${i+1}] ${limitarTextoIndiceKnowledge(p.title, 180)}\nURL: ${p.url}\nTRECHO: ${limitarTextoIndiceKnowledge(p.text, 1200)}`).join('\n\n');
+    const prompt = `Você é um mecanismo de busca semântica sobre páginas de um site previamente sincronizado por um escritório de advocacia.\n\nPERGUNTA DO CLIENTE:\n${JSON.stringify(String(texto || '').slice(0,1800))}\n\nPÁGINAS DISPONÍVEIS:\n${indice}\n\nRetorne SOMENTE JSON válido: {"indices":[1,2],"confianca":0}\n\nEscolha no máximo 4 páginas cujo conteúdo realmente ajude a responder a pergunta. Considere sinônimos e erros de digitação. Não use conhecimento externo. Se nada for suficiente, retorne indices vazio.`;
+    try {
+        const result = await geminiModel.generateContent(prompt);
+        const parsed = extrairJsonIA((await result.response).text());
+        const vistos = new Set();
+        return (Array.isArray(parsed?.indices) ? parsed.indices : [])
+            .map(Number)
+            .filter(n => Number.isInteger(n) && n >= 1 && n <= pool.length && !vistos.has(n) && vistos.add(n))
+            .slice(0, KNOWLEDGE_WEB_MAX_CANDIDATES)
+            .map(n => pool[n-1]);
+    } catch (err) {
+        console.warn('[IA] Falha na busca semântica das fontes web:', err?.message || err);
+        return [];
+    }
+}
+
+async function obterCandidatosKnowledgeWeb(texto) {
+    const pages = await carregarKnowledgeWebPages();
+    if (!pages.length) return [];
+    const ranqueadas = pages.map(p => ({ ...p, score: pontuarPaginaKnowledgeWeb(texto, p) })).sort((a,b) => b.score - a.score);
+    const fortes = ranqueadas.filter(p => p.score >= 18).slice(0, KNOWLEDGE_WEB_MAX_CANDIDATES);
+    if (fortes.length) return fortes;
+    return selecionarPaginasKnowledgeWebSemantico(texto, pages);
+}
+
+async function responderComKnowledgeWeb(texto, candidatos = []) {
+    if (!geminiModel || !candidatos.length) return null;
+    const contexto = candidatos.map((p, i) => `[${i+1}] FONTE: ${p.sourceName}\nPÁGINA: ${p.title}\nURL: ${p.url}\nCONTEÚDO:\n${String(p.text || '').slice(0, 5000)}`).join('\n\n---\n\n');
+    const prompt = `Você atende clientes por WhatsApp em nome de um escritório de advocacia. Responda de forma humana, clara e curta, usando EXCLUSIVAMENTE os trechos do site sincronizado abaixo.\n\nPERGUNTA DO CLIENTE:\n${JSON.stringify(String(texto || '').slice(0,1800))}\n\nCONTEÚDO OFICIAL SINCRONIZADO:\n${contexto}\n\nRetorne SOMENTE JSON válido:\n{"resposta":"...","confianca":0}\n\nREGRAS OBRIGATÓRIAS:\n1. Não use conhecimento geral, memória do modelo ou inferências externas.\n2. Não invente nomes, áreas, prazos, valores, leis, resultados ou serviços.\n3. Se o conteúdo não responder com segurança, retorne resposta vazia e confianca 0.\n4. Pode reorganizar e humanizar a redação, mas preserve fielmente os fatos da fonte.\n5. Responda em português do Brasil, de preferência em 1 a 3 parágrafos curtos.\n6. Não mencione que consultou um banco de dados ou uma IA.`;
+    try {
+        const result = await geminiModel.generateContent(prompt);
+        const parsed = extrairJsonIA((await result.response).text());
+        const resposta = String(parsed?.resposta || '').trim().slice(0, 3000);
+        const confianca = Math.max(0, Math.min(100, Number(parsed?.confianca || 0)));
+        if (!resposta || confianca < 65) return null;
+        return { resposta, confianca };
+    } catch (err) {
+        console.warn('[IA] Falha ao responder com fonte web:', err?.message || err);
+        return null;
+    }
+}
+
+function chaveLacunaKnowledge(texto = '') {
+    const normalizado = normalizarTexto(texto).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 700);
+    return normalizado ? crypto.createHash('sha256').update(normalizado).digest('hex') : '';
+}
+
+async function registrarLacunaKnowledge(texto = '', ticket = null) {
+    if (!knowledgeGapsColl) return;
+    const exemplo = String(texto || '').trim().slice(0, 700);
+    const chave = chaveLacunaKnowledge(exemplo);
+    if (!chave || exemplo.length < 4) return;
+    const agora = Date.now();
+    try {
+        await knowledgeGapsColl.updateOne(
+            { chave },
+            {
+                $setOnInsert: { chave, textoExemplo: exemplo, firstSeenAt: agora, createdAt: agora, resolvido: false },
+                $set: { lastSeenAt: agora, areaExemplo: String(ticket?.area || ticket?.menuOptionTitle || '').slice(0, 160), updatedAt: agora },
+                $inc: { ocorrencias: 1 }
+            },
+            { upsert: true }
+        );
+    } catch (err) {
+        console.warn('[IA] Falha ao registrar dúvida não coberta:', err?.message || err);
+    }
 }
 
 function possuiSinalDeEncerramento(texto = '') {
@@ -3797,15 +4195,34 @@ async function analisarMensagemComIA(texto, ticket) {
     const sinalEncerramento = possuiSinalDeEncerramento(texto);
     const sinalPergunta = possuiSinalDePergunta(texto);
 
-    // Perguntas reais nunca devem ficar sem qualquer retorno. Se não houver um item
-    // suficientemente aderente na base, usamos uma resposta segura que admite a limitação,
-    // sem recorrer ao conhecimento geral do modelo.
+    // A base manual aprovada é sempre a primeira fonte. Somente quando ela não cobre
+    // a pergunta consultamos as páginas previamente sincronizadas do site.
+    if (!sinalEncerramento && sinalPergunta && !candidatos.length) {
+        try {
+            const candidatosWeb = await obterCandidatosKnowledgeWeb(texto);
+            const respostaWeb = await responderComKnowledgeWeb(texto, candidatosWeb);
+            if (respostaWeb?.resposta) {
+                return {
+                    acao: 'RESPONDER_SITE',
+                    origem: 'site_sincronizado',
+                    resposta: respostaWeb.resposta,
+                    confianca: respostaWeb.confianca
+                };
+            }
+        } catch (err) {
+            console.warn('[IA] Falha ao consultar fontes web:', err?.message || err);
+        }
+    }
+
+    // Perguntas reais nunca devem ficar sem qualquer retorno. Se nenhuma fonte aprovada
+    // responder com segurança, registramos a lacuna sem recorrer ao conhecimento geral.
     if (!sinalEncerramento && !candidatos.length) {
         if (sinalPergunta) {
+            registrarLacunaKnowledge(texto, ticket).catch(() => {});
             return {
                 acao: 'SEM_BASE',
                 origem: 'sem_base',
-                resposta: 'Essa informação ainda não está cadastrada na minha base com segurança. Posso deixar sua dúvida registrada para a equipe confirmar.'
+                resposta: 'Ainda não encontrei essa informação na nossa base com segurança. Posso registrar sua dúvida para que a equipe confirme para você.'
             };
         }
         return null;
@@ -3819,10 +4236,11 @@ async function analisarMensagemComIA(texto, ticket) {
             return { acao: 'RESPONDER_BASE', resposta: melhor.resposta, origem: 'fallback_base' };
         }
         if (sinalPergunta) {
+            registrarLacunaKnowledge(texto, ticket).catch(() => {});
             return {
                 acao: 'SEM_BASE',
                 origem: 'sem_base',
-                resposta: 'Essa informação ainda não está cadastrada na minha base com segurança. Posso deixar sua dúvida registrada para a equipe confirmar.'
+                resposta: 'Ainda não encontrei essa informação na nossa base com segurança. Posso registrar sua dúvida para que a equipe confirme para você.'
             };
         }
         return null;
@@ -3890,10 +4308,11 @@ REGRAS OBRIGATÓRIAS:
         }
 
         if (sinalPergunta) {
+            registrarLacunaKnowledge(texto, ticket).catch(() => {});
             return {
                 acao: 'SEM_BASE',
                 origem: 'sem_base',
-                resposta: 'Essa informação ainda não está cadastrada na minha base com segurança. Posso deixar sua dúvida registrada para a equipe confirmar.'
+                resposta: 'Ainda não encontrei essa informação na nossa base com segurança. Posso registrar sua dúvida para que a equipe confirme para você.'
             };
         }
         return null;
@@ -3905,10 +4324,11 @@ REGRAS OBRIGATÓRIAS:
             return { acao: 'RESPONDER_BASE', resposta: melhor.resposta, origem: 'fallback_base' };
         }
         if (sinalPergunta) {
+            registrarLacunaKnowledge(texto, ticket).catch(() => {});
             return {
                 acao: 'SEM_BASE',
                 origem: 'sem_base',
-                resposta: 'Essa informação ainda não está cadastrada na minha base com segurança. Posso deixar sua dúvida registrada para a equipe confirmar.'
+                resposta: 'Ainda não encontrei essa informação na nossa base com segurança. Posso registrar sua dúvida para que a equipe confirme para você.'
             };
         }
         return null;
@@ -4029,7 +4449,7 @@ async function responderInterrupcaoIA(ticket, jid, analiseIA, mensagemCliente = 
         return true;
     }
 
-    if (analiseIA.acao === 'RESPONDER_SISTEMA' || analiseIA.acao === 'SEM_BASE') {
+    if (analiseIA.acao === 'RESPONDER_SISTEMA' || analiseIA.acao === 'RESPONDER_SITE' || analiseIA.acao === 'SEM_BASE') {
         const retomada = await mensagemRetomadaFluxo(ticket);
         const cortesia = detectarCortesiaMensagem(mensagemCliente);
         const prefixo = cortesia.saudacao ? `${cortesia.saudacao}!\n\n` : '';
@@ -4916,6 +5336,9 @@ async function startBotInterno() {
         authColl = db.collection('auth_session');
         ticketsColl = db.collection('active_tickets');
         knowledgeColl = db.collection('knowledge_base');
+        knowledgeGapsColl = db.collection('knowledge_gaps');
+        knowledgeWebSourcesColl = db.collection('knowledge_web_sources');
+        knowledgeWebPagesColl = db.collection('knowledge_web_pages');
         userLoginColl = db.collection('user_login');
         clientsColl = db.collection('client_registry');
         ticketHistoryColl = db.collection('ticket_history');
@@ -5007,6 +5430,13 @@ async function startBotInterno() {
             crmLeadsColl.createIndex({ updatedAt: -1 }),
             userLoginColl.createIndex({ userLower: 1 }),
             userLoginColl.createIndex({ role: 1, ativo: 1 }),
+            knowledgeColl.createIndex({ ativo: 1, prioridade: -1, updatedAt: -1 }),
+            knowledgeGapsColl.createIndex({ chave: 1 }, { unique: true }),
+            knowledgeGapsColl.createIndex({ resolvido: 1, ocorrencias: -1, lastSeenAt: -1 }),
+            knowledgeWebSourcesColl.createIndex({ ativo: 1, updatedAt: -1 }),
+            knowledgeWebSourcesColl.createIndex({ url: 1 }, { unique: true }),
+            knowledgeWebPagesColl.createIndex({ sourceId: 1, url: 1 }, { unique: true }),
+            knowledgeWebPagesColl.createIndex({ sourceId: 1, ativo: 1, fetchedAt: -1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, createdAt: -1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, direction: 1, createdAt: -1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, messageId: 1 }, { unique: true }),
@@ -5355,7 +5785,7 @@ async function processarMensagemUpsert(msg, upsertType = 'notify') {
             ? await analisarMensagemComIA(texto, ticket)
             : null;
 
-        if (['ENCERRAR', 'CORTESIA', 'RESPONDER_SISTEMA', 'SEM_BASE'].includes(analiseIAPrevia?.acao)) {
+        if (['ENCERRAR', 'CORTESIA', 'RESPONDER_SISTEMA', 'RESPONDER_SITE', 'SEM_BASE'].includes(analiseIAPrevia?.acao)) {
             await responderInterrupcaoIA(ticket, rawJid, analiseIAPrevia, texto);
             return;
         }
@@ -6587,6 +7017,7 @@ app.use('/api/menu-options', exigirPermissao('menu'));
 app.use('/api/crm', exigirPermissao('crm'));
 app.use('/api/clients', exigirPermissao('clients'));
 app.use('/api/knowledgeColl', exigirPermissao('ia'));
+app.use('/api/knowledgeWebSources', exigirPermissao('ia'));
 app.use('/api/users', exigirPermissao('users'));
 app.use('/api/tickets', exigirPermissao('tickets'));
 
@@ -9888,15 +10319,202 @@ function normalizarPalavrasChaveKnowledge(valor) {
     const lista = Array.isArray(valor) ? valor : String(valor || '').split(',');
     return [...new Set(lista.map(item => String(item || '').trim()).filter(Boolean))].slice(0, 30);
 }
+function normalizarVariacoesKnowledge(valor) {
+    const lista = Array.isArray(valor) ? valor : String(valor || '').split(/\n|;/);
+    return [...new Set(lista.map(item => String(item || '').trim()).filter(Boolean))].slice(0, 20);
+}
 function documentoKnowledgeDoBody(body = {}, existente = null) {
     return {
         pergunta: String(body.pergunta ?? existente?.pergunta ?? '').trim().slice(0, 500),
         resposta: String(body.resposta ?? existente?.resposta ?? '').trim().slice(0, 5000),
         palavrasChave: normalizarPalavrasChaveKnowledge(body.palavrasChave ?? existente?.palavrasChave ?? []),
+        variacoesPergunta: normalizarVariacoesKnowledge(body.variacoesPergunta ?? existente?.variacoesPergunta ?? []),
         prioridade: Math.max(1, Math.min(5, Number(body.prioridade ?? existente?.prioridade ?? 3) || 3)),
         ativo: body.ativo !== undefined ? body.ativo !== false : existente?.ativo !== false
     };
 }
+
+app.post('/api/knowledgeColl/suggest', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!geminiModel) return res.status(503).json({ erro: 'A IA não está disponível no momento.' });
+    try {
+        const pergunta = String(req.body?.pergunta || '').trim().slice(0, 500);
+        const resposta = String(req.body?.resposta || '').trim().slice(0, 5000);
+        const palavrasChave = normalizarPalavrasChaveKnowledge(req.body?.palavrasChave || []);
+        const modo = String(req.body?.modo || 'melhorar') === 'regenerar' ? 'regenerar' : 'melhorar';
+        if (!pergunta) return res.status(400).json({ erro: 'Informe o título/pergunta principal.' });
+        if (!resposta) return res.status(400).json({ erro: 'Insira primeiro o texto da resposta aprovada para a IA revisar.' });
+
+        const prompt = `Você é um revisor de uma BASE DE CONHECIMENTO de atendimento jurídico por WhatsApp.
+
+TÍTULO/PERGUNTA PRINCIPAL:
+${JSON.stringify(pergunta)}
+
+TEXTO FORNECIDO PELO USUÁRIO:
+${JSON.stringify(resposta)}
+
+PALAVRAS-CHAVE ATUAIS:
+${JSON.stringify(palavrasChave)}
+
+MODO: ${modo}
+
+Crie uma sugestão de resposta padrão mais clara, humana, acolhedora e profissional, adequada a WhatsApp. A sugestão será APENAS uma proposta: um usuário humano decidirá se aprova.
+
+Retorne SOMENTE JSON válido:
+{
+  "respostaSugerida":"...",
+  "palavrasChaveSugeridas":["..."],
+  "variacoesPergunta":["..."],
+  "validacao":"APROVAVEL|REVISAR",
+  "observacao":"..."
+}
+
+REGRAS OBRIGATÓRIAS:
+1. Use EXCLUSIVAMENTE os fatos presentes no texto fornecido. Não acrescente lei, prazo, valor, promessa, nome, área de atuação ou qualquer fato não informado.
+2. Preserve ressalvas, condições e limites do texto original.
+3. Se o texto original contiver afirmação ambígua, arriscada ou incompleta, não invente a solução: marque validacao=REVISAR e explique brevemente em observacao.
+4. A resposta deve soar natural e humana, sem linguagem de robô e sem dizer que é uma IA.
+5. Prefira 1 a 3 parágrafos curtos. Não prometa resultado jurídico.
+6. Em modo regenerar, produza uma redação diferente da versão anterior, sem mudar o conteúdo factual.
+7. Gere de 6 a 15 palavras/expressões de busca realmente úteis, incluindo sinônimos naturais.
+8. Gere de 6 a 12 formas diferentes pelas quais um cliente real poderia fazer a mesma pergunta, inclusive linguagem informal, abreviações e pequenos erros comuns de digitação.
+9. As variações servem apenas para localizar este conhecimento; não devem inventar assuntos novos.`;
+
+        const result = await geminiModel.generateContent(prompt);
+        const parsed = extrairJsonIA((await result.response).text());
+        const sugestao = String(parsed?.respostaSugerida || '').trim().slice(0, 5000);
+        if (!sugestao) throw new Error('A IA não retornou uma sugestão válida.');
+        res.json({
+            respostaSugerida: sugestao,
+            palavrasChaveSugeridas: normalizarPalavrasChaveKnowledge(parsed?.palavrasChaveSugeridas || []),
+            variacoesPergunta: normalizarVariacoesKnowledge(parsed?.variacoesPergunta || []),
+            validacao: String(parsed?.validacao || 'APROVAVEL').toUpperCase() === 'REVISAR' ? 'REVISAR' : 'APROVAVEL',
+            observacao: String(parsed?.observacao || '').trim().slice(0, 600)
+        });
+    } catch (err) {
+        console.error('[IA] Erro ao sugerir melhoria da base:', err);
+        res.status(500).json({ erro: err?.message || 'Não foi possível gerar a sugestão.' });
+    }
+});
+
+function documentoFonteWebKnowledge(body = {}, existente = null) {
+    return {
+        nome: String(body.nome ?? existente?.nome ?? '').trim().slice(0, 140),
+        url: String(body.url ?? existente?.url ?? '').trim().slice(0, 1800),
+        maxPages: Math.max(1, Math.min(KNOWLEDGE_WEB_MAX_PAGES, Number(body.maxPages ?? existente?.maxPages ?? KNOWLEDGE_WEB_DEFAULT_PAGES) || KNOWLEDGE_WEB_DEFAULT_PAGES)),
+        ativo: body.ativo !== undefined ? body.ativo !== false : existente?.ativo !== false
+    };
+}
+
+app.get('/api/knowledgeWebSources', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!knowledgeWebSourcesColl) return res.json([]);
+    try {
+        const data = await knowledgeWebSourcesColl.find({}).sort({ updatedAt: -1, createdAt: -1 }).toArray();
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ erro: 'Não foi possível carregar as fontes do site.' });
+    }
+});
+
+app.post('/api/knowledgeWebSources', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    try {
+        const doc = documentoFonteWebKnowledge(req.body || {});
+        if (!doc.nome || !doc.url) return res.status(400).json({ erro: 'Informe um nome e a URL do site.' });
+        const url = await validarUrlPublicaKnowledgeWeb(doc.url);
+        doc.url = url.toString();
+        const agora = Date.now();
+        const result = await knowledgeWebSourcesColl.insertOne({ ...doc, pageCount: 0, lastSyncStatus: 'nunca', createdAt: agora, updatedAt: agora });
+        invalidarCacheKnowledgeWeb();
+        res.status(201).json({ ok: true, id: String(result.insertedId) });
+    } catch (err) {
+        if (err?.code === 11000) return res.status(409).json({ erro: 'Este site já está cadastrado como fonte.' });
+        res.status(400).json({ erro: err?.message || 'Não foi possível cadastrar a fonte.' });
+    }
+});
+
+app.put('/api/knowledgeWebSources/:id', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    try {
+        const id = new ObjectId(String(req.params.id || ''));
+        const existente = await knowledgeWebSourcesColl.findOne({ _id: id });
+        if (!existente) return res.status(404).json({ erro: 'Fonte não encontrada.' });
+        const doc = documentoFonteWebKnowledge(req.body || {}, existente);
+        if (!doc.nome || !doc.url) return res.status(400).json({ erro: 'Informe um nome e a URL do site.' });
+        const url = await validarUrlPublicaKnowledgeWeb(doc.url);
+        doc.url = url.toString();
+        const mudouUrl = doc.url !== existente.url;
+        await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { ...doc, ...(mudouUrl ? { pageCount: 0, lastSyncStatus: 'nunca', lastSyncAt: null, lastError: '' } : {}), updatedAt: Date.now() } });
+        if (mudouUrl) await knowledgeWebPagesColl.deleteMany({ sourceId: id });
+        invalidarCacheKnowledgeWeb();
+        res.json({ ok: true });
+    } catch (err) {
+        if (err?.code === 11000) return res.status(409).json({ erro: 'Este site já está cadastrado como fonte.' });
+        res.status(400).json({ erro: err?.message || 'Não foi possível editar a fonte.' });
+    }
+});
+
+app.delete('/api/knowledgeWebSources/:id', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    try {
+        const id = new ObjectId(String(req.params.id || ''));
+        const [sourceResult] = await Promise.all([
+            knowledgeWebSourcesColl.deleteOne({ _id: id }),
+            knowledgeWebPagesColl.deleteMany({ sourceId: id })
+        ]);
+        if (!sourceResult.deletedCount) return res.status(404).json({ erro: 'Fonte não encontrada.' });
+        invalidarCacheKnowledgeWeb();
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(400).json({ erro: 'Não foi possível excluir a fonte.' });
+    }
+});
+
+app.post('/api/knowledgeWebSources/:id/sync', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    let id;
+    try {
+        id = new ObjectId(String(req.params.id || ''));
+        const source = await knowledgeWebSourcesColl.findOne({ _id: id });
+        if (!source) return res.status(404).json({ erro: 'Fonte não encontrada.' });
+        await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { lastSyncStatus: 'sincronizando', updatedAt: Date.now() } });
+        const resultado = await sincronizarFonteKnowledgeWeb(source);
+        io.emit('knowledge_web_updated', { sourceId: String(id), pageCount: resultado.pageCount, syncedAt: Date.now() });
+        res.json({ ok: true, ...resultado });
+    } catch (err) {
+        if (id && knowledgeWebSourcesColl) {
+            await knowledgeWebSourcesColl.updateOne({ _id: id }, { $set: { lastSyncStatus: 'erro', lastError: String(err?.message || err).slice(0, 1000), updatedAt: Date.now() } }).catch(() => {});
+        }
+        res.status(400).json({ erro: err?.message || 'Não foi possível sincronizar o site.' });
+    }
+});
+
+app.get('/api/knowledgeColl/gaps', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!knowledgeGapsColl) return res.json([]);
+    try {
+        const items = await knowledgeGapsColl.find({ resolvido: { $ne: true } })
+            .sort({ ocorrencias: -1, lastSeenAt: -1 })
+            .limit(30)
+            .toArray();
+        res.json(items);
+    } catch (err) {
+        res.status(500).json({ erro: 'Não foi possível carregar as dúvidas para ensinar.' });
+    }
+});
+
+app.post('/api/knowledgeColl/gaps/:id/resolve', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!knowledgeGapsColl) return res.json({ ok: true });
+    try {
+        const id = new ObjectId(String(req.params.id || ''));
+        await knowledgeGapsColl.updateOne({ _id: id }, { $set: { resolvido: true, resolvidoEm: Date.now(), updatedAt: Date.now() } });
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(400).json({ erro: 'Não foi possível concluir esta dúvida.' });
+    }
+});
 
 app.post('/api/knowledgeColl', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
