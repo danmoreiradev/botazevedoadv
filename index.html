@@ -593,7 +593,9 @@
         .knowledge-web-actions{grid-column:1/-1;}
         @media(max-width:900px){.knowledge-web-grid{grid-template-columns:1fr}.knowledge-web-actions{grid-column:auto}}
 
-    </style>
+    
+        .atendimentos-realtime-badge{height:42px;padding:0 11px;display:inline-flex;align-items:center;gap:7px;color:#16834a;background:#ecfaf2;border:1px solid #caecd9;border-radius:10px;font-size:.70rem;font-weight:800;white-space:nowrap}.atendimentos-realtime-badge::before{content:'';width:7px;height:7px;border-radius:50%;background:#22a35a;box-shadow:0 0 0 4px rgba(34,163,90,.12)}
+</style>
 
     <style id="professional-redesign">
         :root {
@@ -3757,6 +3759,42 @@
         @media(max-width:900px){.ticket-chat-workspace{grid-template-columns:280px minmax(0,1fr);}}
         @media(max-width:700px){.ticket-chat-workspace{grid-template-columns:1fr}.ticket-chat-conversations{display:none}.ticket-chat-workspace>.ticket-chat-shell{border-left:0}.ticket-chat-operation-actions span{display:none}.ticket-chat-end{width:36px;height:36px;padding:0;justify-content:center}.ticket-chat-operations{overflow-x:auto}}
     </style>
+
+    <style id="atendimentos-central-v3">
+        /* Central de Atendimentos: chat é a própria tela, não um modal. */
+        #tab-tickets{max-width:none!important;margin:-34px!important;width:calc(100% + 68px)!important;height:calc(100dvh - 78px);overflow:hidden;animation:none!important;}
+        #tab-tickets>.tickets-subnav{position:absolute;z-index:20;right:20px;top:10px;margin:0;background:rgba(255,255,255,.92);backdrop-filter:none;}
+        #tickets-view-active{height:100%;overflow:hidden;background:#f0f2f5;}
+        .atendimentos-view{display:grid;grid-template-rows:64px minmax(0,1fr);}
+        .atendimentos-central-header{min-height:64px;padding:9px 350px 9px 18px;display:flex;align-items:center;justify-content:space-between;gap:18px;background:#fff;border-bottom:1px solid #dfe4e7;}
+        .atendimentos-central-title h4{margin:0;color:#111b21!important;font-size:1.05rem!important;font-weight:800!important;letter-spacing:-.01em!important;}
+        .atendimentos-central-title span{display:block;margin-top:1px;color:#667781;font-size:.67rem;}
+        .atendimentos-central-metrics{display:flex;align-items:center;gap:8px;}
+        .atendimentos-metric{min-width:104px;height:44px;padding:6px 10px;display:flex;align-items:center;gap:9px;color:#344047;background:#f6f8f9;border:1px solid #e4e8ea;border-radius:10px;}
+        .atendimentos-metric>i{font-size:1rem;color:#54656f;}.atendimentos-metric.unread>i{color:#1f8f5f;}
+        .atendimentos-metric span{display:grid;line-height:1.05}.atendimentos-metric small{color:#8696a0;font-size:.57rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}.atendimentos-metric strong{margin-top:2px;color:#111b21;font-size:.95rem;}
+        #ticket-chat-dialog.ticket-chat-inline{position:relative!important;inset:auto!important;width:100%!important;max-width:none!important;height:100%!important;max-height:none!important;margin:0!important;padding:0!important;display:block!important;overflow:hidden!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:#f0f2f5!important;}
+        #ticket-chat-dialog.ticket-chat-inline .ticket-chat-workspace{height:100%;}
+        #ticket-chat-dialog.ticket-chat-inline .ticket-chat-close{display:none!important;}
+        .chat-conversations-filters{min-height:40px;padding:5px 11px 8px;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid #eef0f2;background:#fff;}
+        .chat-active-filter{display:inline-flex;align-items:center;gap:7px;margin:0;color:#43515a;font-size:.68rem;font-weight:750;cursor:pointer;user-select:none;}
+        .chat-active-filter input{width:15px;height:15px;margin:0;accent-color:#25d366;}
+        .chat-history-window{display:inline-flex;align-items:center;gap:4px;color:#8696a0;font-size:.61rem;white-space:nowrap;}
+        .chat-conversation-item.archived{opacity:.82;}.chat-conversation-item.archived .chat-conversation-avatar{background:#e6e8ea;color:#78858d;}.chat-conversation-archived{display:inline-flex;align-items:center;gap:4px;margin-left:5px;padding:2px 5px;border-radius:999px;color:#6c7780;background:#edf0f2;font-size:.54rem;font-weight:800;vertical-align:middle;}
+        .ticket-chat-archived-banner{padding:7px 14px;display:flex;align-items:center;justify-content:center;gap:7px;color:#6d5928;background:#fff5cc;border-bottom:1px solid #eadca8;font-size:.68rem;font-weight:750;}
+        #ticket-chat-history{position:relative!important;isolation:isolate;}
+        #ticket-chat-dialog .ticket-chat-history::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:url('https://azevedoejuvencioadvogados.com.br/wp-content/uploads/2026/01/Logo-Alta-Resolucao-copy@azul-SEM-SOMBRA-1024x1024.png') center center/260px auto no-repeat;opacity:.035;filter:grayscale(1);}
+        html[data-theme="dark"] .atendimentos-central-header,html[data-theme="dark"] .chat-conversations-filters{background:#111b21;border-color:#26343b;}
+        html[data-theme="dark"] .atendimentos-central-title h4{color:#e9edef!important;}html[data-theme="dark"] .atendimentos-central-title span{color:#8696a0;}
+        html[data-theme="dark"] .atendimentos-metric{background:#202c33;border-color:#2f3b43;color:#d5dce0;}html[data-theme="dark"] .atendimentos-metric strong{color:#e9edef;}
+        html[data-theme="dark"] .chat-active-filter{color:#c2ccd1;}html[data-theme="dark"] .chat-conversation-archived{color:#aeb8be;background:#26343b;}
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-history::before{opacity:.028;filter:grayscale(1) invert(1);}
+        #tab-tickets.crm-mode{height:auto!important;min-height:calc(100dvh - 78px);overflow:visible!important;padding:34px!important;}
+        #tab-tickets.crm-mode>.tickets-subnav{position:static;margin-bottom:22px;}
+        @media(max-width:991.98px){#tab-tickets{margin:-26px -22px -34px!important;width:calc(100% + 44px)!important;height:calc(100dvh - 70px)}#tab-tickets>.tickets-subnav{right:12px;top:8px}.atendimentos-central-header{padding-right:310px;}}
+        @media(max-width:767.98px){#tab-tickets{margin:-20px -14px -30px!important;width:calc(100% + 28px)!important;height:calc(100dvh - 66px)}#ticket-chat-dialog.ticket-chat-inline .ticket-chat-close{display:inline-flex!important}#tab-tickets.crm-mode{padding:20px 14px 30px!important;}#tab-tickets.crm-mode>.tickets-subnav{display:flex!important}.atendimentos-central-header{padding:8px 12px}.atendimentos-central-title span{display:none}.atendimentos-central-metrics{margin-left:auto}.atendimentos-metric{min-width:78px;height:40px;padding:5px 8px}#tab-tickets>.tickets-subnav{display:none}.chat-conversations-filters{padding-bottom:7px}.ticket-chat-workspace{grid-template-columns:1fr!important}.ticket-chat-conversations{display:flex!important}.ticket-chat-shell{display:none!important}.ticket-chat-workspace.chat-mobile-open .ticket-chat-conversations{display:none!important}.ticket-chat-workspace.chat-mobile-open>.ticket-chat-shell{display:grid!important}}
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -3769,10 +3807,10 @@
             <nav class="nav flex-column" aria-label="Seções do painel">
                 <div class="nav-link" id="nav-tickets-link" data-permission="tickets" onclick="switchTab('tab-tickets', this)">
                     <span class="nav-icon"><i class="bi bi-inboxes"></i></span>
-                    <span>Tickets ativos</span>
+                    <span>Atendimentos</span>
                     <span class="nav-ticket-badges" aria-live="polite">
-                        <span id="nav-ticket-unread-badge" class="nav-ticket-unread-badge hidden" aria-label="Mensagens não lidas nos tickets" title="Mensagens não lidas"><i class="bi bi-chat-dots-fill" aria-hidden="true"></i><span id="nav-ticket-unread-count">0</span></span>
-                        <span id="nav-notification-badge" class="nav-notification-badge hidden" aria-label="Novos tickets" title="Novos tickets">+0</span>
+                        <span id="nav-ticket-unread-badge" class="nav-ticket-unread-badge hidden" aria-label="Mensagens não lidas nos atendimentos" title="Mensagens não lidas"><i class="bi bi-chat-dots-fill" aria-hidden="true"></i><span id="nav-ticket-unread-count">0</span></span>
+                        <span id="nav-notification-badge" class="nav-notification-badge hidden" aria-label="Novos atendimentos" title="Novos atendimentos">+0</span>
                     </span>
                 </div>
                 <div class="nav-link" data-permission="clients" onclick="switchTab('tab-clientes', this)">
@@ -4049,91 +4087,153 @@
         </div>
 
         <div id="tab-tickets" class="content-section hidden" data-permission="tickets">
-            <div class="tickets-subnav" role="tablist" aria-label="Tickets e CRM">
+            <div class="tickets-subnav" role="tablist" aria-label="Atendimentos e CRM">
                 <button type="button" class="tickets-subnav-btn active" id="tickets-subnav-active" onclick="switchTicketsSubtab('active')">
-                    <i class="bi bi-inboxes"></i> Atendimentos ativos
+                    <i class="bi bi-chat-square-text"></i> Atendimentos
                 </button>
                 <button type="button" class="tickets-subnav-btn" id="tickets-subnav-crm" data-permission="crm" onclick="switchTicketsSubtab('crm')">
                     <i class="bi bi-kanban"></i> Controle CRM
                 </button>
             </div>
 
-            <div id="tickets-view-active" class="tickets-subview">
-                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+            <div id="tickets-view-active" class="tickets-subview atendimentos-view">
+                <div class="atendimentos-central-header">
+                    <div class="atendimentos-central-title">
+                        <h4>Atendimentos</h4>
+                        <span>Central de conversas do escritório</span>
+                    </div>
+                    <div class="atendimentos-central-metrics" aria-label="Indicadores dos atendimentos"><div class="atendimentos-realtime-badge" title="A lista é atualizada automaticamente"><i class="bi bi-broadcast-pin"></i><span>Tempo real</span></div>
+                        <div class="atendimentos-metric"><i class="bi bi-headset"></i><span><small>Ativos</small><strong id="atendimentos-metric-active">0</strong></span></div>
+                        <div class="atendimentos-metric unread"><i class="bi bi-chat-left-text-fill"></i><span><small>Não lidas</small><strong id="atendimentos-metric-unread">0</strong></span></div>
+                    </div>
+                </div>
+                <div id="ticket-chat-dialog" class="ticket-chat-inline" open>
+
+        <div class="ticket-chat-workspace">
+            <aside class="ticket-chat-conversations" id="ticket-chat-conversations">
+                <div class="chat-conversations-header">
                     <div>
-                        <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Tickets ativos</h4>
-                        <p class="text-muted mb-0">Visão operacional dos atendimentos em aberto. Arquivos enviados pelo cliente são lidos automaticamente pelo Gemini e resumidos nos detalhes do ticket.</p>
+                        <div class="chat-conversations-title">Conversas</div>
+                        <div class="chat-conversations-subtitle">Ativos e histórico dos últimos 6 meses</div>
                     </div>
-                    <div class="d-flex align-items-center gap-3 flex-wrap">
-                        <span id="tickets-refresh-status" class="tickets-refresh-status">Atualização automática</span>
-                        <button type="button" class="btn btn-outline-secondary" onclick="carregarTicketsAtivos(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
+                    <button type="button" class="chat-conversations-refresh" onclick="atualizarListaConversasChat(true)" title="Atualizar conversas"><i class="bi bi-arrow-clockwise"></i></button>
+                </div>
+                <div class="chat-conversations-search"><i class="bi bi-search"></i><input type="search" id="chat-conversations-search" placeholder="Buscar cliente, ticket, área ou responsável" oninput="renderizarListaConversasChat()"></div>
+                <div class="chat-conversations-filters">
+                    <label class="chat-active-filter" for="chat-filter-active"><input type="checkbox" id="chat-filter-active" checked onchange="atualizarListaConversasChat(true)"><span>Apenas atendimentos ativos</span></label>
+                    <span class="chat-history-window"><i class="bi bi-clock-history"></i> 6 meses</span>
+                </div>
+                <div class="chat-conversations-list" id="chat-conversations-list"><div class="chat-conversations-empty">Carregando conversas...</div></div>
+            </aside>
+            <div class="ticket-chat-shell">
+            <div class="ticket-chat-header">
+                <div class="ticket-chat-contact">
+                    <div class="ticket-chat-avatar"><i class="bi bi-person-fill"></i></div>
+                    <div class="ticket-chat-contact-copy">
+                        <h5 class="ticket-chat-title" id="ticket-chat-title">Selecione um atendimento</h5>
+                        <div class="ticket-chat-subtitle" id="ticket-chat-subtitle"></div>
                     </div>
                 </div>
-                <div class="tickets-summary-grid tickets-summary-compact" aria-label="Resumo dos tickets ativos">
-                    <div class="ticket-summary-card">
-                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Tickets ativos</div><div class="ticket-summary-value" id="tickets-metric-total">0</div></div>
-                        <span class="ticket-summary-icon"><i class="bi bi-inboxes"></i></span>
-                    </div>
-                    <div class="ticket-summary-card is-unread">
-                        <div class="ticket-summary-copy"><div class="ticket-summary-label">Mensagens não lidas</div><div class="ticket-summary-value" id="tickets-metric-unread">0</div></div>
-                        <span class="ticket-summary-icon"><i class="bi bi-chat-left-text-fill"></i></span>
+                <div class="ticket-chat-header-actions">
+                    <button type="button" class="ticket-chat-close" onclick="fecharChatTicket()" aria-label="Fechar chat"><i class="bi bi-x-lg"></i></button>
+                </div>
+            </div>
+
+            <div class="ticket-chat-operations">
+                <div class="ticket-chat-statuses">
+                    <span class="chat-op-pill" id="ticket-chat-op-situation"><i class="bi bi-circle-fill"></i><span>Situação</span></span>
+                    <select class="chat-status-select" id="ticket-chat-status-select" title="Alterar status interno do ticket" onchange="alterarStatusInternoPeloChat(this)"><option value="">Sem status</option></select>
+                    <span class="chat-op-pill" id="ticket-chat-op-owner"><i class="bi bi-person-badge"></i><span>Sem responsável</span></span>
+                    <button type="button" class="chat-op-pill chat-op-pill-action" id="ticket-chat-op-triage" onclick="toggleTriagemChat(event)" aria-expanded="false" title="Ver perguntas e respostas da triagem"><i class="bi bi-list-check"></i><span>Triagem</span><i class="bi bi-chevron-down chat-op-chevron"></i></button>
+                    <span class="chat-op-pill" id="ticket-chat-op-time"><i class="bi bi-clock"></i><span>Atividade</span></span>
+                </div>
+                <div class="ticket-chat-operation-actions">
+                    <button type="button" class="ticket-chat-documents-btn" id="ticket-chat-documents-btn" onclick="toggleDocumentosChat()" title="Ver arquivos recebidos e resumos da IA">
+                        <i class="bi bi-files"></i><span class="label">Ver documentos</span><span class="ticket-chat-documents-count" id="ticket-chat-documents-count">0</span>
+                    </button>
+                    <button type="button" class="ticket-chat-claim hidden" id="ticket-chat-claim" onclick="iniciarAtendimentoTicket(window.activeChatTicketNumber, this, false)" title="Iniciar atendimento">
+                        <i class="bi bi-headset"></i><span>Iniciar atendimento</span>
+                    </button>
+                    <button type="button" class="ticket-chat-end" id="ticket-chat-end" onclick="encerrarTicketPainel(window.activeChatTicketNumber, this)" title="Encerrar e arquivar atendimento"><i class="bi bi-check2-circle"></i><span>Encerrar</span></button>
+                    <div class="ticket-transfer-wrap">
+                        <button type="button" class="ticket-chat-transfer hidden" id="ticket-chat-transfer" onclick="toggleTransferenciaChat(event)" title="Transferir atendimento para outro usuário">
+                            <i class="bi bi-arrow-left-right"></i><span>Transferir atendimento</span>
+                        </button>
+                        <div class="ticket-transfer-panel hidden" id="ticket-transfer-panel">
+                            <div class="ticket-transfer-title">Transferir atendimento</div>
+                            <div class="ticket-transfer-help">Selecione o usuário que passará a conduzir esta conversa.</div>
+                            <select id="ticket-transfer-user" class="form-select form-select-sm">
+                                <option value="">Selecione um usuário...</option>
+                            </select>
+                            <div class="ticket-transfer-footer">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fecharTransferenciaChat()">Cancelar</button>
+                                <button type="button" class="btn btn-sm text-white" id="ticket-transfer-confirm" style="background:var(--adv-blue)" onclick="confirmarTransferenciaChat()">Transferir</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
+            </div>
 
-                <div class="card-custom text-start tickets-panel-card" style="width: 100%;">
-                    <div class="tickets-toolbar tickets-toolbar-clean">
-                        <div class="tickets-search">
-                            <span class="search-icon"><i class="bi bi-search"></i></span>
-                            <input type="text" id="tickets-search-input" class="form-control" placeholder="Buscar ticket, cliente, CPF, WhatsApp ou área..." oninput="filtrarTicketsAtivos(true)">
-                        </div>
-                        <select id="tickets-filter-area" class="form-select" onchange="filtrarTicketsAtivos(true)" aria-label="Filtrar área">
-                            <option value="">Todas as áreas</option>
-                        </select>
-                        <select id="tickets-filter-unread" class="form-select" onchange="filtrarTicketsAtivos(true)" aria-label="Filtrar mensagens não lidas">
-                            <option value="">Todas as mensagens</option>
-                            <option value="unread">Somente não lidas</option>
-                            <option value="read">Sem mensagens não lidas</option>
-                        </select>
-                        <button type="button" class="btn btn-outline-secondary" onclick="limparFiltrosTickets()"><i class="bi bi-x-circle me-1"></i> Limpar</button>
+            <section class="chat-triage-panel hidden" id="chat-triage-panel" aria-label="Perguntas e respostas da triagem">
+                <div class="chat-triage-header">
+                    <div>
+                        <strong><i class="bi bi-list-check me-1"></i> Respostas da triagem</strong>
+                        <div class="chat-triage-subtitle" id="chat-triage-subtitle">Carregando informações...</div>
                     </div>
+                    <button type="button" class="chat-triage-close" onclick="fecharTriagemChat()" aria-label="Fechar triagem"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="chat-triage-body" id="chat-triage-body"><div class="chat-triage-empty">Carregando perguntas e respostas...</div></div>
+            </section>
 
-                    <div class="tickets-list-meta">
-                        <div class="tickets-legend" aria-label="Legenda dos tickets">
-                            <span><i class="ticket-legend-dot unread"></i> Mensagem não lida</span>
-                            <span><i class="ticket-legend-line mine"></i> Seu atendimento</span>
-                            <span><i class="ticket-legend-line assigned"></i> Atribuído a outro usuário</span>
-                            <span id="ticket-status-legend" class="ticket-status-legend"></span>
-                        </div>
-                        <div id="tickets-status" class="menu-save-status text-muted"></div>
-                    </div>
+            <div class="ticket-chat-user" id="ticket-chat-current-user">Modo leitura</div>
+            <div class="ticket-chat-storage" id="ticket-chat-storage">Selecione uma conversa para visualizar o histórico</div>
+            <div class="ticket-chat-history" id="ticket-chat-history">
+                <div class="chat-empty">Selecione um atendimento na lista ao lado.</div>
+            </div>
 
-                    <div class="tickets-table-wrap">
-                        <table class="table tickets-table align-middle">
-                            <thead>
-                                <tr>
-                                    <th data-excel-table="tickets" data-excel-key="ticketNumber">Ticket</th>
-                                    <th data-excel-table="tickets" data-excel-key="clienteNome">Cliente</th>
-                                    <th data-excel-table="tickets" data-excel-key="area">Área</th>
-                                    <th data-excel-table="tickets" data-excel-key="internalStatus">Status</th>
-                                    <th data-excel-table="tickets" data-excel-key="responsavel">Responsável</th>
-                                    <th data-excel-table="tickets" data-excel-key="lastActivity">Última atividade</th>
-                                    <th data-excel-table="tickets" data-excel-key="createdAt">Aberto há</th>
-                                    <th class="text-end" data-excel-table="tickets" data-excel-key="acoes">Ações</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tickets-table-body">
-                                <tr><td colspan="8" class="tickets-empty">Abra esta aba para carregar os tickets ativos.</td></tr>
-                            </tbody>
-                        </table>
+            <div class="chat-documents-backdrop hidden" id="chat-documents-backdrop" onclick="fecharDocumentosChat()"></div>
+            <aside class="chat-documents-panel hidden" id="chat-documents-panel" aria-label="Documentos e análises da IA">
+                <div class="chat-documents-header">
+                    <div>
+                        <div class="chat-documents-title"><i class="bi bi-stars me-1"></i> Documentos e análise da IA</div>
+                        <div class="chat-documents-subtitle" id="chat-documents-subtitle">Arquivos enviados pelo cliente</div>
                     </div>
-                    <div class="crm-table-footer" id="tickets-table-footer">
-                        <span id="tickets-page-info">0 tickets</span>
-                        <div class="crm-page-actions">
-                            <button type="button" class="crm-page-btn" id="tickets-page-prev" onclick="mudarPaginaTickets(-1)"><i class="bi bi-chevron-left"></i> Anterior</button>
-                            <span id="tickets-page-label">Página 1</span>
-                            <button type="button" class="crm-page-btn" id="tickets-page-next" onclick="mudarPaginaTickets(1)">Próxima <i class="bi bi-chevron-right"></i></button>
-                        </div>
-                    </div>
+                    <button type="button" class="chat-documents-close" onclick="fecharDocumentosChat()" aria-label="Fechar documentos"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="chat-documents-body" id="chat-documents-body">
+                    <div class="chat-documents-empty"><i class="bi bi-files"></i>Nenhum arquivo analisado neste atendimento.</div>
+                </div>
+            </aside>
+
+            <form class="ticket-chat-composer" id="ticket-chat-composer" onsubmit="enviarMensagemChat(event)">
+                <input type="file" id="ticket-chat-file" class="hidden" onchange="enviarArquivoChat(this)" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv">
+                <div id="ticket-chat-reply-preview" class="chat-reply-compose hidden">
+                    <i class="bi bi-reply-fill"></i>
+                    <div class="chat-reply-compose-copy"><div class="chat-reply-compose-name" id="ticket-chat-reply-name">Respondendo</div><div class="chat-reply-compose-text" id="ticket-chat-reply-text"></div></div>
+                    <button type="button" class="chat-reply-compose-close" onclick="cancelarRespostaChat()" title="Cancelar resposta"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div id="ticket-chat-edit-preview" class="chat-reply-compose hidden">
+                    <i class="bi bi-pencil-square"></i>
+                    <div class="chat-reply-compose-copy"><div class="chat-reply-compose-name">Editando mensagem</div><div class="chat-reply-compose-text" id="ticket-chat-edit-text"></div></div>
+                    <button type="button" class="chat-reply-compose-close" onclick="cancelarEdicaoChat()" title="Cancelar edição"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="chat-compose-tools">
+                    <button type="button" class="chat-emoji-btn" id="ticket-chat-emoji" onclick="toggleEmojiPickerChat(event)" title="Emojis" aria-label="Inserir emoji"><i class="bi bi-emoji-smile"></i></button>
+                    <button type="button" class="chat-attach-btn" id="ticket-chat-attach" onclick="document.getElementById('ticket-chat-file').click()" title="Enviar arquivo (máx. 15 MB)"><i class="bi bi-paperclip"></i></button>
+                </div>
+                <div class="chat-input-wrap">
+                    <div id="ticket-chat-emoji-picker" class="chat-emoji-picker hidden" aria-label="Seletor de emojis"></div>
+                    <div id="chat-quick-suggestions" class="chat-quick-suggestions hidden" role="listbox" aria-label="Textos rápidos"></div>
+                    <div id="chat-recording-bar" class="chat-recording-bar hidden"><span class="chat-recording-dot"></span><span class="chat-recording-time" id="chat-recording-time">00:00</span><span class="chat-recording-label">Gravando áudio…</span><button type="button" class="chat-recording-cancel" onclick="cancelarGravacaoChat()">Cancelar</button><button type="button" class="chat-recording-send" onclick="finalizarGravacaoChat(true)" title="Enviar áudio"><i class="bi bi-send-fill"></i></button></div>
+                    <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem · Enter envia · Shift+Enter quebra linha" onkeydown="atalhoEnviarChat(event)"></textarea>
+                    <div class="chat-paste-hint"><i class="bi bi-lightning-charge"></i> Enter envia · Shift+Enter quebra linha · /atalho · Ctrl+V</div>
+                </div>
+                <button type="button" class="chat-record-btn" id="ticket-chat-record" onclick="toggleGravacaoChat()" title="Gravar áudio"><i class="bi bi-mic-fill"></i></button>
+
+                <div class="chat-compose-status" id="ticket-chat-status"></div>
+            </form>
+        </div>
+    
                 </div>
             </div>
 
@@ -4141,7 +4241,7 @@
                 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                     <div>
                         <h4 class="mb-1" style="color: var(--adv-blue); font-weight: 700;">Controle CRM</h4>
-                        <p class="text-muted mb-0">Controle comercial exclusivo para leads originados de anúncios e mídia paga. Atendimentos orgânicos permanecem somente em Tickets ativos.</p>
+                        <p class="text-muted mb-0">Controle comercial exclusivo para leads originados de anúncios e mídia paga. Atendimentos orgânicos permanecem na Central de Atendimentos.</p>
                     </div>
                     <div class="d-flex align-items-center gap-2 flex-wrap">
                         <button type="button" class="btn btn-outline-secondary" onclick="carregarCRM(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
@@ -4279,7 +4379,7 @@
                     </table>
                 </div>
 
-                <div class="form-text mt-3">Os contatos não cadastrados são identificados pelos tickets ativos e pelo histórico recente do WhatsApp. Nome, CPF e dados complementares são opcionais; o número é o vínculo principal do cadastro manual.</div>
+                <div class="form-text mt-3">Os contatos não cadastrados são identificados pelos atendimentos ativos e pelo histórico recente do WhatsApp. Nome, CPF e dados complementares são opcionais; o número é o vínculo principal do cadastro manual.</div>
             </div>
         </div>
 
@@ -4328,7 +4428,7 @@
                 <div><h4 class="mb-1" style="color:var(--adv-blue);font-weight:700;">Parâmetros de tickets</h4><p class="text-muted mb-0">Crie status internos para organização da equipe. Eles não alteram o fluxo automático do chatbot.</p></div>
                 <button type="button" class="btn btn-outline-secondary" onclick="carregarParametrosTickets(true)"><i class="bi bi-arrow-clockwise me-1"></i> Atualizar</button>
             </div>
-            <div class="param-admin-card param-admin-card-compact param-admin-shell"><div class="param-admin-head"><div><div class="param-admin-title">Status internos</div><div class="param-admin-help">Defina o nome e a cor. A legenda da tela Tickets ativos é criada automaticamente.</div></div><button class="param-add" type="button" onclick="adicionarParametroTicket()"><i class="bi bi-plus-lg"></i> Novo status</button></div><div id="ticket-params-status" class="menu-save-status text-muted mb-2"></div><div id="ticket-params-status-list" class="param-admin-list"></div><div class="param-actions"><button type="button" class="btn text-white" style="background:var(--adv-blue)" onclick="salvarParametrosTickets()"><i class="bi bi-check2 me-1"></i> Salvar status</button></div></div>
+            <div class="param-admin-card param-admin-card-compact param-admin-shell"><div class="param-admin-head"><div><div class="param-admin-title">Status internos</div><div class="param-admin-help">Defina o nome e a cor. A legenda da tela Atendimentos é criada automaticamente.</div></div><button class="param-add" type="button" onclick="adicionarParametroTicket()"><i class="bi bi-plus-lg"></i> Novo status</button></div><div id="ticket-params-status" class="menu-save-status text-muted mb-2"></div><div id="ticket-params-status-list" class="param-admin-list"></div><div class="param-actions"><button type="button" class="btn text-white" style="background:var(--adv-blue)" onclick="salvarParametrosTickets()"><i class="bi bi-check2 me-1"></i> Salvar status</button></div></div>
         </div>
 
         <div id="tab-usuarios" class="content-section hidden" data-permission="users">
@@ -4343,7 +4443,7 @@
                 </div>
             </div>
             <div class="card-custom text-start p-4" style="width:100%;max-width:1150px;">
-                <div class="users-summary"><span><strong>Advogado comum:</strong> por padrão acessa Tickets ativos, Clientes e Chat.</span><span id="users-count">0 usuários</span></div>
+                <div class="users-summary"><span><strong>Advogado comum:</strong> por padrão acessa Atendimentos, Clientes e Chat.</span><span id="users-count">0 usuários</span></div>
                 <div id="users-status" class="menu-save-status text-muted mb-2"></div>
                 <div class="users-table-wrap">
                     <table class="table users-table align-middle">
@@ -4484,129 +4584,6 @@
         </div>
     </dialog>
 
-    <dialog id="ticket-chat-dialog">
-        <div class="ticket-chat-workspace">
-            <aside class="ticket-chat-conversations" id="ticket-chat-conversations">
-                <div class="chat-conversations-header">
-                    <div>
-                        <div class="chat-conversations-title">Conversas</div>
-                        <div class="chat-conversations-subtitle">Tickets ativos e histórico recente</div>
-                    </div>
-                    <button type="button" class="chat-conversations-refresh" onclick="atualizarListaConversasChat(true)" title="Atualizar conversas"><i class="bi bi-arrow-clockwise"></i></button>
-                </div>
-                <div class="chat-conversations-search"><i class="bi bi-search"></i><input type="search" id="chat-conversations-search" placeholder="Pesquisar conversa" oninput="renderizarListaConversasChat()"></div>
-                <div class="chat-conversations-list" id="chat-conversations-list"><div class="chat-conversations-empty">Carregando conversas...</div></div>
-            </aside>
-            <div class="ticket-chat-shell">
-            <div class="ticket-chat-header">
-                <div class="ticket-chat-contact">
-                    <div class="ticket-chat-avatar"><i class="bi bi-person-fill"></i></div>
-                    <div class="ticket-chat-contact-copy">
-                        <h5 class="ticket-chat-title" id="ticket-chat-title">Chat do ticket</h5>
-                        <div class="ticket-chat-subtitle" id="ticket-chat-subtitle"></div>
-                    </div>
-                </div>
-                <div class="ticket-chat-header-actions">
-                    <button type="button" class="ticket-chat-close" onclick="fecharChatTicket()" aria-label="Fechar chat"><i class="bi bi-x-lg"></i></button>
-                </div>
-            </div>
-
-            <div class="ticket-chat-operations">
-                <div class="ticket-chat-statuses">
-                    <span class="chat-op-pill" id="ticket-chat-op-situation"><i class="bi bi-circle-fill"></i><span>Situação</span></span>
-                    <select class="chat-status-select" id="ticket-chat-status-select" title="Alterar status interno do ticket" onchange="alterarStatusInternoPeloChat(this)"><option value="">Sem status</option></select>
-                    <span class="chat-op-pill" id="ticket-chat-op-owner"><i class="bi bi-person-badge"></i><span>Sem responsável</span></span>
-                    <button type="button" class="chat-op-pill chat-op-pill-action" id="ticket-chat-op-triage" onclick="toggleTriagemChat(event)" aria-expanded="false" title="Ver perguntas e respostas da triagem"><i class="bi bi-list-check"></i><span>Triagem</span><i class="bi bi-chevron-down chat-op-chevron"></i></button>
-                    <span class="chat-op-pill" id="ticket-chat-op-time"><i class="bi bi-clock"></i><span>Atividade</span></span>
-                </div>
-                <div class="ticket-chat-operation-actions">
-                    <button type="button" class="ticket-chat-documents-btn" id="ticket-chat-documents-btn" onclick="toggleDocumentosChat()" title="Ver arquivos recebidos e resumos da IA">
-                        <i class="bi bi-files"></i><span class="label">Ver documentos</span><span class="ticket-chat-documents-count" id="ticket-chat-documents-count">0</span>
-                    </button>
-                    <button type="button" class="ticket-chat-claim hidden" id="ticket-chat-claim" onclick="iniciarAtendimentoTicket(window.activeChatTicketNumber, this, false)" title="Iniciar atendimento">
-                        <i class="bi bi-headset"></i><span>Iniciar atendimento</span>
-                    </button>
-                    <button type="button" class="ticket-chat-end" id="ticket-chat-end" onclick="encerrarTicketPainel(window.activeChatTicketNumber, this)" title="Encerrar e arquivar atendimento"><i class="bi bi-check2-circle"></i><span>Encerrar</span></button>
-                    <div class="ticket-transfer-wrap">
-                        <button type="button" class="ticket-chat-transfer hidden" id="ticket-chat-transfer" onclick="toggleTransferenciaChat(event)" title="Transferir atendimento para outro usuário">
-                            <i class="bi bi-arrow-left-right"></i><span>Transferir atendimento</span>
-                        </button>
-                        <div class="ticket-transfer-panel hidden" id="ticket-transfer-panel">
-                            <div class="ticket-transfer-title">Transferir atendimento</div>
-                            <div class="ticket-transfer-help">Selecione o usuário que passará a conduzir esta conversa.</div>
-                            <select id="ticket-transfer-user" class="form-select form-select-sm">
-                                <option value="">Selecione um usuário...</option>
-                            </select>
-                            <div class="ticket-transfer-footer">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fecharTransferenciaChat()">Cancelar</button>
-                                <button type="button" class="btn btn-sm text-white" id="ticket-transfer-confirm" style="background:var(--adv-blue)" onclick="confirmarTransferenciaChat()">Transferir</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <section class="chat-triage-panel hidden" id="chat-triage-panel" aria-label="Perguntas e respostas da triagem">
-                <div class="chat-triage-header">
-                    <div>
-                        <strong><i class="bi bi-list-check me-1"></i> Respostas da triagem</strong>
-                        <div class="chat-triage-subtitle" id="chat-triage-subtitle">Carregando informações...</div>
-                    </div>
-                    <button type="button" class="chat-triage-close" onclick="fecharTriagemChat()" aria-label="Fechar triagem"><i class="bi bi-x-lg"></i></button>
-                </div>
-                <div class="chat-triage-body" id="chat-triage-body"><div class="chat-triage-empty">Carregando perguntas e respostas...</div></div>
-            </section>
-
-            <div class="ticket-chat-user" id="ticket-chat-current-user">Modo leitura</div>
-            <div class="ticket-chat-storage" id="ticket-chat-storage">Histórico completo com carregamento paginado</div>
-            <div class="ticket-chat-history" id="ticket-chat-history">
-                <div class="chat-empty">Carregando conversa...</div>
-            </div>
-
-            <div class="chat-documents-backdrop hidden" id="chat-documents-backdrop" onclick="fecharDocumentosChat()"></div>
-            <aside class="chat-documents-panel hidden" id="chat-documents-panel" aria-label="Documentos e análises da IA">
-                <div class="chat-documents-header">
-                    <div>
-                        <div class="chat-documents-title"><i class="bi bi-stars me-1"></i> Documentos e análise da IA</div>
-                        <div class="chat-documents-subtitle" id="chat-documents-subtitle">Arquivos enviados pelo cliente</div>
-                    </div>
-                    <button type="button" class="chat-documents-close" onclick="fecharDocumentosChat()" aria-label="Fechar documentos"><i class="bi bi-x-lg"></i></button>
-                </div>
-                <div class="chat-documents-body" id="chat-documents-body">
-                    <div class="chat-documents-empty"><i class="bi bi-files"></i>Nenhum arquivo analisado neste atendimento.</div>
-                </div>
-            </aside>
-
-            <form class="ticket-chat-composer" id="ticket-chat-composer" onsubmit="enviarMensagemChat(event)">
-                <input type="file" id="ticket-chat-file" class="hidden" onchange="enviarArquivoChat(this)" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv">
-                <div id="ticket-chat-reply-preview" class="chat-reply-compose hidden">
-                    <i class="bi bi-reply-fill"></i>
-                    <div class="chat-reply-compose-copy"><div class="chat-reply-compose-name" id="ticket-chat-reply-name">Respondendo</div><div class="chat-reply-compose-text" id="ticket-chat-reply-text"></div></div>
-                    <button type="button" class="chat-reply-compose-close" onclick="cancelarRespostaChat()" title="Cancelar resposta"><i class="bi bi-x-lg"></i></button>
-                </div>
-                <div id="ticket-chat-edit-preview" class="chat-reply-compose hidden">
-                    <i class="bi bi-pencil-square"></i>
-                    <div class="chat-reply-compose-copy"><div class="chat-reply-compose-name">Editando mensagem</div><div class="chat-reply-compose-text" id="ticket-chat-edit-text"></div></div>
-                    <button type="button" class="chat-reply-compose-close" onclick="cancelarEdicaoChat()" title="Cancelar edição"><i class="bi bi-x-lg"></i></button>
-                </div>
-                <div class="chat-compose-tools">
-                    <button type="button" class="chat-emoji-btn" id="ticket-chat-emoji" onclick="toggleEmojiPickerChat(event)" title="Emojis" aria-label="Inserir emoji"><i class="bi bi-emoji-smile"></i></button>
-                    <button type="button" class="chat-attach-btn" id="ticket-chat-attach" onclick="document.getElementById('ticket-chat-file').click()" title="Enviar arquivo (máx. 15 MB)"><i class="bi bi-paperclip"></i></button>
-                </div>
-                <div class="chat-input-wrap">
-                    <div id="ticket-chat-emoji-picker" class="chat-emoji-picker hidden" aria-label="Seletor de emojis"></div>
-                    <div id="chat-quick-suggestions" class="chat-quick-suggestions hidden" role="listbox" aria-label="Textos rápidos"></div>
-                    <div id="chat-recording-bar" class="chat-recording-bar hidden"><span class="chat-recording-dot"></span><span class="chat-recording-time" id="chat-recording-time">00:00</span><span class="chat-recording-label">Gravando áudio…</span><button type="button" class="chat-recording-cancel" onclick="cancelarGravacaoChat()">Cancelar</button><button type="button" class="chat-recording-send" onclick="finalizarGravacaoChat(true)" title="Enviar áudio"><i class="bi bi-send-fill"></i></button></div>
-                    <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem · Enter envia · Shift+Enter quebra linha" onkeydown="atalhoEnviarChat(event)"></textarea>
-                    <div class="chat-paste-hint"><i class="bi bi-lightning-charge"></i> Enter envia · Shift+Enter quebra linha · /atalho · Ctrl+V</div>
-                </div>
-                <button type="button" class="chat-record-btn" id="ticket-chat-record" onclick="toggleGravacaoChat()" title="Gravar áudio"><i class="bi bi-mic-fill"></i></button>
-
-                <div class="chat-compose-status" id="ticket-chat-status"></div>
-            </form>
-        </div>
-    </dialog>
-
     <dialog id="my-profile-dialog">
         <div class="my-profile-header">
             <div>
@@ -4704,7 +4681,7 @@
                     <div class="col-md-6"><label class="form-label small fw-bold">E-mail</label><input id="user-email" type="email" class="form-control" maxlength="240"></div>
                     <div class="col-md-6"><label class="form-label small fw-bold">Celular</label><input id="user-celular" type="tel" inputmode="tel" class="form-control" maxlength="24" placeholder="Ex.: (19) 99999-9999"></div>
                     <div class="col-md-6"><label class="form-label small fw-bold">Senha <span class="text-muted" id="user-password-help">*</span></label><input id="user-password" type="password" class="form-control" minlength="6" autocomplete="new-password"><div class="form-text">Ao editar, deixe em branco para manter a senha atual.</div></div>
-                    <div class="col-12"><label class="form-label small fw-bold">Permissões</label><div class="permission-grid" id="user-permissions-grid"></div><div class="permission-note">Administradores possuem acesso completo. O perfil Advogado inicia com Tickets ativos, Clientes e Chat.</div></div>
+                    <div class="col-12"><label class="form-label small fw-bold">Permissões</label><div class="permission-grid" id="user-permissions-grid"></div><div class="permission-note">Administradores possuem acesso completo. O perfil Advogado inicia com Atendimentos, Clientes e Chat.</div></div>
                     <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="user-active" checked><label class="form-check-label fw-bold" for="user-active">Usuário ativo</label></div></div>
                 </div>
                 <div id="user-form-status" class="client-form-status mt-2"></div>
@@ -4816,7 +4793,7 @@
 
 
         const PERMISSION_LABELS = {
-            tickets:'Tickets ativos', clients:'Clientes', chat:'Chat', crm:'CRM', whatsapp:'Conexão WhatsApp',
+            tickets:'Atendimentos', clients:'Clientes', chat:'Chat', crm:'CRM', whatsapp:'Conexão WhatsApp',
             ia:'Gestão da IA', menu:'Opções de atendimento', crm_params:'Parâmetros CRM', ticket_params:'Parâmetros de tickets', business_hours:'Horário de funcionamento', users:'Usuários'
         };
         window.panelSessionUser = null;
@@ -5393,6 +5370,7 @@
             document.querySelectorAll('.content-section').forEach(s => s.classList.add('hidden'));
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
             document.getElementById(tabId).classList.remove('hidden');
+            if(tabId!=='tab-tickets') document.querySelector('.ticket-chat-workspace')?.classList.remove('chat-mobile-open');
             el.classList.add('active');
             sincronizarMenuAdministracaoAtivo(el);
             if (window.innerWidth < 992) toggleSidebar(false);
@@ -5418,13 +5396,14 @@
 
             const mostrarCRM = subtab === 'crm' && temPermissaoPainel('crm');
             window.ticketsCurrentSubtab = mostrarCRM ? 'crm' : 'active';
+            document.getElementById('tab-tickets')?.classList.toggle('crm-mode', mostrarCRM);
             activeView.classList.toggle('hidden', mostrarCRM);
             crmView.classList.toggle('hidden', !mostrarCRM);
             activeBtn?.classList.toggle('active', !mostrarCRM);
             crmBtn?.classList.toggle('active', mostrarCRM);
 
             if (mostrarCRM) carregarCRM();
-            else carregarTicketsAtivos();
+            else inicializarCentralAtendimentos();
         }
 
         socket.on('panel_notification', (payload = {}) => {
@@ -5440,7 +5419,7 @@
                     window.crmNotificationRefreshTimer = setTimeout(() => carregarCRM(true), 250);
                 } else if (activeView && !activeView.classList.contains('hidden')) {
                     clearTimeout(window.ticketNotificationRefreshTimer);
-                    window.ticketNotificationRefreshTimer = setTimeout(() => carregarTicketsAtivos(true), 250);
+                    window.ticketNotificationRefreshTimer = setTimeout(() => atualizarListaConversasChat(true), 250);
                 }
             }
         });
@@ -5452,6 +5431,37 @@
 
         socket.on('panel_user', user => {
             if (user) { window.panelSessionUser = user; aplicarPermissoesPainel(); }
+        });
+
+        socket.on('ticket_conversation_created', (payload = {}) => {
+            const numero=String(payload.ticketNumber||'').trim();
+            if(!numero)return;
+
+            // Não mudamos activeChatTicketNumber: um novo atendimento aparece na lista
+            // sem interromper a conversa que o advogado já está conduzindo.
+            const existe=(window.atendimentosConversasData||[]).some(item=>String(item.ticketNumber||'')===numero);
+            if(!existe){
+                const novo={
+                    ticketNumber:numero,
+                    clienteNome:payload.clienteNome||null,
+                    whatsapp:payload.whatsapp||null,
+                    status:payload.status||'aguardando_opcao',
+                    statusLabel:'Novo atendimento',
+                    pendenciaTipo:'cliente',
+                    pendenciaLabel:'Novo atendimento',
+                    origem:payload.origem||'organico',
+                    createdAt:Number(payload.createdAt||Date.now()),
+                    lastActivity:Number(payload.lastActivity||payload.createdAt||Date.now()),
+                    temMensagemNaoLida:true,
+                    isActive:true,
+                    isArchived:false
+                };
+                window.atendimentosConversasData=[novo,...(window.atendimentosConversasData||[])];
+                window.activeTicketsData=[novo,...(window.activeTicketsData||[]).filter(item=>String(item.ticketNumber||'')!==numero)];
+                renderizarListaConversasChat();
+            }
+            agendarAtualizacaoBadgeNaoLidosTickets(80);
+            agendarSincronizacaoAtendimentosRealtime(70);
         });
 
         socket.on('ticket_chat_message', ({ ticketNumber, message } = {}) => {
@@ -5471,8 +5481,10 @@
                     ticket.idadeUltimaAtividadeMs=0;
                     recalcularResumoTicketsLocal();
                     filtrarTicketsAtivos();
+                    renderizarListaConversasChat();
                 } else {
                     window.activeTicketsLoaded=false;
+                    agendarSincronizacaoAtendimentosRealtime(80);
                 }
             }
         });
@@ -5573,6 +5585,8 @@
             if (window.activeTicketDialogNumber && String(window.activeTicketDialogNumber) === String(payload.ticketNumber || '')) {
                 abrirDetalheTicket(payload.ticketNumber);
             }
+            renderizarListaConversasChat();
+            agendarSincronizacaoAtendimentosRealtime(120);
         });
 
         socket.on('ticket_activity_updated', (payload = {}) => {
@@ -5582,6 +5596,8 @@
 
             if (!ticket) {
                 window.activeTicketsLoaded = false;
+                // Pode ser um atendimento recém-criado que ainda não existia na memória local.
+                agendarSincronizacaoAtendimentosRealtime(80);
                 return;
             }
 
@@ -5611,18 +5627,23 @@
 
             recalcularResumoTicketsLocal();
             filtrarTicketsAtivos();
+            renderizarListaConversasChat();
+            // Busca consolidada atualiza ordenação, indicadores e campos que não vêm no evento leve.
+            agendarSincronizacaoAtendimentosRealtime(140);
         });
 
-        socket.on('ticket_archived', ({ ticketNumber } = {}) => {
+        socket.on('ticket_archived', ({ ticketNumber, archivedAt } = {}) => {
             const numero = String(ticketNumber || '').trim();
             if (!numero) return;
             window.activeTicketsData = (window.activeTicketsData || []).filter(item => String(item.ticketNumber || '') !== numero);
-            if (String(window.activeChatTicketNumber || '') === numero) fecharChatTicket();
-            renderizarListaConversasChat();
+            if (String(window.activeChatTicketNumber || '') === numero) {
+                window.activeChatTicketData={...(window.activeChatTicketData||{}),isActive:false,isArchived:true,status:'encerrado',statusLabel:'Encerrado',pendenciaLabel:'Encerrado',archivedAt:archivedAt||Date.now()};
+                atualizarEstadoAtendimentoChat(window.activeChatTicketData);
+                atualizarStatusOperacionalChat(window.activeChatTicketData);
+            }
             if (String(window.activeTicketDialogNumber || '') === numero) fecharDetalheTicket();
-            preencherFiltroAreasTickets(window.activeTicketsData || []);
             recalcularResumoTicketsLocal();
-            filtrarTicketsAtivos();
+            atualizarListaConversasChat(true);
         });
 
         socket.on('panel_users_updated', () => {
@@ -6902,7 +6923,7 @@
             const total = Math.max(0, Number(totalNaoLidas || 0));
             badge.classList.toggle('hidden', total <= 0);
             if (count) count.textContent = total > 99 ? '99+' : String(total);
-            badge.setAttribute('aria-label', total === 1 ? '1 mensagem não lida nos tickets' : `${total} mensagens não lidas nos tickets`);
+            badge.setAttribute('aria-label', total === 1 ? '1 mensagem não lida nos atendimentos' : `${total} mensagens não lidas nos atendimentos`);
             badge.title = total === 1 ? '1 mensagem não lida' : `${total} mensagens não lidas`;
         }
 
@@ -7127,7 +7148,7 @@
         async function encerrarTicketPainel(ticketNumber, button = null) {
             const numero = String(ticketNumber || '').trim();
             if (!numero) return;
-            if (!confirm(`Encerrar e arquivar o ticket ${numero}?\n\nEle será removido da tela de tickets ativos.`)) return;
+            if (!confirm(`Encerrar e arquivar o ticket ${numero}?\n\nEle será removido da Central de Atendimentos.`)) return;
 
             const htmlOriginal = button?.innerHTML || '';
             if (button) {
@@ -7144,11 +7165,14 @@
                 if (!res.ok) throw new Error(data.erro || 'Não foi possível encerrar o ticket.');
 
                 window.activeTicketsData = (window.activeTicketsData || []).filter(item => String(item.ticketNumber || '') !== numero);
-                if (String(window.activeChatTicketNumber || '') === numero) fecharChatTicket();
                 if (String(window.activeTicketDialogNumber || '') === numero) fecharDetalheTicket();
-                preencherFiltroAreasTickets(window.activeTicketsData);
                 recalcularResumoTicketsLocal();
-                filtrarTicketsAtivos();
+                if (String(window.activeChatTicketNumber || '') === numero) {
+                    window.activeChatTicketData={...(window.activeChatTicketData||{}),isActive:false,isArchived:true,status:'encerrado_painel',statusLabel:'Encerrado',pendenciaLabel:'Encerrado',archivedAt:data.archivedAt||Date.now()};
+                    atualizarEstadoAtendimentoChat(window.activeChatTicketData);
+                    atualizarStatusOperacionalChat(window.activeChatTicketData);
+                }
+                await atualizarListaConversasChat(true);
             } catch (err) {
                 alert(err.message || 'Não foi possível encerrar o ticket.');
                 if (button?.isConnected) {
@@ -7210,13 +7234,13 @@
 
             if (status) {
                 status.className = 'menu-save-status text-muted mb-2';
-                status.textContent = 'Carregando tickets ativos...';
+                status.textContent = 'Carregando atendimentos...';
             }
 
             try {
                 const res = await fetch('/api/tickets/active', { cache: 'no-store' });
                 const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar os tickets ativos.');
+                if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar os atendimentos.');
 
                 window.activeTicketsData = Array.isArray(data.tickets) ? data.tickets : [];
                 window.ticketStatusOptions = Array.isArray(data.ticketStatusOptions) ? data.ticketStatusOptions : (window.ticketStatusOptions||[]);
@@ -8122,7 +8146,7 @@
                 const status = document.getElementById('tickets-status');
                 if (status) {
                     status.className = 'menu-save-status text-muted mb-2';
-                    status.textContent = `O ticket ${ticketNumber} não está mais entre os tickets ativos.`;
+                    status.textContent = `O ticket ${ticketNumber} não está mais entre os atendimentos ativos.`;
                 }
             });
         }
@@ -9371,7 +9395,7 @@
             select.value=atual;
             if(select.value!==atual)select.value='';
             aplicarVisualStatusTicketSelect(select,select.value);
-            select.disabled=!window.activeChatTicketNumber;
+            select.disabled=!window.activeChatTicketNumber||window.activeChatTicketData?.isArchived===true||window.activeChatTicketData?.isActive===false;
         }
         async function alterarStatusInternoPeloChat(select){
             const ticket=String(window.activeChatTicketNumber||'');if(!ticket||!select)return;
@@ -9389,13 +9413,14 @@
             if(!window.activeChatTicketNumber) return;
             const local=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber)===String(window.activeChatTicketNumber));
             const combinado={...(window.activeChatTicketData||{}),...(local||{}),...(ticketData||{})};
+            const encerrado=combinado.isArchived===true||combinado.isActive===false;
             const ownerId=String(combinado.advogadoResponsavelId || '').trim();
             const ownerName=String(combinado.advogadoResponsavelNome || '').trim();
             const meuId=idUsuarioPainelAtual();
             const ehMeu=!!meuId && !!ownerId && ownerId===meuId;
             window.activeChatOwnerId=ownerId||null;
             window.activeChatOwnerName=ownerName||null;
-            window.activeChatCanSend=ehMeu;
+            window.activeChatCanSend=ehMeu&&!encerrado;
             window.activeChatTicketData=combinado;
             atualizarStatusOperacionalChat(combinado);
             atualizarSeletorStatusChat(combinado);
@@ -9403,33 +9428,43 @@
             const usuarioAtual=window.panelSessionUser?.assinatura||window.panelSessionUser?.nome||'usuário conectado';
             const userLine=document.getElementById('ticket-chat-current-user');
             if(userLine) {
-                userLine.innerHTML = ownerId
-                    ? `<i class="bi bi-person-check"></i> Atendimento atribuído a <strong>${escapeHtmlChat(ownerName||'Usuário')}</strong>${ehMeu ? ' · você pode responder' : ` · você está em modo leitura (${escapeHtmlChat(usuarioAtual)})`}`
-                    : '<i class="bi bi-eye"></i> Modo leitura · atendimento ainda não iniciado';
+                userLine.innerHTML = encerrado
+                    ? '<i class="bi bi-archive"></i> Atendimento encerrado · histórico disponível em modo somente leitura'
+                    : (ownerId
+                        ? `<i class="bi bi-person-check"></i> Atendimento atribuído a <strong>${escapeHtmlChat(ownerName||'Usuário')}</strong>${ehMeu ? ' · você pode responder' : ` · você está em modo leitura (${escapeHtmlChat(usuarioAtual)})`}`
+                        : '<i class="bi bi-eye"></i> Modo leitura · atendimento ainda não iniciado');
             }
 
             const claim=document.getElementById('ticket-chat-claim');
             const transfer=document.getElementById('ticket-chat-transfer');
             if(claim){
-                claim.classList.toggle('hidden',!!ownerId);
+                claim.classList.toggle('hidden',encerrado||!!ownerId);
                 claim.disabled=false;
                 claim.innerHTML='<i class="bi bi-headset"></i><span>Iniciar atendimento</span>';
                 claim.title='Iniciar atendimento com seu usuário e avisar o cliente.';
             }
             if(transfer){
-                transfer.classList.toggle('hidden',!ownerId);
+                transfer.classList.toggle('hidden',encerrado||!ownerId);
                 transfer.disabled=false;
             }
-            if(!ownerId) fecharTransferenciaChat();
+            if(!ownerId||encerrado) fecharTransferenciaChat();
+            const endBtn=document.getElementById('ticket-chat-end');
+            if(endBtn) endBtn.classList.toggle('hidden',encerrado);
+            const statusSelect=document.getElementById('ticket-chat-status-select');
+            if(statusSelect) statusSelect.disabled=encerrado||!window.activeChatTicketNumber;
 
             ['ticket-chat-input','ticket-chat-attach','ticket-chat-send','ticket-chat-emoji','ticket-chat-record'].forEach(id=>{
-                const el=document.getElementById(id); if(el) el.disabled=!ehMeu;
+                const el=document.getElementById(id); if(el) el.disabled=encerrado||!ehMeu;
             });
-            const file=document.getElementById('ticket-chat-file'); if(file) file.disabled=!ehMeu;
+            const file=document.getElementById('ticket-chat-file'); if(file) file.disabled=encerrado||!ehMeu;
 
             const status=document.getElementById('ticket-chat-status');
             if(status){
-                if(!ehMeu){
+                if(encerrado){
+                    status.classList.add('access-lock');
+                    status.dataset.accessLock='1';
+                    status.textContent='Atendimento encerrado. Este histórico está disponível somente para consulta.';
+                } else if(!ehMeu){
                     status.classList.add('access-lock');
                     status.dataset.accessLock='1';
                     status.textContent=ownerId
@@ -9439,7 +9474,7 @@
                     status.classList.remove('access-lock'); delete status.dataset.accessLock; status.textContent='';
                 }
             }
-            if(!ehMeu) fecharEmojiPickerChat();
+            if(encerrado||!ehMeu) fecharEmojiPickerChat();
         }
 
         async function iniciarAtendimentoTicket(ticketNumber, triggerButton = null, abrirChatDepois = false) {
@@ -9528,40 +9563,93 @@
             finally{if(btn){btn.disabled=false;btn.innerHTML=old;}}
         }
 
+        function centralAtendimentosVisivel(){
+            const tab=document.getElementById('tab-tickets');
+            const activeView=document.getElementById('tickets-view-active');
+            return !!tab && !tab.classList.contains('hidden') && !!activeView && !activeView.classList.contains('hidden');
+        }
+        function agendarSincronizacaoAtendimentosRealtime(delay=90){
+            // Debounce curto: várias mensagens/eventos do mesmo atendimento podem chegar
+            // em sequência. Fazemos uma única leitura consolidada sem perder tempo real.
+            clearTimeout(window.atendimentosRealtimeSyncTimer);
+            window.atendimentosRealtimeSyncTimer=setTimeout(()=>{
+                if(!centralAtendimentosVisivel()) {
+                    window.activeTicketsLoaded=false;
+                    return;
+                }
+                atualizarListaConversasChat(true).catch(()=>{});
+            }, Math.max(30, Number(delay||90)));
+        }
         function textoConversaChat(item={}){
             const nome=String(item.clienteNome||item.nomeCliente||'Cliente não cadastrado').trim();
             const area=String(item.area||item.menuOptionTitle||'').trim();
-            return `${nome} ${item.ticketNumber||''} ${area} ${item.advogadoResponsavelNome||''}`.toLowerCase();
+            const whatsapp=String(item.whatsapp||'').trim();
+            return `${nome} ${item.ticketNumber||''} ${area} ${whatsapp} ${item.advogadoResponsavelNome||''} ${item.internalStatus?.nome||''}`.toLowerCase();
+        }
+        function atualizarIndicadoresCentralAtendimentos(resumo={}){
+            const ativos=document.getElementById('atendimentos-metric-active');
+            const unread=document.getElementById('atendimentos-metric-unread');
+            if(ativos)ativos.textContent=String(Number(resumo.ativos||0));
+            if(unread)unread.textContent=String(Number(resumo.mensagensNaoLidas||0));
+            // Mantém os badges globais coerentes com a central.
+            atualizarBadgeMensagensNaoLidasTickets(Number(resumo.mensagensNaoLidas||0));
         }
         function renderizarListaConversasChat(){
             const box=document.getElementById('chat-conversations-list'); if(!box)return;
             const termo=String(document.getElementById('chat-conversations-search')?.value||'').trim().toLowerCase();
-            const ativos=[...(window.activeTicketsData||[])].sort((a,b)=>Number(b.lastActivity||b.updatedAt||0)-Number(a.lastActivity||a.updatedAt||0));
-            const itens=ativos.filter(item=>!termo||textoConversaChat(item).includes(termo));
+            const conversas=[...(window.atendimentosConversasData||[])];
+            const itens=conversas.filter(item=>!termo||textoConversaChat(item).includes(termo));
             box.replaceChildren();
-            if(!itens.length){box.innerHTML='<div class="chat-conversations-empty">Nenhuma conversa encontrada.</div>';return;}
+            if(!itens.length){box.innerHTML='<div class="chat-conversations-empty">Nenhum atendimento encontrado.</div>';return;}
             const frag=document.createDocumentFragment();
             itens.forEach(item=>{
                 const numero=String(item.ticketNumber||'');
                 const btn=document.createElement('button');btn.type='button';btn.className='chat-conversation-item';
+                if(item.isArchived||item.isActive===false)btn.classList.add('archived');
                 if(numero===String(window.activeChatTicketNumber||''))btn.classList.add('active');
                 if(item.temMensagemNaoLida)btn.classList.add('unread');
                 const inicial=String(item.clienteNome||'C').trim().charAt(0).toUpperCase()||'C';
                 const nome=escapeHtmlChat(item.clienteNome||'Cliente não cadastrado');
                 const area=escapeHtmlChat(item.area||item.menuOptionTitle||'Sem área');
-                const status=escapeHtmlChat(item.internalStatus?.nome||item.statusLabel||item.status||'Em atendimento');
-                const hora=item.lastActivity?new Date(Number(item.lastActivity)).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
-                btn.innerHTML=`<span class="chat-conversation-avatar">${escapeHtmlChat(inicial)}</span><span class="chat-conversation-copy"><span class="chat-conversation-line"><strong>${nome}</strong><time>${hora}</time></span><span class="chat-conversation-preview">${area} · ${status}</span><span class="chat-conversation-ticket">${escapeHtmlChat(numero)}</span></span>${item.temMensagemNaoLida?'<span class="chat-conversation-unread"></span>':''}`;
-                btn.onclick=()=>{ if(numero&&numero!==String(window.activeChatTicketNumber||'')) abrirChatTicket(numero,btn); };
+                const status=item.isArchived||item.isActive===false?'Encerrado':escapeHtmlChat(item.internalStatus?.nome||item.statusLabel||item.status||'Em atendimento');
+                const dataRef=Number(item.lastActivity||item.archivedAt||0);
+                const hora=dataRef?new Date(dataRef).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}):'';
+                const encerrado=item.isArchived||item.isActive===false?'<span class="chat-conversation-archived"><i class="bi bi-archive"></i> encerrado</span>':'';
+                btn.innerHTML=`<span class="chat-conversation-avatar">${escapeHtmlChat(inicial)}</span><span class="chat-conversation-copy"><span class="chat-conversation-line"><strong>${nome}${encerrado}</strong><time>${hora}</time></span><span class="chat-conversation-preview">${area} · ${status}</span><span class="chat-conversation-ticket">${escapeHtmlChat(numero)}</span></span>${item.temMensagemNaoLida?'<span class="chat-conversation-unread"></span>':''}`;
+                btn.onclick=()=>abrirChatTicket(numero,btn);
                 frag.appendChild(btn);
             });
             box.appendChild(frag);
         }
         async function atualizarListaConversasChat(forcar=false){
+            if(window.atendimentosConversasLoading&&!forcar)return;
+            const apenasAtivos=document.getElementById('chat-filter-active')?.checked!==false;
+            window.atendimentosConversasLoading=true;
             try{
-                if(forcar||!(window.activeTicketsData||[]).length){window.activeTicketsLoaded=false;await carregarTicketsAtivos(true);}
-            }catch(_){}
-            renderizarListaConversasChat();
+                const res=await fetch(`/api/tickets/conversations?includeArchived=${apenasAtivos?'0':'1'}`,{cache:'no-store'});
+                const data=await res.json().catch(()=>({}));
+                if(!res.ok)throw new Error(data.erro||'Não foi possível carregar os atendimentos.');
+                window.atendimentosConversasData=Array.isArray(data.conversations)?data.conversations:[];
+                window.ticketStatusOptions=Array.isArray(data.ticketStatusOptions)?data.ticketStatusOptions:(window.ticketStatusOptions||[]);
+                // Compatibilidade com as rotinas operacionais existentes: somente os ativos
+                // entram na coleção usada por claim/status/transferência.
+                window.activeTicketsData=window.atendimentosConversasData.filter(item=>item.isActive!==false&&!item.isArchived);
+                window.activeTicketsLoaded=true;
+                atualizarIndicadoresCentralAtendimentos(data.resumo||{});
+                renderizarListaConversasChat();
+                const atual=String(window.activeChatTicketNumber||'');
+                if(!atual&&window.atendimentosConversasData.length){
+                    const primeiro=window.atendimentosConversasData[0];
+                    if(primeiro?.ticketNumber)abrirChatTicket(primeiro.ticketNumber);
+                }
+            }catch(err){
+                const box=document.getElementById('chat-conversations-list');
+                if(box)box.innerHTML=`<div class="chat-conversations-empty">${escapeHtmlChat(err.message||'Erro ao carregar atendimentos.')}</div>`;
+            }finally{window.atendimentosConversasLoading=false;}
+        }
+        async function inicializarCentralAtendimentos(){
+            marcarNotificacoesTicketsComoVistas();
+            await atualizarListaConversasChat(true);
         }
 
         async function abrirChatTicket(ticketNumber, triggerButton = null) {
@@ -9573,7 +9661,8 @@
             window.activeChatTicketNumber=String(ticketNumber||''); window.activeChatMessages=[]; window.activeChatOldest=null;
             window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null;
             if(history) history.innerHTML='<div class="chat-empty">Carregando conversa...</div>';
-            if(dialog && !dialog.open) { if(typeof dialog.showModal==='function') dialog.showModal(); else dialog.setAttribute('open',''); }
+            if(dialog && typeof dialog.showModal==='function' && !dialog.open) dialog.showModal();
+            document.querySelector('.ticket-chat-workspace')?.classList.add('chat-mobile-open');
             renderizarListaConversasChat();
             if(triggerButton){triggerButton.disabled=true;triggerButton.innerHTML='<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> Abrindo...';}
 
@@ -9590,9 +9679,10 @@
                 sincronizarDocumentosMensagensChat();
                 renderizarDocumentosChat(window.activeChatDocuments);
                 window.activeChatTicketData=data.ticket||{};
-                const localTicket=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber)===String(ticketNumber));
+                const localTicket=(window.atendimentosConversasData||[]).find(item=>String(item.ticketNumber)===String(ticketNumber))||(window.activeTicketsData||[]).find(item=>String(item.ticketNumber)===String(ticketNumber));
                 if(localTicket){localTicket.temMensagemNaoLida=false;localTicket.chatLidoEm=data.readAt||Date.now();}
-                recalcularResumoTicketsLocal(); filtrarTicketsAtivos();
+                if(data.ticket?.isActive!==false&&!data.ticket?.isArchived){recalcularResumoTicketsLocal();}
+                atualizarIndicadoresCentralAtendimentos({ativos:(window.activeTicketsData||[]).length,mensagensNaoLidas:(window.activeTicketsData||[]).filter(t=>t.temMensagemNaoLida).length});
                 renderizarChat(window.activeChatMessages,window.activeChatHasMore);
                 atualizarEstadoAtendimentoChat(data.ticket||{});
                 renderizarListaConversasChat();
@@ -9604,7 +9694,7 @@
             }
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
-        function fecharChatTicket() { cancelarEdicaoChat(false); const d=document.getElementById('ticket-chat-dialog'); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; window.activeChatTriageDetails=null; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharTriagemChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); if(!d)return; if(typeof d.close==='function')d.close(); else d.removeAttribute('open'); }
+        function fecharChatTicket() { cancelarEdicaoChat(false); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; window.activeChatTriageDetails=null; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharTriagemChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); document.querySelector('.ticket-chat-workspace')?.classList.remove('chat-mobile-open'); const h=document.getElementById('ticket-chat-history'); if(h)h.innerHTML='<div class="chat-empty">Selecione um atendimento na lista ao lado.</div>'; renderizarListaConversasChat(); }
         async function carregarMensagensAnterioresChat() {
             if(!window.activeChatTicketNumber||!window.activeChatOldest) return;
             const history=document.getElementById('ticket-chat-history'); const beforeHeight=history?.scrollHeight||0;

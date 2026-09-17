@@ -5840,6 +5840,21 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
         console.warn(`[Histórico] Não foi possível registrar imediatamente o ticket ${ticket.ticketNumber}:`, err?.message || err);
     });
 
+    // Atualização em tempo real da Central de Atendimentos. Este evento é separado
+    // das notificações visuais porque TODO atendimento criado deve aparecer na lista
+    // lateral imediatamente, inclusive os iniciados pelo próprio escritório.
+    io.emit('ticket_conversation_created', {
+        ticketNumber: ticket.ticketNumber,
+        clienteNome: ticket.clienteNome || null,
+        whatsapp: contato.numeroPrincipal || ticket.numeroReal || null,
+        status: ticket.status || null,
+        origem: ticket.origem || 'organico',
+        createdAt: ticket.createdAt,
+        lastActivity: ticket.lastActivity || ticket.createdAt,
+        isActive: true,
+        isArchived: false
+    });
+
     // LEADS DE ANÚNCIO entram automaticamente no CRM no mesmo instante em que
     // o ticket é criado. A falha do CRM nunca impede a abertura do atendimento.
     // O resultado é reaproveitado pela notificação para abrir o lead diretamente.
@@ -9437,19 +9452,17 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
     if (!ticketMessagesColl || !ticketsColl) return res.status(503).json({ erro: 'Chat ainda não está disponível.' });
     try {
         const ticketNumber = String(req.params.ticketNumber || '').trim();
-        const ticket = await ticketsColl.findOne({ ticketNumber });
-        if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+        const [ticketAtivo, historicoChat] = await Promise.all([
+            ticketsColl.findOne({ ticketNumber }),
+            ticketHistoryColl ? ticketHistoryColl.findOne({ _id: ticketNumber }) : Promise.resolve(null)
+        ]);
+        const ticket = ticketAtivo || historicoChat;
+        if (!ticket) return res.status(404).json({ erro: 'Atendimento não encontrado.' });
+        const atendimentoAtivo = !!ticketAtivo;
 
         // A análise dos anexos fica persistida no ticket/histórico e é carregada junto
-        // do chat. Assim o resumo da IA acompanha a própria mensagem mesmo após
-        // reinicializações do servidor ou troca de advogado responsável.
-        const historicoChat = ticketHistoryColl
-            ? await ticketHistoryColl.findOne(
-                { _id: ticketNumber },
-                { projection: { documentosIA: 1, respostasTriagem: 1, perguntasTriagem: 1, triagemConcluidaEm: 1 } }
-            )
-            : null;
-        const documentosIAChat = mesclarDocumentosIATicket(ticket, historicoChat || {}, { detalhado: true });
+        // do chat. Atendimentos encerrados continuam consultáveis em modo somente leitura.
+        const documentosIAChat = mesclarDocumentosIATicket(ticketAtivo || {}, historicoChat || {}, { detalhado: true });
         const documentoIAPorMensagem = new Map(
             documentosIAChat
                 .filter(doc => doc?.messageId)
@@ -9471,15 +9484,28 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
         const lidoEm = docs.length
             ? Math.max(...docs.map(item => item.createdAt instanceof Date ? item.createdAt.getTime() : Number(item.createdAt || 0)).filter(Number.isFinite))
             : Date.now();
-        await marcarTicketChatComoLido(ticketNumber, req, lidoEm).catch(() => {});
+        if (atendimentoAtivo) {
+            await marcarTicketChatComoLido(ticketNumber, req, lidoEm).catch(() => {});
+        } else if (ticketHistoryColl) {
+            const chaveLeitura = chaveLeituraChatUsuario(req);
+            if (chaveLeitura) {
+                await ticketHistoryColl.updateOne(
+                    { _id: ticketNumber },
+                    { $set: { [`chatLeituras.${chaveLeitura}`]: lidoEm } }
+                ).catch(() => {});
+            }
+        }
         res.json({
             readAt: lidoEm,
             ticket: (() => {
-                const classificacao = classificarPendenciaTicket(ticket);
+                const classificacao = atendimentoAtivo ? classificarPendenciaTicket(ticket) : { statusLabel: 'Encerrado', tipo: 'encerrado', label: 'Encerrado' };
                 const triagemBase = dadosTriagemTicket(ticket, historicoChat || {});
                 const triagem = progressoTriagemTicket(triagemBase.ticket, triagemBase.respostas);
                 return {
                     ticketNumber,
+                    isActive: atendimentoAtivo,
+                    isArchived: !atendimentoAtivo,
+                    archivedAt: !atendimentoAtivo ? Number(historicoChat?.archivedAt || historicoChat?.closedAt || 0) || null : null,
                     clienteNome: ticket.clienteNome || null,
                     whatsapp: whatsappDoTicket(ticket),
                     area: ticket.area || ticket.menuOptionTitle || null,
@@ -9539,9 +9565,10 @@ app.get('/api/tickets/:ticketNumber/chat/triage', async (req, res) => {
                 : Promise.resolve(null)
         ]);
 
-        if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+        const ticketBase = ticket || historico;
+        if (!ticketBase) return res.status(404).json({ erro: 'Atendimento não encontrado.' });
 
-        const triagemBase = dadosTriagemTicket(ticket, historico || {});
+        const triagemBase = dadosTriagemTicket(ticketBase, historico || {});
         const respostas = triagemBase.respostas;
         const triagem = progressoTriagemTicket(triagemBase.ticket, respostas);
 
@@ -9584,9 +9611,9 @@ app.get('/api/tickets/:ticketNumber/chat/documents', async (req, res) => {
                 : Promise.resolve(null)
         ]);
 
-        if (!ticket) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
+        if (!ticket && !historico) return res.status(404).json({ erro: 'Atendimento não encontrado.' });
 
-        const documents = mesclarDocumentosIATicket(ticket, historico || {}, { detalhado: true });
+        const documents = mesclarDocumentosIATicket(ticket || {}, historico || {}, { detalhado: true });
         return res.json({
             ticketNumber,
             documents,
@@ -9619,11 +9646,17 @@ app.get('/api/tickets/:ticketNumber/chat/media/:messageId', async (req, res) => 
 
         let mediaRef = doc.mediaRef || null;
         if (!mediaRef) {
-            const ticket = await ticketsColl.findOne(
-                { ticketNumber, 'documentosIA.messageId': messageId },
-                { projection: { documentosIA: { $elemMatch: { messageId } } } }
-            );
-            const retryRef = ticket?.documentosIA?.[0]?.retryRef || null;
+            const [ticket, historico] = await Promise.all([
+                ticketsColl.findOne(
+                    { ticketNumber, 'documentosIA.messageId': messageId },
+                    { projection: { documentosIA: { $elemMatch: { messageId } } } }
+                ),
+                ticketHistoryColl ? ticketHistoryColl.findOne(
+                    { _id: ticketNumber, 'documentosIA.messageId': messageId },
+                    { projection: { documentosIA: { $elemMatch: { messageId } } } }
+                ) : Promise.resolve(null)
+            ]);
+            const retryRef = ticket?.documentosIA?.[0]?.retryRef || historico?.documentosIA?.[0]?.retryRef || null;
             if (retryRef) {
                 try {
                     const dadosAntigos = JSON.parse(String(retryRef), BufferJSON.reviver);
@@ -9782,8 +9815,8 @@ app.post('/api/tickets/:ticketNumber/transfer', async (req, res) => {
 });
 
 // Encerramento/arquivamento manual pelo painel. O ticket sai de active_tickets,
-// permanece registrado em ticket_history e o histórico leve do chat continua
-// disponível até o prazo normal de retenção.
+// permanece registrado em ticket_history e continua disponível na Central de
+// Atendimentos como histórico somente leitura (a interface exibe os últimos 6 meses).
 app.post('/api/tickets/:ticketNumber/archive', async (req, res) => {
     if (!usuarioPode(req, 'tickets')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para encerrar tickets.' });
     if (!ticketsColl || !ticketHistoryColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
@@ -10104,6 +10137,146 @@ app.post(
     }
 );
 
+
+// Visão unificada da Central de Atendimentos.
+// `active_tickets` continua sendo a fonte operacional do bot. Quando solicitado,
+// a interface também recebe atendimentos encerrados nos últimos 6 meses a partir
+// de `ticket_history`, sem reativá-los nem permitir novos envios.
+app.get('/api/tickets/conversations', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).json({ erro: 'Acesso negado' });
+    if (!usuarioPode(req, 'tickets')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para os atendimentos.' });
+    if (!ticketsColl) return res.status(503).json({ erro: 'Banco de dados ainda não está disponível.' });
+
+    try {
+        const incluirEncerrados = String(req.query.includeArchived || '') === '1';
+        const agora = Date.now();
+        const inicioHistorico = new Date(agora);
+        inicioHistorico.setMonth(inicioHistorico.getMonth() - 6);
+        const inicioHistoricoMs = inicioHistorico.getTime();
+        const chaveLeitura = chaveLeituraChatUsuario(req);
+
+        const ativos = await ticketsColl.find({}, {
+            projection: {
+                ticketNumber: 1, status: 1, clienteNome: 1, cpf: 1, numeroReal: 1,
+                whatsappNumbers: 1, identificadores: 1, area: 1, menuOptionTitle: 1,
+                menuOptionEmoji: 1, createdAt: 1, lastActivity: 1, lastInboundChatAt: 1,
+                chatLeituras: 1, advogadoResponsavelId: 1, advogadoResponsavelNome: 1,
+                atendimentoAssumidoEm: 1, internalStatusId: 1, paused: 1, origem: 1
+            }
+        }).toArray();
+
+        const conversasAtivas = ativos.map(ticket => {
+            const classificacao = classificarPendenciaTicket(ticket);
+            const ultimaMensagemClienteEm = Number(ticket.lastInboundChatAt || 0) || null;
+            const chatLidoEm = timestampLeituraChatTicket(ticket, chaveLeitura);
+            const temMensagemNaoLida = !!ultimaMensagemClienteEm && ultimaMensagemClienteEm > chatLidoEm;
+            return {
+                ticketNumber: ticket.ticketNumber || null,
+                clienteNome: ticket.clienteNome || null,
+                cpf: ticket.cpf || null,
+                whatsapp: whatsappDoTicket(ticket),
+                area: ticket.area || ticket.menuOptionTitle || null,
+                menuOptionTitle: ticket.menuOptionTitle || null,
+                menuOptionEmoji: ticket.menuOptionEmoji || '',
+                status: ticket.status || null,
+                statusLabel: classificacao.statusLabel,
+                pendenciaTipo: classificacao.tipo,
+                pendenciaLabel: classificacao.label,
+                createdAt: Number(ticket.createdAt || 0) || null,
+                lastActivity: Number(ticket.lastActivity || ticket.createdAt || 0) || null,
+                advogadoResponsavelId: ticket.advogadoResponsavelId || null,
+                advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
+                atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null,
+                internalStatusId: ticket.internalStatusId || null,
+                internalStatus: statusTicketPorId(ticket.internalStatusId),
+                origem: ticket.origem || 'organico',
+                ultimaMensagemClienteEm,
+                chatLidoEm: chatLidoEm || null,
+                temMensagemNaoLida,
+                isActive: true,
+                isArchived: false,
+                archivedAt: null
+            };
+        });
+
+        let conversasEncerradas = [];
+        if (incluirEncerrados && ticketHistoryColl) {
+            const historicos = await ticketHistoryColl.find({
+                $and: [
+                    { _id: { $nin: conversasAtivas.map(item => item.ticketNumber).filter(Boolean) } },
+                    {
+                        $or: [
+                            { archivedAt: { $gte: inicioHistoricoMs } },
+                            { closedAt: { $gte: inicioHistoricoMs } },
+                            { updatedAt: { $gte: inicioHistoricoMs }, status: { $regex: /^encerrado/i } }
+                        ]
+                    }
+                ]
+            }, {
+                projection: {
+                    ticketNumber: 1, status: 1, clienteNome: 1, cpf: 1, numeroReal: 1,
+                    whatsappNumbers: 1, identificadores: 1, area: 1, menuOptionTitle: 1,
+                    menuOptionEmoji: 1, createdAt: 1, lastActivity: 1, updatedAt: 1,
+                    archivedAt: 1, closedAt: 1, advogadoResponsavelId: 1,
+                    advogadoResponsavelNome: 1, atendimentoAssumidoEm: 1,
+                    internalStatusId: 1, origem: 1
+                }
+            }).sort({ archivedAt: -1, closedAt: -1, updatedAt: -1 }).limit(3000).toArray();
+
+            conversasEncerradas = historicos.map(item => {
+                const ticketNumber = String(item.ticketNumber || item._id || '');
+                const encerradoEm = Number(item.archivedAt || item.closedAt || item.updatedAt || item.lastActivity || item.createdAt || 0) || null;
+                return {
+                    ticketNumber,
+                    clienteNome: item.clienteNome || null,
+                    cpf: item.cpf || null,
+                    whatsapp: whatsappDoTicket(item),
+                    area: item.area || item.menuOptionTitle || null,
+                    menuOptionTitle: item.menuOptionTitle || null,
+                    menuOptionEmoji: item.menuOptionEmoji || '',
+                    status: item.status || 'encerrado',
+                    statusLabel: 'Encerrado',
+                    pendenciaTipo: 'encerrado',
+                    pendenciaLabel: 'Encerrado',
+                    createdAt: Number(item.createdAt || 0) || null,
+                    lastActivity: encerradoEm,
+                    advogadoResponsavelId: item.advogadoResponsavelId || null,
+                    advogadoResponsavelNome: item.advogadoResponsavelNome || null,
+                    atendimentoAssumidoEm: item.atendimentoAssumidoEm || null,
+                    internalStatusId: item.internalStatusId || null,
+                    internalStatus: statusTicketPorId(item.internalStatusId),
+                    origem: item.origem || 'organico',
+                    ultimaMensagemClienteEm: null,
+                    chatLidoEm: null,
+                    temMensagemNaoLida: false,
+                    isActive: false,
+                    isArchived: true,
+                    archivedAt: encerradoEm
+                };
+            }).filter(item => item.ticketNumber);
+        }
+
+        const conversations = [...conversasAtivas, ...conversasEncerradas]
+            .sort((a, b) => Number(b.lastActivity || 0) - Number(a.lastActivity || 0));
+
+        return res.json({
+            generatedAt: agora,
+            historyMonths: 6,
+            includeArchived: incluirEncerrados,
+            resumo: {
+                ativos: conversasAtivas.length,
+                mensagensNaoLidas: conversasAtivas.filter(item => item.temMensagemNaoLida).length,
+                encerradosExibidos: conversasEncerradas.length,
+                exibidos: conversations.length
+            },
+            ticketStatusOptions: statusTicketsAtivos(),
+            conversations
+        });
+    } catch (err) {
+        console.error('[Atendimentos] Erro ao carregar central de conversas:', err);
+        return res.status(500).json({ erro: 'Não foi possível carregar os atendimentos.' });
+    }
+});
 
 // Resumo leve de mensagens não lidas para o menu lateral.
 // Não depende de o usuário abrir a tela de Tickets: o frontend consulta este
