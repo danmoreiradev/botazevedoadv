@@ -3802,7 +3802,9 @@
             #app-sidebar{transition:width .20s ease,min-width .20s ease,transform .20s ease,opacity .15s ease;}
             body.atendimentos-menu-recolhido #app-sidebar{width:0!important;min-width:0!important;transform:translateX(-100%);opacity:0;pointer-events:none;border-right:0;}
             body.atendimentos-menu-recolhido .main-content{width:100%;}
-            body.atendimentos-menu-recolhido .mobile-menu-btn{display:inline-flex;}
+            /* No desktop, o botão hambúrguer continua exclusivo do layout mobile.
+               A Central de Atendimentos já possui seu próprio botão para restaurar a sidebar. */
+            body.atendimentos-menu-recolhido .mobile-menu-btn{display:none!important;}
         }
         html[data-theme="dark"] .atendimentos-sidebar-toggle{color:#c6cfd5;background:#202c33;border-color:#2f3b43;}
         @media(max-width:991.98px){#tab-tickets{margin:-26px -22px -34px!important;width:calc(100% + 44px)!important;height:calc(100dvh - 70px)}#tab-tickets>.tickets-subnav{right:12px;top:8px}.atendimentos-central-header{padding-right:310px;}}
@@ -4252,6 +4254,7 @@
         </div>
     
                 </div>
+            </div>
             </div>
 
             <div id="tickets-view-crm" class="tickets-subview hidden">
