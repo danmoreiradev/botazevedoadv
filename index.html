@@ -879,8 +879,12 @@
             justify-content:space-between; gap:12px; border-bottom:1px solid var(--border);
         }
         .notification-popover-title { color:var(--adv-blue); font-size:.88rem; font-weight:800; }
-        .notification-mark-all { padding:4px 7px; color:#69727f; background:transparent; border:0; font-size:.70rem; font-weight:700; }
-        .notification-mark-all:hover { color:var(--adv-blue); }
+        .notification-popover-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:flex-end;}
+        .notification-mark-all,.notification-clear-all{padding:4px 7px;background:transparent;border:0;font-size:.70rem;font-weight:700;border-radius:7px;}
+        .notification-mark-all{color:#69727f;}
+        .notification-mark-all:hover{color:var(--adv-blue);background:#f3f5f7;}
+        .notification-clear-all{color:#9a4540;}
+        .notification-clear-all:hover{color:#fff;background:var(--danger-red);}
         .notification-list { overflow-y:auto; }
         .notification-empty { padding:34px 20px; color:var(--text-muted); text-align:center; font-size:.82rem; }
         .notification-item {
@@ -3680,6 +3684,20 @@
         .ticket-status-legend{display:inline-flex;align-items:center;gap:9px;flex-wrap:wrap;}
         .ticket-status-legend-item{display:inline-flex;align-items:center;gap:5px;color:var(--text-muted);font-size:.66rem;font-weight:680;}
         .ticket-status-legend-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;}
+        .ticket-chat-status-legend{min-height:29px;padding:5px 14px 6px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:#fbfcfb;border-bottom:1px solid #e7ebe9;overflow:hidden;}
+        .ticket-status-legend-label{display:inline-flex;align-items:center;gap:5px;color:#7b8781;font-size:.63rem;font-weight:800;text-transform:uppercase;letter-spacing:.035em;white-space:nowrap;}
+        .ticket-status-legend-label i{font-size:.67rem;color:#8b9690;}
+        .ticket-chat-status-legend .ticket-status-legend-item{max-width:230px;padding:2px 0;}
+        .ticket-chat-status-legend .ticket-status-legend-item>span{max-width:205px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .ticket-status-legend-empty{color:#9aa39f;font-size:.64rem;}
+        html[data-theme="dark"] .ticket-chat-status-legend{background:#20252d;border-color:#353b46;}
+        html[data-theme="dark"] .ticket-status-legend-label{color:#aab4ae;}
+        @media(max-width:767.98px){
+            .ticket-chat-status-legend{min-height:28px;padding:4px 7px!important;gap:8px;flex-wrap:nowrap!important;overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+            .ticket-chat-status-legend::-webkit-scrollbar{display:none;}
+            .ticket-chat-status-legend .ticket-status-legend-item{flex:0 0 auto;max-width:180px;}
+            .ticket-chat-status-legend .ticket-status-legend-item>span{max-width:155px;}
+        }
         .ticket-internal-status{min-width:145px;max-width:190px;height:34px;padding:5px 27px 5px 10px;border-radius:999px;font-size:.70rem;font-weight:760;background-color:#fff;}
         .ticket-internal-status:disabled{opacity:.6;}
         #crm-lead-dialog::backdrop{background:rgba(17,22,30,.56)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
@@ -3802,8 +3820,10 @@
             #app-sidebar{transition:width .20s ease,min-width .20s ease,transform .20s ease,opacity .15s ease;}
             body.atendimentos-menu-recolhido #app-sidebar{width:0!important;min-width:0!important;transform:translateX(-100%);opacity:0;pointer-events:none;border-right:0;}
             body.atendimentos-menu-recolhido .main-content{width:100%;}
-            /* No desktop, o botão hambúrguer continua exclusivo do layout mobile.
-               A Central de Atendimentos já possui seu próprio botão para restaurar a sidebar. */
+            /* Atendimentos em desktop usa toda a área útil: sidebar e cabeçalho somem juntos.
+               O botão da própria Central restaura os dois elementos de uma só vez. */
+            body.atendimentos-menu-recolhido .topbar{display:none!important;}
+            body.atendimentos-menu-recolhido #tab-tickets:not(.crm-mode){height:100dvh!important;}
             body.atendimentos-menu-recolhido .mobile-menu-btn{display:none!important;}
         }
         html[data-theme="dark"] .atendimentos-sidebar-toggle{color:#c6cfd5;background:#202c33;border-color:#2f3b43;}
@@ -4397,6 +4417,7 @@
 
             body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-header,
             body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-operations,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-status-legend,
             body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .chat-triage-panel,
             body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-user,
             body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-archived-banner,
@@ -4490,6 +4511,26 @@
         }
     </style>
 
+
+    <style id="chat-send-whatsapp-v344">
+        #ticket-chat-send.hidden, #ticket-chat-record.hidden { display:none !important; }
+        #ticket-chat-send {
+            flex:0 0 45px;
+            align-self:end;
+            box-shadow:none;
+            transition:transform .14s ease, background .14s ease, opacity .14s ease;
+        }
+        #ticket-chat-send:not(:disabled):active { transform:scale(.94); }
+        @media (max-width:767.98px) {
+            body.atendimentos-chat-mobile-aberto #ticket-chat-send,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-record {
+                width:42px !important;
+                min-width:42px !important;
+                height:42px !important;
+                flex:0 0 42px !important;
+            }
+        }
+    </style>
 
     <style id="app-feedback-system-v34">
         /* V3.4 — feedback global, confirmações e carregamento */
@@ -4897,7 +4938,10 @@
                         <div id="notification-popover" class="notification-popover hidden" role="dialog" aria-label="Notificações recentes">
                             <div class="notification-popover-header">
                                 <span class="notification-popover-title">Notificações</span>
-                                <button type="button" class="notification-mark-all" onclick="marcarTodasNotificacoesComoLidas(event)">Marcar como lidas</button>
+                                <div class="notification-popover-actions">
+                                    <button type="button" class="notification-mark-all" onclick="marcarTodasNotificacoesComoLidas(event)">Marcar como lidas</button>
+                                    <button type="button" class="notification-clear-all" onclick="limparNotificacoesPainel(event)"><i class="bi bi-trash3 me-1"></i>Limpar</button>
+                                </div>
                             </div>
                             <div id="notification-list" class="notification-list">
                                 <div class="notification-empty">Nenhuma notificação nova.</div>
@@ -5196,6 +5240,8 @@
                 </div>
             </div>
 
+            <div class="ticket-status-legend ticket-chat-status-legend hidden" id="ticket-status-legend" data-ticket-status-legend aria-label="Legenda dos status internos cadastrados"></div>
+
             <section class="chat-triage-panel hidden" id="chat-triage-panel" aria-label="Perguntas e respostas da triagem">
                 <div class="chat-triage-header">
                     <div>
@@ -5247,10 +5293,11 @@
                     <div id="ticket-chat-emoji-picker" class="chat-emoji-picker hidden" aria-label="Seletor de emojis"></div>
                     <div id="chat-quick-suggestions" class="chat-quick-suggestions hidden" role="listbox" aria-label="Textos rápidos"></div>
                     <div id="chat-recording-bar" class="chat-recording-bar hidden"><span class="chat-recording-dot"></span><span class="chat-recording-time" id="chat-recording-time">00:00</span><span class="chat-recording-label">Gravando áudio…</span><button type="button" class="chat-recording-cancel" onclick="cancelarGravacaoChat()">Cancelar</button><button type="button" class="chat-recording-send" onclick="finalizarGravacaoChat(true)" title="Enviar áudio"><i class="bi bi-send-fill"></i></button></div>
-                    <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" placeholder="Digite uma mensagem · Enter envia · Shift+Enter quebra linha" onkeydown="atalhoEnviarChat(event)"></textarea>
+                    <textarea id="ticket-chat-input" class="chat-compose-input" rows="1" maxlength="12000" enterkeyhint="enter" placeholder="Digite uma mensagem · Enter envia · Shift+Enter quebra linha" onkeydown="atalhoEnviarChat(event)"></textarea>
                     <div class="chat-paste-hint"><i class="bi bi-lightning-charge"></i> Enter envia · Shift+Enter quebra linha · /atalho · Ctrl+V</div>
                 </div>
-                <button type="button" class="chat-record-btn" id="ticket-chat-record" onclick="toggleGravacaoChat()" title="Gravar áudio"><i class="bi bi-mic-fill"></i></button>
+                <button type="submit" class="chat-send-btn hidden" id="ticket-chat-send" title="Enviar mensagem" aria-label="Enviar mensagem"><i class="bi bi-send-fill"></i></button>
+                <button type="button" class="chat-record-btn" id="ticket-chat-record" onclick="toggleGravacaoChat()" title="Gravar áudio" aria-label="Gravar áudio"><i class="bi bi-mic-fill"></i></button>
 
                 <div class="chat-compose-status" id="ticket-chat-status"></div>
             </form>
@@ -6112,13 +6159,38 @@
         }
         function aplicarTextoRapidoNoChat(item) {
             const input=document.getElementById('ticket-chat-input'); if(!input||!item)return;
-            input.value=String(item.text||''); esconderSugestoesTextosRapidos(); ajustarAlturaComposerChat(); input.focus();
+            input.value=String(item.text||''); esconderSugestoesTextosRapidos(); ajustarAlturaComposerChat(); atualizarAcaoEnvioChat(); input.focus();
             input.setSelectionRange(input.value.length,input.value.length);
             const status=document.getElementById('ticket-chat-status'); if(status){status.textContent=`/${item.shortcut} inserido. Revise e envie quando quiser.`;setTimeout(()=>{if(status.textContent.includes('inserido'))status.textContent='';},1800);}
         }
+        function chatEmViewportMobile() {
+            return window.matchMedia?.('(max-width: 767.98px)')?.matches === true;
+        }
+
+        function atualizarAcaoEnvioChat() {
+            const input=document.getElementById('ticket-chat-input');
+            const send=document.getElementById('ticket-chat-send');
+            const record=document.getElementById('ticket-chat-record');
+            if(!input||!send||!record)return;
+
+            const temTexto=String(input.value||'').trim().length>0;
+            const gravando=record.classList.contains('recording') || window.chatAudioRecorder?.state==='recording';
+
+            // WhatsApp: campo vazio mostra microfone; ao digitar, troca pela seta.
+            send.classList.toggle('hidden',!temTexto||gravando);
+            record.classList.toggle('hidden',temTexto&&!gravando);
+            send.disabled=input.disabled||!temTexto||window.activeChatCanSend!==true;
+            record.disabled=input.disabled||window.activeChatCanSend!==true;
+
+            input.placeholder=chatEmViewportMobile()
+                ? 'Digite uma mensagem'
+                : 'Digite uma mensagem · Enter envia · Shift+Enter quebra linha';
+        }
+
         function ajustarAlturaComposerChat() {
             const input=document.getElementById('ticket-chat-input'); if(!input)return;
             input.style.height='auto'; input.style.height=`${Math.min(130,Math.max(44,input.scrollHeight))}px`;
+            atualizarAcaoEnvioChat();
         }
 
         document.addEventListener('click',event=>{
@@ -6256,6 +6328,24 @@
             event?.stopPropagation();
             (window.panelNotifications || []).forEach(item => { item.lida = true; });
             salvarNotificacoesLocais(); atualizarIndicadoresNotificacao(); renderizarListaNotificacoes();
+        }
+        async function limparNotificacoesPainel(event) {
+            event?.stopPropagation();
+            const total=(window.panelNotifications||[]).length;
+            if(!total) {
+                AppUI?.toast?.('Não há notificações para limpar.',{title:'Central de notificações',type:'info'});
+                return;
+            }
+            const confirmou=await AppUI.confirm(
+                `As ${total === 1 ? 'notificação armazenada será removida' : `${total} notificações armazenadas serão removidas`} deste navegador.`,
+                {title:'Limpar notificações?',type:'danger',confirmText:'Limpar notificações'}
+            );
+            if(!confirmou)return;
+            window.panelNotifications=[];
+            salvarNotificacoesLocais();
+            atualizarIndicadoresNotificacao();
+            renderizarListaNotificacoes();
+            AppUI?.toast?.('A central de notificações foi limpa.',{title:'Notificações limpas',type:'success'});
         }
         function marcarNotificacoesTicketsComoVistas() {
             let alterou = false;
@@ -6495,7 +6585,7 @@
 
 
         socket.on('ticket_internal_status_updated', payload=>{const t=(window.activeTicketsData||[]).find(x=>String(x.ticketNumber)===String(payload?.ticketNumber));if(t){t.internalStatusId=payload.internalStatusId||null;t.internalStatus=payload.internalStatus||null;filtrarTicketsAtivos()}if(String(window.activeChatTicketNumber||'')===String(payload?.ticketNumber||'')){window.activeChatTicketData={...(window.activeChatTicketData||{}),internalStatusId:payload.internalStatusId||null,internalStatus:payload.internalStatus||null}}});
-        socket.on('ticket_parameters_updated', payload=>{window.ticketStatusOptions=Array.isArray(payload?.status)?payload.status:[];renderizarLegendaStatusTickets();if(window.activeTicketsData?.length)filtrarTicketsAtivos();if(window.ticketParametrosAdmin)carregarParametrosTickets(true)});
+        socket.on('ticket_parameters_updated', payload=>{window.ticketStatusOptions=Array.isArray(payload?.status)?payload.status:[];renderizarLegendaStatusTickets();if(window.activeChatTicketData)atualizarSeletorStatusChat(window.activeChatTicketData);if(window.activeTicketsData?.length)filtrarTicketsAtivos();if(window.ticketParametrosAdmin)carregarParametrosTickets(true)});
         socket.on('crm_parameters_updated', ()=>{window.crmLoaded=false;window.crmOptions=null;if(window.crmParametrosAdmin)carregarParametrosCRM(true)});
 
         socket.on('panel_user', user => {
@@ -8078,8 +8168,25 @@
         }
 
 
-        function renderizarLegendaStatusTickets(){const box=document.getElementById('ticket-status-legend');if(!box)return;box.replaceChildren();(window.ticketStatusOptions||[]).forEach(item=>{const span=document.createElement('span');span.className='ticket-status-legend-item';const dot=document.createElement('i');dot.className='ticket-status-legend-dot';dot.style.backgroundColor=item.cor||'#667085';const txt=document.createElement('span');txt.textContent=item.nome;span.append(dot,txt);box.appendChild(span)})}
-        function aplicarVisualStatusTicketSelect(select,statusId){const item=(window.ticketStatusOptions||[]).find(x=>String(x.id)===String(statusId||''));select.style.color=item?.cor||'';select.style.borderColor=item?.cor||'';select.style.boxShadow=item?`inset 3px 0 0 ${item.cor}`:'';}
+        function abreviarNomeStatusTicket(nome,max=24){const texto=String(nome||'Status').trim()||'Status';const limite=Math.max(10,Number(max)||24);return texto.length<=limite?texto:`${texto.slice(0,limite-1).trimEnd()}…`;}
+        function renderizarLegendaStatusTickets(){
+            const boxes=[...document.querySelectorAll('[data-ticket-status-legend]')];
+            const lista=(window.ticketStatusOptions||[]).filter(item=>item&&item.ativo!==false);
+            boxes.forEach(box=>{
+                box.replaceChildren();
+                box.classList.toggle('hidden',!lista.length);
+                if(!lista.length)return;
+                const label=document.createElement('span');label.className='ticket-status-legend-label';label.innerHTML='<i class="bi bi-palette2"></i><span>Legenda</span>';box.appendChild(label);
+                lista.forEach(item=>{
+                    const nome=String(item.nome||'Status').trim()||'Status';
+                    const span=document.createElement('span');span.className='ticket-status-legend-item';span.title=nome;
+                    const dot=document.createElement('i');dot.className='ticket-status-legend-dot';dot.style.backgroundColor=item.cor||'#667085';
+                    const txt=document.createElement('span');txt.textContent=abreviarNomeStatusTicket(nome,32);
+                    span.append(dot,txt);box.appendChild(span);
+                });
+            });
+        }
+        function aplicarVisualStatusTicketSelect(select,statusId){const item=(window.ticketStatusOptions||[]).find(x=>String(x.id)===String(statusId||''));select.style.color=item?.cor||'';select.style.borderColor=item?.cor||'';select.style.boxShadow=item?`inset 3px 0 0 ${item.cor}`:'';select.title=item?.nome?`Status interno: ${item.nome}`:'Alterar status interno do atendimento';}
         async function atualizarStatusInternoTicket(ticketNumber,statusId,select){const anterior=(window.activeTicketsData||[]).find(t=>String(t.ticketNumber)===String(ticketNumber))?.internalStatusId||'';if(select)select.disabled=true;try{const r=await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/internal-status`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({statusId:statusId||null})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Não foi possível atualizar o status.');const t=(window.activeTicketsData||[]).find(x=>String(x.ticketNumber)===String(ticketNumber));if(t){t.internalStatusId=d.internalStatusId||null;t.internalStatus=d.internalStatus||null}if(select)aplicarVisualStatusTicketSelect(select,d.internalStatusId)}catch(e){if(select)select.value=anterior;alert(e.message||'Não foi possível atualizar o status interno.')}finally{if(select)select.disabled=false}}
 
         function renderizarTicketsAtivos(tickets = []) {
@@ -8918,7 +9025,7 @@
         function renderizarParametrosTickets(){const box=document.getElementById('ticket-params-status-list');if(!box)return;box.replaceChildren();const lista=window.ticketParametrosAdmin?.status||[];lista.forEach((item,index)=>{const row=document.createElement('div');row.className='param-row ticket-status';const cor=document.createElement('input');cor.type='color';cor.className='form-control form-control-color param-color';cor.value=/^#[0-9a-f]{6}$/i.test(item.cor||'')?item.cor:'#667085';cor.oninput=()=>item.cor=cor.value;const nome=document.createElement('input');nome.className='form-control';nome.value=item.nome||'';nome.placeholder='Ex: Aguardando documentação';nome.oninput=()=>item.nome=nome.value;const rem=document.createElement('button');rem.type='button';rem.className='param-remove';rem.innerHTML='<i class="bi bi-trash"></i>';rem.onclick=()=>{lista.splice(index,1);renderizarParametrosTickets()};row.append(cor,nome,rem);box.appendChild(row)});if(!lista.length){const e=document.createElement('div');e.className='text-muted small';e.textContent='Nenhum status interno cadastrado. Clique em “Novo status” para começar.';box.appendChild(e)}}
         function adicionarParametroTicket(){if(!window.ticketParametrosAdmin)window.ticketParametrosAdmin={status:[]};window.ticketParametrosAdmin.status=window.ticketParametrosAdmin.status||[];window.ticketParametrosAdmin.status.push({id:idParametroLocal('status'),nome:'',cor:'#667085'});renderizarParametrosTickets();setTimeout(()=>document.querySelector('#ticket-params-status-list .param-row:last-child input[type="text"]')?.focus(),0)}
         async function carregarParametrosTickets(forcar=false){if(window.ticketParametrosAdmin&&!forcar){renderizarParametrosTickets();return}const st=document.getElementById('ticket-params-status');if(st)st.textContent='Carregando...';try{const r=await fetch('/api/admin/ticket-params',{cache:'no-store'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Erro ao carregar parâmetros.');window.ticketParametrosAdmin=d.parametros||{status:[]};renderizarParametrosTickets();if(st)st.textContent=''}catch(e){if(st){st.className='menu-save-status text-danger mb-2';st.textContent=e.message}}}
-        async function salvarParametrosTickets(){const st=document.getElementById('ticket-params-status');if((window.ticketParametrosAdmin?.status||[]).some(x=>!String(x.nome||'').trim())){alert('Preencha o nome de todos os status.');return}if(st){st.className='menu-save-status text-muted mb-2';st.textContent='Salvando...'}try{const r=await fetch('/api/admin/ticket-params',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(window.ticketParametrosAdmin||{status:[]})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Erro ao salvar status.');window.ticketParametrosAdmin=d.parametros||{status:[]};window.ticketStatusOptions=(d.parametros?.status||[]).filter(x=>x.ativo!==false);renderizarParametrosTickets();renderizarLegendaStatusTickets();window.activeTicketsLoaded=false;if(st){st.className='menu-save-status text-success mb-2';st.textContent='Status salvos.'}}catch(e){if(st){st.className='menu-save-status text-danger mb-2';st.textContent=e.message}}}
+        async function salvarParametrosTickets(){const st=document.getElementById('ticket-params-status');if((window.ticketParametrosAdmin?.status||[]).some(x=>!String(x.nome||'').trim())){alert('Preencha o nome de todos os status.');return}if(st){st.className='menu-save-status text-muted mb-2';st.textContent='Salvando...'}try{const r=await fetch('/api/admin/ticket-params',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(window.ticketParametrosAdmin||{status:[]})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Erro ao salvar status.');window.ticketParametrosAdmin=d.parametros||{status:[]};window.ticketStatusOptions=(d.parametros?.status||[]).filter(x=>x.ativo!==false);renderizarParametrosTickets();renderizarLegendaStatusTickets();if(window.activeChatTicketData)atualizarSeletorStatusChat(window.activeChatTicketData);window.activeTicketsLoaded=false;if(st){st.className='menu-save-status text-success mb-2';st.textContent='Status salvos.'}}catch(e){if(st){st.className='menu-save-status text-danger mb-2';st.textContent=e.message}}}
 
         // ---------------------------------------------------------------------
         // CRM de leads
@@ -10315,7 +10422,7 @@
             const inicio=Number.isInteger(input.selectionStart)?input.selectionStart:input.value.length;
             const fim=Number.isInteger(input.selectionEnd)?input.selectionEnd:inicio;
             input.value=input.value.slice(0,inicio)+emoji+input.value.slice(fim);
-            const cursor=inicio+emoji.length; input.focus(); input.setSelectionRange(cursor,cursor);
+            const cursor=inicio+emoji.length; atualizarAcaoEnvioChat(); ajustarAlturaComposerChat(); input.focus(); input.setSelectionRange(cursor,cursor);
         }
 
         document.addEventListener('click', event=>{
@@ -10451,7 +10558,7 @@
             const valorAnterior=select.value;
             select.replaceChildren();
             const sem=document.createElement('option');sem.value='';sem.textContent='Sem status';select.appendChild(sem);
-            (window.ticketStatusOptions||[]).forEach(item=>{const op=document.createElement('option');op.value=String(item.id||'');op.textContent=String(item.nome||'Status');select.appendChild(op);});
+            (window.ticketStatusOptions||[]).forEach(item=>{const op=document.createElement('option');const nome=String(item.nome||'Status').trim()||'Status';op.value=String(item.id||'');op.textContent=abreviarNomeStatusTicket(nome,24);op.title=nome;select.appendChild(op);});
             select.value=atual;
             if(select.value!==atual)select.value='';
             aplicarVisualStatusTicketSelect(select,select.value);
@@ -10527,6 +10634,7 @@
             ['ticket-chat-input','ticket-chat-attach','ticket-chat-send','ticket-chat-emoji','ticket-chat-record'].forEach(id=>{
                 const el=document.getElementById(id); if(el) el.disabled=encerrado||!ehMeu;
             });
+            atualizarAcaoEnvioChat();
             const file=document.getElementById('ticket-chat-file'); if(file) file.disabled=encerrado||!ehMeu;
 
             const status=document.getElementById('ticket-chat-status');
@@ -10924,11 +11032,12 @@
             const text=document.getElementById('ticket-chat-edit-text');
             if(text)text.textContent=String(msg.texto||'');
             preview?.classList.remove('hidden');
-            if(input){input.value=String(msg.texto||'');input.focus();input.setSelectionRange(input.value.length,input.value.length);}
+            if(input){input.value=String(msg.texto||'');atualizarAcaoEnvioChat();ajustarAlturaComposerChat();input.focus();input.setSelectionRange(input.value.length,input.value.length);}
         }
         function cancelarEdicaoChat(limparTexto=true) {
             const input=document.getElementById('ticket-chat-input');
             if(limparTexto && input && window.activeChatEdit && input.value===window.activeChatEdit.texto) input.value='';
+            atualizarAcaoEnvioChat(); ajustarAlturaComposerChat();
             window.activeChatEdit=null;
             document.getElementById('ticket-chat-edit-preview')?.classList.add('hidden');
         }
@@ -11028,6 +11137,7 @@
         }
 
         function atalhoEnviarChat(event) {
+            const mobile=chatEmViewportMobile();
             const box=document.getElementById('chat-quick-suggestions');
             const aberto=box && !box.classList.contains('hidden');
             const items=aberto?sugestoesTextosRapidosAtuais():[];
@@ -11035,9 +11145,11 @@
                 if(event.key==='ArrowDown'){event.preventDefault();window.quickTextSuggestionIndex=(window.quickTextSuggestionIndex+1)%items.length;renderizarSugestoesTextosRapidos();return;}
                 if(event.key==='ArrowUp'){event.preventDefault();window.quickTextSuggestionIndex=(window.quickTextSuggestionIndex-1+items.length)%items.length;renderizarSugestoesTextosRapidos();return;}
                 if(event.key==='Escape'){event.preventDefault();esconderSugestoesTextosRapidos();return;}
-                if(event.key==='Tab'||(event.key==='Enter'&&!event.shiftKey)){event.preventDefault();aplicarTextoRapidoNoChat(items[window.quickTextSuggestionIndex||0]);return;}
+                // Desktop mantém Enter para escolher texto rápido; no mobile Enter é sempre nova linha.
+                if(event.key==='Tab'||(!mobile&&event.key==='Enter'&&!event.shiftKey)){event.preventDefault();aplicarTextoRapidoNoChat(items[window.quickTextSuggestionIndex||0]);return;}
             }
-            if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemChat(event);}
+            // Desktop: Enter envia, Shift+Enter quebra linha. Mobile: Enter nunca envia.
+            if(!mobile&&event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemChat(event);}
         }
         async function enviarMensagemChat(event) {
             event?.preventDefault?.();
@@ -11057,14 +11169,14 @@
                 try{
                     const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/messages/${encodeURIComponent(editId)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:novoTexto})});
                     const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível editar a mensagem.');
-                    substituirMensagemChatEditada(data.message);input.value='';cancelarEdicaoChat(false);if(status)status.textContent='';
+                    substituirMensagemChatEditada(data.message);input.value='';cancelarEdicaoChat(false);ajustarAlturaComposerChat();atualizarAcaoEnvioChat();if(status)status.textContent='';
                 }catch(err){if(status)status.textContent=err.message||'Não foi possível editar a mensagem.';}
                 return;
             }
 
             const replyTo=window.activeChatReply?{...window.activeChatReply}:null;
             const otimista=mensagemOtimistaChat({texto,tipo:'text',replyTo});
-            input.value=''; cancelarRespostaChat(); esconderSugestoesTextosRapidos(); ajustarAlturaComposerChat(); adicionarMensagemChatNaTela(otimista,true);if(status)status.textContent='';input?.focus();
+            input.value=''; cancelarRespostaChat(); esconderSugestoesTextosRapidos(); ajustarAlturaComposerChat(); atualizarAcaoEnvioChat(); adicionarMensagemChatNaTela(otimista,true);if(status)status.textContent='';input?.focus();
 
             window.chatSendQueue=window.chatSendQueue.then(async()=>{
                 try{
@@ -11090,7 +11202,7 @@
             const localPreviewUrl=['image','video','audio'].includes(tipo)?URL.createObjectURL(file):null;
             const replyTo=window.activeChatReply?{...window.activeChatReply}:null;
             const otimista=mensagemOtimistaChat({texto:tipo==='audio'?'':caption,tipo,file,localPreviewUrl,replyTo});
-            cancelarRespostaChat(); adicionarMensagemChatNaTela(otimista,true);if(caption&&input)input.value='';if(status)status.textContent='';input?.focus();
+            cancelarRespostaChat(); adicionarMensagemChatNaTela(otimista,true);if(caption&&input)input.value='';ajustarAlturaComposerChat();atualizarAcaoEnvioChat();if(status)status.textContent='';input?.focus();
 
             window.chatSendQueue=window.chatSendQueue.then(async()=>{
                 try{
@@ -11159,8 +11271,10 @@
             }, { passive: true });
         }
         ticketChatInput?.addEventListener('paste',processarColagemChat);
-        ticketChatInput?.addEventListener('input',()=>{window.quickTextSuggestionIndex=0;renderizarSugestoesTextosRapidos();ajustarAlturaComposerChat();});
+        ticketChatInput?.addEventListener('input',()=>{window.quickTextSuggestionIndex=0;renderizarSugestoesTextosRapidos();ajustarAlturaComposerChat();atualizarAcaoEnvioChat();});
         ticketChatInput?.addEventListener('focus',()=>{if(String(ticketChatInput.value||'').trim().startsWith('/'))renderizarSugestoesTextosRapidos();});
+        atualizarAcaoEnvioChat();
+        window.addEventListener('resize',()=>atualizarAcaoEnvioChat(),{passive:true});
         const chatComposerDrop=document.getElementById('ticket-chat-composer');
         chatComposerDrop?.addEventListener('dragover',event=>{event.preventDefault();if(window.activeChatCanSend===true)chatComposerDrop.classList.add('is-dragging');});
         chatComposerDrop?.addEventListener('dragleave',()=>chatComposerDrop.classList.remove('is-dragging'));
