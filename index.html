@@ -3811,6 +3811,492 @@
         @media(max-width:767.98px){#tab-tickets{margin:-20px -14px -30px!important;width:calc(100% + 28px)!important;height:calc(100dvh - 66px)}#ticket-chat-dialog.ticket-chat-inline .ticket-chat-close{display:inline-flex!important}#tab-tickets.crm-mode{padding:20px 14px 30px!important;}#tab-tickets.crm-mode>.tickets-subnav{display:flex!important}.atendimentos-central-header{padding:8px 12px}.atendimentos-central-title span{display:none}.atendimentos-central-metrics{margin-left:auto}.atendimentos-metric{min-width:78px;height:40px;padding:5px 8px}#tab-tickets>.tickets-subnav{display:none}.chat-conversations-filters{padding-bottom:7px}.ticket-chat-workspace{grid-template-columns:1fr!important}.ticket-chat-conversations{display:flex!important}.ticket-chat-shell{display:none!important}.ticket-chat-workspace.chat-mobile-open .ticket-chat-conversations{display:none!important}.ticket-chat-workspace.chat-mobile-open>.ticket-chat-shell{display:grid!important}}
     </style>
 
+
+
+    <style id="atendimentos-mobile-v33">
+        /* V3.3 — Central de Atendimentos realmente responsiva no celular.
+           Fluxo mobile: lista de conversas -> conversa em tela cheia -> voltar para lista. */
+        @media (max-width: 767.98px) {
+            /* Tela de lista */
+            #tab-tickets:not(.crm-mode) {
+                overflow: hidden !important;
+            }
+            #tickets-view-active.atendimentos-view {
+                grid-template-rows: auto minmax(0, 1fr) !important;
+                min-height: 0;
+            }
+            .atendimentos-central-header {
+                min-height: 0 !important;
+                padding: 9px 10px 8px !important;
+                gap: 8px !important;
+                flex-wrap: wrap;
+                align-items: center !important;
+            }
+            .atendimentos-sidebar-toggle {
+                display: none !important;
+            }
+            .atendimentos-central-title-wrap {
+                width: 100%;
+                min-height: 36px;
+            }
+            .atendimentos-central-title h4 {
+                font-size: 1.02rem !important;
+            }
+            .atendimentos-central-title span {
+                display: block !important;
+                margin-top: 0 !important;
+                font-size: .61rem !important;
+            }
+            .atendimentos-central-metrics {
+                width: 100%;
+                margin: 0 !important;
+                display: grid !important;
+                grid-template-columns: auto minmax(0,1fr) minmax(0,1fr);
+                gap: 6px !important;
+            }
+            .atendimentos-realtime-badge {
+                height: 38px !important;
+                padding: 0 9px !important;
+                border-radius: 9px !important;
+                font-size: .62rem !important;
+            }
+            .atendimentos-realtime-badge span {
+                display: none;
+            }
+            .atendimentos-metric {
+                min-width: 0 !important;
+                height: 38px !important;
+                padding: 4px 8px !important;
+                gap: 7px !important;
+                border-radius: 9px !important;
+            }
+            .atendimentos-metric > i { font-size: .88rem !important; }
+            .atendimentos-metric small { font-size: .51rem !important; }
+            .atendimentos-metric strong { font-size: .88rem !important; }
+
+            #ticket-chat-dialog.ticket-chat-inline,
+            #ticket-chat-dialog.ticket-chat-inline .ticket-chat-workspace {
+                min-height: 0 !important;
+                height: 100% !important;
+            }
+            .ticket-chat-workspace {
+                display: grid !important;
+                grid-template-columns: 1fr !important;
+                min-width: 0;
+            }
+            .ticket-chat-conversations {
+                display: flex !important;
+                width: 100%;
+                min-width: 0;
+                min-height: 0;
+                border: 0 !important;
+            }
+            .chat-conversations-header {
+                min-height: 54px !important;
+                padding: 8px 11px !important;
+            }
+            .chat-conversations-title { font-size: .94rem !important; }
+            .chat-conversations-subtitle { font-size: .60rem !important; }
+            .chat-conversations-refresh {
+                width: 36px !important;
+                height: 36px !important;
+            }
+            .chat-conversations-search {
+                min-height: 40px !important;
+                margin: 7px 9px !important;
+                border-radius: 10px !important;
+            }
+            .chat-conversations-search input {
+                min-width: 0;
+                font-size: 16px !important; /* evita zoom automático no iOS */
+            }
+            .chat-conversations-filters {
+                min-height: 38px !important;
+                padding: 5px 10px 7px !important;
+            }
+            .chat-active-filter { font-size: .66rem !important; }
+            .chat-history-window { font-size: .59rem !important; }
+            .chat-conversation-item {
+                min-height: 72px !important;
+                padding: 9px 11px !important;
+                grid-template-columns: 46px minmax(0,1fr) auto !important;
+                gap: 9px !important;
+            }
+            .chat-conversation-avatar {
+                width: 46px !important;
+                height: 46px !important;
+            }
+            .chat-conversation-line strong { font-size: .84rem !important; }
+            .chat-conversation-preview { font-size: .68rem !important; }
+            .chat-conversation-ticket { font-size: .59rem !important; }
+
+            /* Sem conversa selecionada, mostra somente a lista. */
+            .ticket-chat-workspace > .ticket-chat-shell {
+                display: none !important;
+                border-left: 0 !important;
+            }
+
+            /* Ao abrir um atendimento, conversa ocupa a tela inteira da aplicação. */
+            .ticket-chat-workspace.chat-mobile-open > .ticket-chat-conversations {
+                display: none !important;
+            }
+            .ticket-chat-workspace.chat-mobile-open > .ticket-chat-shell {
+                display: grid !important;
+                width: 100%;
+                height: 100%;
+                min-height: 0;
+                grid-template-rows: auto auto auto auto minmax(0,1fr) auto !important;
+                overflow: hidden;
+                border-left: 0 !important;
+                background: #efeae2;
+            }
+            #tickets-view-active.mobile-chat-open {
+                grid-template-rows: minmax(0,1fr) !important;
+                height: 100% !important;
+            }
+            #tickets-view-active.mobile-chat-open > .atendimentos-central-header {
+                display: none !important;
+            }
+
+            /* Usa a altura visual real. Mantém o composer acima do teclado virtual. */
+            body.atendimentos-chat-mobile-aberto {
+                overflow: hidden !important;
+            }
+            body.atendimentos-chat-mobile-aberto .topbar {
+                display: none !important;
+            }
+            body.atendimentos-chat-mobile-aberto .main-content {
+                width: 100% !important;
+                height: var(--chat-mobile-visual-height, 100dvh) !important;
+                min-height: 0 !important;
+                overflow: hidden !important;
+            }
+            body.atendimentos-chat-mobile-aberto .content-container {
+                width: 100% !important;
+                height: var(--chat-mobile-visual-height, 100dvh) !important;
+                min-height: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important;
+            }
+            body.atendimentos-chat-mobile-aberto #tab-tickets {
+                width: 100% !important;
+                height: var(--chat-mobile-visual-height, 100dvh) !important;
+                min-height: 0 !important;
+                margin: 0 !important;
+                overflow: hidden !important;
+            }
+            body.atendimentos-chat-mobile-aberto #tickets-view-active {
+                height: 100% !important;
+            }
+
+            /* Cabeçalho da conversa */
+            #ticket-chat-dialog.ticket-chat-inline .ticket-chat-header {
+                min-height: 58px !important;
+                padding: max(7px, env(safe-area-inset-top)) 8px 7px !important;
+                gap: 7px !important;
+                background: #f0f2f5 !important;
+            }
+            .ticket-chat-contact {
+                flex: 1;
+                gap: 8px !important;
+                overflow: hidden;
+            }
+            .ticket-chat-avatar {
+                width: 37px !important;
+                height: 37px !important;
+                flex-basis: 37px !important;
+            }
+            .ticket-chat-contact-copy { overflow: hidden; }
+            .ticket-chat-title {
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                font-size: .91rem !important;
+            }
+            .ticket-chat-subtitle {
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                font-size: .61rem !important;
+            }
+            #ticket-chat-dialog.ticket-chat-inline .ticket-chat-close {
+                order: -1;
+                display: inline-flex !important;
+                width: 38px !important;
+                height: 38px !important;
+                flex: 0 0 38px !important;
+                color: #54656f !important;
+                background: transparent !important;
+                border: 0 !important;
+                border-radius: 50% !important;
+                font-size: 1.08rem;
+            }
+            #ticket-chat-dialog.ticket-chat-inline .ticket-chat-close:hover,
+            #ticket-chat-dialog.ticket-chat-inline .ticket-chat-close:active {
+                background: #e2e6e8 !important;
+            }
+            .ticket-chat-header-actions {
+                order: -1;
+                flex: 0 0 auto;
+            }
+
+            /* Controles operacionais: duas faixas horizontais compactas. */
+            .ticket-chat-operations {
+                padding: 6px 7px !important;
+                display: grid !important;
+                grid-template-columns: 1fr !important;
+                gap: 5px !important;
+                background: #fff !important;
+                overflow: visible !important;
+            }
+            .ticket-chat-statuses,
+            .ticket-chat-operation-actions {
+                width: 100% !important;
+                max-width: 100%;
+                display: flex !important;
+                flex-wrap: nowrap !important;
+                justify-content: flex-start !important;
+                gap: 5px !important;
+                overflow-x: auto !important;
+                overflow-y: visible !important;
+                padding: 1px 1px 3px !important;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+            }
+            .ticket-chat-statuses::-webkit-scrollbar,
+            .ticket-chat-operation-actions::-webkit-scrollbar { display:none; }
+            .chat-op-pill,
+            .chat-status-select {
+                flex: 0 0 auto !important;
+                min-height: 31px !important;
+                font-size: .64rem !important;
+            }
+            .chat-status-select {
+                width: auto !important;
+                max-width: 154px !important;
+                min-width: 118px !important;
+            }
+            .ticket-chat-documents-btn,
+            .ticket-chat-claim,
+            .ticket-chat-transfer,
+            .ticket-chat-end {
+                flex: 0 0 auto !important;
+                min-height: 34px !important;
+                height: 34px !important;
+                width: auto !important;
+                padding: 0 10px !important;
+                border-radius: 9px !important;
+                font-size: .66rem !important;
+                white-space: nowrap;
+            }
+            .ticket-chat-documents-btn span.label,
+            .ticket-chat-claim span,
+            .ticket-chat-transfer span,
+            .ticket-chat-end span {
+                display: inline !important;
+            }
+            .ticket-chat-documents-count {
+                position: static !important;
+                border: 0 !important;
+            }
+            .ticket-transfer-wrap { flex: 0 0 auto; }
+            .ticket-transfer-panel {
+                position: fixed !important;
+                z-index: 1300 !important;
+                left: 10px !important;
+                right: 10px !important;
+                top: auto !important;
+                bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+                width: auto !important;
+                max-height: min(56dvh, 430px);
+                overflow-y: auto;
+                border-radius: 14px !important;
+                box-shadow: 0 20px 60px rgba(17,27,33,.28) !important;
+            }
+
+            .ticket-chat-user {
+                min-height: 27px;
+                padding: 4px 9px !important;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+                font-size: .61rem !important;
+            }
+            .ticket-chat-storage { display: none !important; }
+
+            /* Triagem vira painel compacto e rolável sem esmagar o histórico. */
+            .chat-triage-panel {
+                padding: 8px !important;
+                max-height: 42dvh;
+                overflow: hidden;
+            }
+            .chat-triage-header { margin-bottom: 7px !important; }
+            .chat-triage-body {
+                max-height: calc(42dvh - 54px) !important;
+                overflow-y: auto !important;
+            }
+
+            /* Histórico */
+            #ticket-chat-history {
+                min-height: 0 !important;
+                padding: 10px 8px 12px !important;
+                overscroll-behavior: contain;
+                -webkit-overflow-scrolling: touch;
+            }
+            #ticket-chat-dialog .ticket-chat-history::before {
+                background-size: 155px auto !important;
+                opacity: .026 !important;
+            }
+            .chat-message-row { margin-bottom: 4px !important; }
+            .chat-bubble {
+                max-width: 89% !important;
+                padding: 7px 8px 6px !important;
+                font-size: .82rem;
+                overflow-wrap: anywhere;
+            }
+            .chat-reply-action,
+            .chat-edit-action {
+                width: 27px !important;
+                height: 27px !important;
+            }
+
+            /* Composer fixo na última linha da grade e respeitando safe-area. */
+            .ticket-chat-composer {
+                min-width: 0;
+                padding: 7px 6px calc(7px + env(safe-area-inset-bottom)) !important;
+                grid-template-columns: auto minmax(0,1fr) auto !important;
+                gap: 4px !important;
+                align-items: end !important;
+                background: #f0f2f5 !important;
+            }
+            .chat-compose-tools {
+                gap: 0 !important;
+            }
+            .chat-emoji-btn,
+            .chat-attach-btn,
+            .chat-record-btn {
+                width: 36px !important;
+                height: 42px !important;
+                flex: 0 0 36px !important;
+                padding: 0 !important;
+            }
+            .chat-input-wrap { min-width: 0; }
+            .chat-compose-input {
+                width: 100%;
+                min-height: 42px !important;
+                max-height: 112px !important;
+                padding: 10px 11px !important;
+                font-size: 16px !important; /* evita zoom do Safari ao focar */
+                line-height: 1.32 !important;
+                border-radius: 12px !important;
+            }
+            .chat-compose-input::placeholder {
+                font-size: .78rem;
+            }
+            .chat-paste-hint { display: none !important; }
+            .chat-compose-status {
+                grid-column: 1 / -1 !important;
+                min-height: 0 !important;
+                padding: 0 5px !important;
+                font-size: .61rem !important;
+            }
+            .chat-reply-compose {
+                grid-column: 1 / -1 !important;
+                margin: 0 2px 2px !important;
+                min-width: 0;
+            }
+            .chat-emoji-picker {
+                position: fixed !important;
+                z-index: 1400 !important;
+                left: 8px !important;
+                right: 8px !important;
+                bottom: calc(66px + env(safe-area-inset-bottom)) !important;
+                width: auto !important;
+                max-height: min(38dvh, 290px) !important;
+                grid-template-columns: repeat(7,1fr) !important;
+            }
+            .chat-quick-suggestions {
+                position: fixed !important;
+                z-index: 1390 !important;
+                left: 8px !important;
+                right: 8px !important;
+                bottom: calc(66px + env(safe-area-inset-bottom)) !important;
+                max-height: min(38dvh, 280px) !important;
+            }
+            .chat-recording-bar {
+                inset: 4px !important;
+                padding: 0 8px !important;
+            }
+            .chat-recording-cancel { font-size: .68rem !important; }
+
+            /* Documentos em tela cheia no celular. */
+            .chat-documents-backdrop { display:none !important; }
+            .chat-documents-panel {
+                position: absolute !important;
+                inset: 0 !important;
+                z-index: 70 !important;
+                width: 100% !important;
+                max-width: none !important;
+                border-left: 0 !important;
+                box-shadow: none !important;
+            }
+            .chat-documents-header {
+                min-height: 58px !important;
+                padding: 9px 11px !important;
+            }
+            .chat-documents-body {
+                padding: 9px !important;
+                padding-bottom: calc(10px + env(safe-area-inset-bottom)) !important;
+            }
+
+            /* Estado encerrado / modo leitura continua legível. */
+            .ticket-chat-archived-banner {
+                padding: 6px 9px !important;
+                font-size: .62rem !important;
+            }
+        }
+
+        @media (max-width: 390px) {
+            .atendimentos-central-title span { display:none !important; }
+            .chat-active-filter span { max-width: 172px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+            .chat-history-window { display:none !important; }
+            .ticket-chat-documents-btn span.label,
+            .ticket-chat-claim span,
+            .ticket-chat-transfer span,
+            .ticket-chat-end span { display:none !important; }
+            .ticket-chat-documents-btn,
+            .ticket-chat-claim,
+            .ticket-chat-transfer,
+            .ticket-chat-end {
+                width: 36px !important;
+                min-width: 36px !important;
+                padding: 0 !important;
+                justify-content:center !important;
+                border-radius: 50% !important;
+            }
+            .ticket-chat-documents-count {
+                position:absolute !important;
+                top:-5px !important;
+                right:-5px !important;
+                border:2px solid #fff !important;
+            }
+            .ticket-chat-documents-btn { position:relative !important; }
+            .chat-bubble { max-width: 92% !important; }
+            .chat-emoji-picker { grid-template-columns: repeat(6,1fr) !important; }
+        }
+
+        /* Landscape baixo: reduz barras para sobrar histórico. */
+        @media (max-width: 767.98px) and (orientation: landscape) and (max-height: 500px) {
+            .ticket-chat-operations { padding: 4px 6px !important; }
+            .ticket-chat-user { display:none !important; }
+            #ticket-chat-dialog.ticket-chat-inline .ticket-chat-header { min-height: 50px !important; padding-top:4px !important; padding-bottom:4px !important; }
+            .ticket-chat-avatar { width:34px !important; height:34px !important; flex-basis:34px !important; }
+            .chat-triage-panel { max-height: 52dvh; }
+        }
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -4154,7 +4640,7 @@
                     </div>
                 </div>
                 <div class="ticket-chat-header-actions">
-                    <button type="button" class="ticket-chat-close" onclick="fecharChatTicket()" aria-label="Fechar chat"><i class="bi bi-x-lg"></i></button>
+                    <button type="button" class="ticket-chat-close" onclick="fecharChatTicket()" aria-label="Voltar para conversas" title="Voltar para conversas"><i class="bi bi-arrow-left"></i></button>
                 </div>
             </div>
 
@@ -5424,7 +5910,7 @@
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
             document.getElementById(tabId).classList.remove('hidden');
             if(tabId!=='tab-tickets') {
-                document.querySelector('.ticket-chat-workspace')?.classList.remove('chat-mobile-open');
+                definirModoConversaMobile(false);
                 definirMenuAtendimentosRecolhido(false);
             }
             el?.classList.add('active');
@@ -5461,6 +5947,7 @@
             crmBtn?.classList.toggle('active', mostrarCRM);
 
             if (mostrarCRM) {
+                definirModoConversaMobile(false);
                 definirMenuAtendimentosRecolhido(false);
                 // Força uma nova leitura ao entrar no CRM. Além de corrigir cache antigo,
                 // garante que indicadores e valores comerciais sempre reflitam o MongoDB.
@@ -9708,7 +10195,7 @@
                 atualizarIndicadoresCentralAtendimentos(data.resumo||{});
                 renderizarListaConversasChat();
                 const atual=String(window.activeChatTicketNumber||'');
-                if(!atual&&window.atendimentosConversasData.length){
+                if(!atual&&window.atendimentosConversasData.length&&window.innerWidth>767.98){
                     const primeiro=window.atendimentosConversasData[0];
                     if(primeiro?.ticketNumber)abrirChatTicket(primeiro.ticketNumber);
                 }
@@ -9732,7 +10219,7 @@
             window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null;
             if(history) history.innerHTML='<div class="chat-empty">Carregando conversa...</div>';
             if(dialog && typeof dialog.showModal==='function' && !dialog.open) dialog.showModal();
-            document.querySelector('.ticket-chat-workspace')?.classList.add('chat-mobile-open');
+            definirModoConversaMobile(true);
             renderizarListaConversasChat();
             if(triggerButton){triggerButton.disabled=true;triggerButton.innerHTML='<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> Abrindo...';}
 
@@ -9767,7 +10254,44 @@
             }
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
-        function fecharChatTicket() { cancelarEdicaoChat(false); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; window.activeChatTriageDetails=null; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharTriagemChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); document.querySelector('.ticket-chat-workspace')?.classList.remove('chat-mobile-open'); const h=document.getElementById('ticket-chat-history'); if(h)h.innerHTML='<div class="chat-empty">Selecione um atendimento na lista ao lado.</div>'; renderizarListaConversasChat(); }
+
+        function atualizarAlturaVisualChatMobile() {
+            if (window.innerWidth > 767.98) {
+                document.documentElement.style.removeProperty('--chat-mobile-visual-height');
+                return;
+            }
+            const altura = Math.max(320, Math.round(window.visualViewport?.height || window.innerHeight || 0));
+            document.documentElement.style.setProperty('--chat-mobile-visual-height', `${altura}px`);
+        }
+
+        function definirModoConversaMobile(aberto = false) {
+            const mobile = window.innerWidth <= 767.98;
+            const workspace = document.querySelector('.ticket-chat-workspace');
+            const view = document.getElementById('tickets-view-active');
+            const abrir = mobile && aberto;
+            workspace?.classList.toggle('chat-mobile-open', abrir);
+            view?.classList.toggle('mobile-chat-open', abrir);
+            document.body.classList.toggle('atendimentos-chat-mobile-aberto', abrir);
+            atualizarAlturaVisualChatMobile();
+        }
+
+        if (!window.__atendimentosMobileViewportBound) {
+            window.__atendimentosMobileViewportBound = true;
+            window.addEventListener('resize', () => {
+                atualizarAlturaVisualChatMobile();
+                if (window.innerWidth > 767.98) {
+                    document.getElementById('tickets-view-active')?.classList.remove('mobile-chat-open');
+                    document.body.classList.remove('atendimentos-chat-mobile-aberto');
+                    document.querySelector('.ticket-chat-workspace')?.classList.remove('chat-mobile-open');
+                } else if (window.activeChatTicketNumber) {
+                    definirModoConversaMobile(true);
+                }
+            }, { passive:true });
+            window.visualViewport?.addEventListener('resize', atualizarAlturaVisualChatMobile, { passive:true });
+            window.visualViewport?.addEventListener('scroll', atualizarAlturaVisualChatMobile, { passive:true });
+        }
+
+        function fecharChatTicket() { cancelarEdicaoChat(false); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; window.activeChatTriageDetails=null; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharTriagemChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); definirModoConversaMobile(false); const h=document.getElementById('ticket-chat-history'); if(h)h.innerHTML='<div class="chat-empty">Selecione um atendimento na lista ao lado.</div>'; renderizarListaConversasChat(); }
         async function carregarMensagensAnterioresChat() {
             if(!window.activeChatTicketNumber||!window.activeChatOldest) return;
             const history=document.getElementById('ticket-chat-history'); const beforeHeight=history?.scrollHeight||0;
