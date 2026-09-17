@@ -3727,7 +3727,11 @@
         .chat-conversation-item:hover{background:#f5f6f6;}
         .chat-conversation-item.active{background:#f0f2f5;}
         .chat-conversation-item.unread strong{font-weight:800;}
-        .chat-conversation-avatar{width:47px;height:47px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:#dfe7e3;color:#60736c;font-weight:800;font-size:1rem;}
+        .chat-conversation-avatar{position:relative;width:47px;height:47px;display:inline-flex;align-items:center;justify-content:center;overflow:hidden;border-radius:50%;background:#dfe7e3;color:#60736c;font-weight:800;font-size:1rem;}
+        .chat-avatar-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;background:#dfe7e3;}
+        .chat-avatar-fallback{display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:1rem;}
+        .ticket-chat-avatar{position:relative;overflow:hidden;}
+        .ticket-chat-avatar-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;background:#dfe7e3;}
         .chat-conversation-copy{min-width:0;display:block;}
         .chat-conversation-line{display:flex;align-items:center;justify-content:space-between;gap:10px;}
         .chat-conversation-line strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.83rem;color:#111b21;}
@@ -3791,6 +3795,16 @@
         html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-history::before{opacity:.028;filter:grayscale(1) invert(1);}
         #tab-tickets.crm-mode{height:auto!important;min-height:calc(100dvh - 78px);overflow:visible!important;padding:34px!important;}
         #tab-tickets.crm-mode>.tickets-subnav{position:static;margin-bottom:22px;}
+        .atendimentos-sidebar-toggle{width:38px;height:38px;flex:0 0 38px;display:inline-flex;align-items:center;justify-content:center;color:#54656f;background:#f3f5f6;border:1px solid #e1e5e8;border-radius:10px;cursor:pointer;}
+        .atendimentos-sidebar-toggle:hover{background:#e9edef;color:#111b21;}
+        .atendimentos-central-title-wrap{display:flex;align-items:center;gap:10px;min-width:0;}
+        @media(min-width:992px){
+            #app-sidebar{transition:width .20s ease,min-width .20s ease,transform .20s ease,opacity .15s ease;}
+            body.atendimentos-menu-recolhido #app-sidebar{width:0!important;min-width:0!important;transform:translateX(-100%);opacity:0;pointer-events:none;border-right:0;}
+            body.atendimentos-menu-recolhido .main-content{width:100%;}
+            body.atendimentos-menu-recolhido .mobile-menu-btn{display:inline-flex;}
+        }
+        html[data-theme="dark"] .atendimentos-sidebar-toggle{color:#c6cfd5;background:#202c33;border-color:#2f3b43;}
         @media(max-width:991.98px){#tab-tickets{margin:-26px -22px -34px!important;width:calc(100% + 44px)!important;height:calc(100dvh - 70px)}#tab-tickets>.tickets-subnav{right:12px;top:8px}.atendimentos-central-header{padding-right:310px;}}
         @media(max-width:767.98px){#tab-tickets{margin:-20px -14px -30px!important;width:calc(100% + 28px)!important;height:calc(100dvh - 66px)}#ticket-chat-dialog.ticket-chat-inline .ticket-chat-close{display:inline-flex!important}#tab-tickets.crm-mode{padding:20px 14px 30px!important;}#tab-tickets.crm-mode>.tickets-subnav{display:flex!important}.atendimentos-central-header{padding:8px 12px}.atendimentos-central-title span{display:none}.atendimentos-central-metrics{margin-left:auto}.atendimentos-metric{min-width:78px;height:40px;padding:5px 8px}#tab-tickets>.tickets-subnav{display:none}.chat-conversations-filters{padding-bottom:7px}.ticket-chat-workspace{grid-template-columns:1fr!important}.ticket-chat-conversations{display:flex!important}.ticket-chat-shell{display:none!important}.ticket-chat-workspace.chat-mobile-open .ticket-chat-conversations{display:none!important}.ticket-chat-workspace.chat-mobile-open>.ticket-chat-shell{display:grid!important}}
     </style>
@@ -4098,9 +4112,12 @@
 
             <div id="tickets-view-active" class="tickets-subview atendimentos-view">
                 <div class="atendimentos-central-header">
-                    <div class="atendimentos-central-title">
-                        <h4>Atendimentos</h4>
-                        <span>Central de conversas do escritório</span>
+                    <div class="atendimentos-central-title-wrap">
+                        <button type="button" class="atendimentos-sidebar-toggle" onclick="toggleMenuAtendimentos()" title="Ocultar ou mostrar menu principal" aria-label="Ocultar ou mostrar menu principal"><i class="bi bi-layout-sidebar-inset"></i></button>
+                        <div class="atendimentos-central-title">
+                            <h4>Atendimentos</h4>
+                            <span>Central de conversas do escritório</span>
+                        </div>
                     </div>
                     <div class="atendimentos-central-metrics" aria-label="Indicadores dos atendimentos"><div class="atendimentos-realtime-badge" title="A lista é atualizada automaticamente"><i class="bi bi-broadcast-pin"></i><span>Tempo real</span></div>
                         <div class="atendimentos-metric"><i class="bi bi-headset"></i><span><small>Ativos</small><strong id="atendimentos-metric-active">0</strong></span></div>
@@ -4128,7 +4145,7 @@
             <div class="ticket-chat-shell">
             <div class="ticket-chat-header">
                 <div class="ticket-chat-contact">
-                    <div class="ticket-chat-avatar"><i class="bi bi-person-fill"></i></div>
+                    <div class="ticket-chat-avatar"><span class="chat-avatar-fallback" id="ticket-chat-avatar-fallback"><i class="bi bi-person-fill"></i></span><img class="ticket-chat-avatar-photo hidden" id="ticket-chat-avatar-photo" alt="Foto do WhatsApp"></div>
                     <div class="ticket-chat-contact-copy">
                         <h5 class="ticket-chat-title" id="ticket-chat-title">Selecione um atendimento</h5>
                         <div class="ticket-chat-subtitle" id="ticket-chat-subtitle"></div>
@@ -5304,11 +5321,44 @@
         atualizarIndicadoresNotificacao();
         renderizarListaNotificacoes();
 
+        function atendimentosEmModoChat() {
+            const tab=document.getElementById('tab-tickets');
+            const active=document.getElementById('tickets-view-active');
+            return !!(tab && !tab.classList.contains('hidden') && active && !active.classList.contains('hidden'));
+        }
+
+        function definirMenuAtendimentosRecolhido(recolher = true) {
+            if (window.innerWidth < 992) {
+                if (recolher) {
+                    document.getElementById('app-sidebar')?.classList.remove('is-open');
+                    document.getElementById('sidebar-overlay')?.classList.remove('is-open');
+                }
+                return;
+            }
+            document.body.classList.toggle('atendimentos-menu-recolhido', !!recolher);
+            document.querySelector('.mobile-menu-btn')?.setAttribute('aria-expanded', String(!recolher));
+        }
+
+        function toggleMenuAtendimentos() {
+            if (window.innerWidth < 992) return toggleSidebar();
+            const recolhido=document.body.classList.contains('atendimentos-menu-recolhido');
+            definirMenuAtendimentosRecolhido(!recolhido);
+        }
+
         function toggleSidebar(forceState) {
             const sidebar = document.getElementById('app-sidebar');
             const overlay = document.getElementById('sidebar-overlay');
             const button = document.querySelector('.mobile-menu-btn');
             if (!sidebar || !overlay) return;
+
+            // Em desktop, a Central de Atendimentos usa o mesmo botão para recolher/restaurar
+            // o menu, liberando toda a largura para a conversa.
+            if (window.innerWidth >= 992 && atendimentosEmModoChat()) {
+                const recolhido=document.body.classList.contains('atendimentos-menu-recolhido');
+                const shouldOpen=typeof forceState==='boolean'?forceState:recolhido;
+                definirMenuAtendimentosRecolhido(!shouldOpen);
+                return;
+            }
 
             const shouldOpen = typeof forceState === 'boolean'
                 ? forceState
@@ -5370,8 +5420,11 @@
             document.querySelectorAll('.content-section').forEach(s => s.classList.add('hidden'));
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
             document.getElementById(tabId).classList.remove('hidden');
-            if(tabId!=='tab-tickets') document.querySelector('.ticket-chat-workspace')?.classList.remove('chat-mobile-open');
-            el.classList.add('active');
+            if(tabId!=='tab-tickets') {
+                document.querySelector('.ticket-chat-workspace')?.classList.remove('chat-mobile-open');
+                definirMenuAtendimentosRecolhido(false);
+            }
+            el?.classList.add('active');
             sincronizarMenuAdministracaoAtivo(el);
             if (window.innerWidth < 992) toggleSidebar(false);
             if(tabId === 'tab-ia') carregarConhecimento();
@@ -5380,7 +5433,9 @@
             if(tabId === 'tab-parametros-tickets') carregarParametrosTickets();
             if(tabId === 'tab-tickets') {
                 marcarNotificacoesTicketsComoVistas();
-                switchTicketsSubtab(window.ticketsCurrentSubtab || 'active');
+                // O item principal "Atendimentos" sempre abre a Central de conversas.
+                // O CRM continua acessível pelo seletor interno, sem virar a tela padrão.
+                switchTicketsSubtab('active');
             }
             if(tabId === 'tab-clientes') carregarClientes();
             if(tabId === 'tab-horario') carregarHorarioFuncionamento();
@@ -5402,8 +5457,15 @@
             activeBtn?.classList.toggle('active', !mostrarCRM);
             crmBtn?.classList.toggle('active', mostrarCRM);
 
-            if (mostrarCRM) carregarCRM();
-            else inicializarCentralAtendimentos();
+            if (mostrarCRM) {
+                definirMenuAtendimentosRecolhido(false);
+                // Força uma nova leitura ao entrar no CRM. Além de corrigir cache antigo,
+                // garante que indicadores e valores comerciais sempre reflitam o MongoDB.
+                carregarCRM(true);
+            } else {
+                definirMenuAtendimentosRecolhido(true);
+                inicializarCentralAtendimentos();
+            }
         }
 
         socket.on('panel_notification', (payload = {}) => {
@@ -5444,6 +5506,7 @@
                 const novo={
                     ticketNumber:numero,
                     clienteNome:payload.clienteNome||null,
+                    clienteCadastrado:payload.clienteCadastrado===true,
                     whatsapp:payload.whatsapp||null,
                     status:payload.status||'aguardando_opcao',
                     statusLabel:'Novo atendimento',
@@ -8107,48 +8170,17 @@
 
             fecharLeadCRM();
             switchTicketsSubtab('active');
-
-            // switchTicketsSubtab já dispara o carregamento. Se ele estiver em andamento,
-            // aguardamos terminar antes de aplicar o filtro do ticket; assim o botão nunca
-            // abre o chat automaticamente nem perde o direcionamento por condição de corrida.
-            if (window.activeTicketsLoading) {
-                await new Promise(resolve => {
-                    const inicioEspera = Date.now();
-                    const timer = setInterval(() => {
-                        if (!window.activeTicketsLoading || (Date.now() - inicioEspera) > 7000) {
-                            clearInterval(timer);
-                            resolve();
-                        }
-                    }, 60);
-                });
-            } else if (!window.activeTicketsLoaded) {
-                await carregarTicketsAtivos(false);
+            await atualizarListaConversasChat(true);
+            const existe=(window.atendimentosConversasData||[]).some(item=>String(item.ticketNumber||'')===ticketNumber);
+            if(!existe){
+                // Se estiver encerrado, habilita temporariamente o histórico de 6 meses e procura novamente.
+                const filtro=document.getElementById('chat-filter-active');
+                if(filtro)filtro.checked=false;
+                await atualizarListaConversasChat(true);
             }
-
-            const busca = document.getElementById('tickets-search-input');
-            const area = document.getElementById('tickets-filter-area');
-            const unread = document.getElementById('tickets-filter-unread');
-            if (busca) busca.value = ticketNumber;
-            if (area) area.value = '';
-            if (unread) unread.value = '';
-            filtrarTicketsAtivos(true);
-
-            requestAnimationFrame(() => {
-                const linha = [...document.querySelectorAll('#tickets-table-body tr[data-ticket-number]')]
-                    .find(item => String(item.dataset.ticketNumber || '') === ticketNumber);
-                if (linha) {
-                    linha.scrollIntoView({ behavior:'smooth', block:'center' });
-                    linha.classList.add('ticket-row-crm-focus');
-                    setTimeout(() => linha.classList.remove('ticket-row-crm-focus'), 1900);
-                    document.getElementById('tickets-search-input')?.focus();
-                    return;
-                }
-                const status = document.getElementById('tickets-status');
-                if (status) {
-                    status.className = 'menu-save-status text-muted mb-2';
-                    status.textContent = `O ticket ${ticketNumber} não está mais entre os atendimentos ativos.`;
-                }
-            });
+            const encontrado=(window.atendimentosConversasData||[]).some(item=>String(item.ticketNumber||'')===ticketNumber);
+            if(encontrado) abrirChatTicket(ticketNumber);
+            else alert(`O atendimento ${ticketNumber} não foi localizado na janela atual de 6 meses.`);
         }
 
         function direcionarLeadCRMAtualParaTicket() {
@@ -9580,8 +9612,39 @@
                 atualizarListaConversasChat(true).catch(()=>{});
             }, Math.max(30, Number(delay||90)));
         }
+        function formatarNumeroIdentificacaoChat(numero=''){
+            const digitos=String(numero||'').replace(/\D/g,'');
+            if(!digitos)return '';
+            if(digitos.startsWith('55')&&digitos.length===13)return `+55 ${digitos.slice(2,4)} ${digitos.slice(4,9)}-${digitos.slice(9)}`;
+            if(digitos.startsWith('55')&&digitos.length===12)return `+55 ${digitos.slice(2,4)} ${digitos.slice(4,8)}-${digitos.slice(8)}`;
+            if(digitos.length===11)return `+55 ${digitos.slice(0,2)} ${digitos.slice(2,7)}-${digitos.slice(7)}`;
+            if(digitos.length===10)return `+55 ${digitos.slice(0,2)} ${digitos.slice(2,6)}-${digitos.slice(6)}`;
+            return `+${digitos}`;
+        }
+        function nomeExibicaoAtendimento(item={}){
+            const numero=formatarNumeroIdentificacaoChat(item.whatsapp||'');
+            if(item.clienteCadastrado!==true && numero)return numero;
+            return String(item.clienteNome||numero||'Cliente não cadastrado').trim();
+        }
+        function urlFotoAtendimento(ticketNumber=''){
+            return ticketNumber?`/api/tickets/${encodeURIComponent(String(ticketNumber))}/profile-photo`:'';
+        }
+        function atualizarAvatarCabecalhoAtendimento(ticket={}){
+            const img=document.getElementById('ticket-chat-avatar-photo');
+            const fallback=document.getElementById('ticket-chat-avatar-fallback');
+            if(!img||!fallback)return;
+            img.classList.add('hidden');
+            img.removeAttribute('src');
+            fallback.classList.remove('hidden');
+            const src=urlFotoAtendimento(ticket.ticketNumber||window.activeChatTicketNumber||'');
+            if(!src)return;
+            img.onload=()=>{img.classList.remove('hidden');fallback.classList.add('hidden');};
+            img.onerror=()=>{img.classList.add('hidden');fallback.classList.remove('hidden');};
+            img.src=src;
+        }
+
         function textoConversaChat(item={}){
-            const nome=String(item.clienteNome||item.nomeCliente||'Cliente não cadastrado').trim();
+            const nome=nomeExibicaoAtendimento(item);
             const area=String(item.area||item.menuOptionTitle||'').trim();
             const whatsapp=String(item.whatsapp||'').trim();
             return `${nome} ${item.ticketNumber||''} ${area} ${whatsapp} ${item.advogadoResponsavelNome||''} ${item.internalStatus?.nome||''}`.toLowerCase();
@@ -9608,14 +9671,18 @@
                 if(item.isArchived||item.isActive===false)btn.classList.add('archived');
                 if(numero===String(window.activeChatTicketNumber||''))btn.classList.add('active');
                 if(item.temMensagemNaoLida)btn.classList.add('unread');
-                const inicial=String(item.clienteNome||'C').trim().charAt(0).toUpperCase()||'C';
-                const nome=escapeHtmlChat(item.clienteNome||'Cliente não cadastrado');
+                const nomeExibicao=nomeExibicaoAtendimento(item);
+                const inicial=item.clienteCadastrado===true?(String(nomeExibicao||'C').trim().charAt(0).toUpperCase()||'C'):'<i class="bi bi-person-fill"></i>';
+                const nome=escapeHtmlChat(nomeExibicao);
+                const fotoUrl=urlFotoAtendimento(numero);
                 const area=escapeHtmlChat(item.area||item.menuOptionTitle||'Sem área');
                 const status=item.isArchived||item.isActive===false?'Encerrado':escapeHtmlChat(item.internalStatus?.nome||item.statusLabel||item.status||'Em atendimento');
                 const dataRef=Number(item.lastActivity||item.archivedAt||0);
                 const hora=dataRef?new Date(dataRef).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}):'';
                 const encerrado=item.isArchived||item.isActive===false?'<span class="chat-conversation-archived"><i class="bi bi-archive"></i> encerrado</span>':'';
-                btn.innerHTML=`<span class="chat-conversation-avatar">${escapeHtmlChat(inicial)}</span><span class="chat-conversation-copy"><span class="chat-conversation-line"><strong>${nome}${encerrado}</strong><time>${hora}</time></span><span class="chat-conversation-preview">${area} · ${status}</span><span class="chat-conversation-ticket">${escapeHtmlChat(numero)}</span></span>${item.temMensagemNaoLida?'<span class="chat-conversation-unread"></span>':''}`;
+                const fallbackAvatar=item.clienteCadastrado===true?escapeHtmlChat(inicial):inicial;
+                const fotoHtml=fotoUrl?`<img class="chat-avatar-photo" src="${fotoUrl}" loading="lazy" alt="" onerror="this.remove()">`:'';
+                btn.innerHTML=`<span class="chat-conversation-avatar"><span class="chat-avatar-fallback">${fallbackAvatar}</span>${fotoHtml}</span><span class="chat-conversation-copy"><span class="chat-conversation-line"><strong>${nome}${encerrado}</strong><time>${hora}</time></span><span class="chat-conversation-preview">${area} · ${status}</span><span class="chat-conversation-ticket">${escapeHtmlChat(numero)}</span></span>${item.temMensagemNaoLida?'<span class="chat-conversation-unread"></span>':''}`;
                 btn.onclick=()=>abrirChatTicket(numero,btn);
                 frag.appendChild(btn);
             });
@@ -9670,8 +9737,11 @@
                 // IMPORTANTE: abrir chat faz somente GET. Nenhuma assunção/aviso ao cliente.
                 const res=await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/chat?limit=60`,{cache:'no-store'});
                 const data=await res.json().catch(()=>({})); if(!res.ok)throw new Error(data.erro||'Não foi possível carregar o chat.');
-                document.getElementById('ticket-chat-title').textContent=`${data.ticket?.ticketNumber||ticketNumber} · ${data.ticket?.clienteNome||'Cliente não cadastrado'}`;
-                document.getElementById('ticket-chat-subtitle').textContent=[data.ticket?.area,data.ticket?.whatsapp?formatarWhatsAppCliente(data.ticket.whatsapp):null].filter(Boolean).join(' • ');
+                const nomeChat=nomeExibicaoAtendimento(data.ticket||{});
+                document.getElementById('ticket-chat-title').textContent=nomeChat;
+                const numeroSub=data.ticket?.clienteCadastrado===true&&data.ticket?.whatsapp?formatarNumeroIdentificacaoChat(data.ticket.whatsapp):null;
+                document.getElementById('ticket-chat-subtitle').textContent=[data.ticket?.ticketNumber||ticketNumber,data.ticket?.area,numeroSub].filter(Boolean).join(' • ');
+                atualizarAvatarCabecalhoAtendimento(data.ticket||{});
                 document.getElementById('ticket-chat-storage').textContent=data.unlimitedHistory?'Histórico completo · carregamento paginado · anexos sob demanda.':`Histórico conforme política configurada. Anexos sob demanda.`;
                 window.activeChatMessages=Array.isArray(data.messages)?data.messages:[]; window.activeChatHasMore=data.hasMore===true; window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
                 window.activeChatDocuments=Array.isArray(data.documents)?data.documents:[];

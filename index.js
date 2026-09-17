@@ -1163,6 +1163,13 @@ const BAILEYS_SENT_STORE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const BAILEYS_RETRY_COUNTER_TTL_MS = 60 * 60 * 1000;
 const baileysSentMessageCache = new Map();
 
+// Cache efêmero das fotos de perfil dos contatos. A URL do WhatsApp expira e pode
+// mudar, portanto nunca é persistida no MongoDB. O cache reduz chamadas repetidas
+// ao Baileys quando a Central de Atendimentos renderiza muitas conversas.
+const WHATSAPP_PROFILE_PHOTO_CACHE_TTL_MS = 30 * 60 * 1000;
+const WHATSAPP_PROFILE_PHOTO_NEGATIVE_TTL_MS = 10 * 60 * 1000;
+const whatsappProfilePhotoCache = new Map();
+
 // O cache de contagem de retry fica FORA do socket e sobrevive às recriações da
 // conexão dentro do mesmo processo. Isso evita loops de retry após reconexões.
 function criarCacheBaileysComTTL(ttlMs = BAILEYS_RETRY_COUNTER_TTL_MS, maxItems = 5000) {
@@ -5755,6 +5762,7 @@ async function registrarTicketHistorico(ticket) {
                 origem: ticket.origem,
                 clienteId: ticket.clienteId || null,
                 clienteNome: ticket.clienteNome || null,
+                clienteCadastrado: ticket.clienteCadastrado === true || !!ticket.clienteId,
                 cpf: ticket.cpf || null,
                 identificadores: ticket.identificadores || [],
                 whatsappNumbers: ticket.whatsappNumbers || [],
@@ -5846,6 +5854,7 @@ async function criarNovoTicket({ contato, rawJid, textoInicial, cliente = null, 
     io.emit('ticket_conversation_created', {
         ticketNumber: ticket.ticketNumber,
         clienteNome: ticket.clienteNome || null,
+        clienteCadastrado: ticket.clienteCadastrado === true || !!ticket.clienteId,
         whatsapp: contato.numeroPrincipal || ticket.numeroReal || null,
         status: ticket.status || null,
         origem: ticket.origem || 'organico',
@@ -9507,6 +9516,7 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
                     isArchived: !atendimentoAtivo,
                     archivedAt: !atendimentoAtivo ? Number(historicoChat?.archivedAt || historicoChat?.closedAt || 0) || null : null,
                     clienteNome: ticket.clienteNome || null,
+                    clienteCadastrado: ticket.clienteCadastrado === true || !!ticket.clienteId,
                     whatsapp: whatsappDoTicket(ticket),
                     area: ticket.area || ticket.menuOptionTitle || null,
                     status: ticket.status || null,
@@ -10138,6 +10148,63 @@ app.post(
 );
 
 
+
+async function obterUrlFotoPerfilWhatsApp(ticket = {}) {
+    if (!sock?.user || typeof sock.profilePictureUrl !== 'function') return null;
+
+    const numero = whatsappDoTicket(ticket);
+    const candidatos = [];
+    if (numero) candidatos.push(normalizarJid(`${numero}@s.whatsapp.net`));
+    [ticket.lastRawJid, ...(Array.isArray(ticket.identificadores) ? ticket.identificadores : [])]
+        .map(valor => normalizarJid(String(valor || '')))
+        .filter(Boolean)
+        .forEach(jid => { if (!candidatos.includes(jid)) candidatos.push(jid); });
+
+    for (const jid of candidatos.filter(Boolean)) {
+        const cache = whatsappProfilePhotoCache.get(jid);
+        if (cache) {
+            const ttl = cache.url ? WHATSAPP_PROFILE_PHOTO_CACHE_TTL_MS : WHATSAPP_PROFILE_PHOTO_NEGATIVE_TTL_MS;
+            if ((Date.now() - Number(cache.savedAt || 0)) < ttl) return cache.url || null;
+            whatsappProfilePhotoCache.delete(jid);
+        }
+
+        try {
+            const url = await sock.profilePictureUrl(jid, 'image');
+            if (url) {
+                whatsappProfilePhotoCache.set(jid, { url, savedAt: Date.now() });
+                return url;
+            }
+        } catch (_) {
+            whatsappProfilePhotoCache.set(jid, { url: null, savedAt: Date.now() });
+        }
+    }
+    return null;
+}
+
+// Foto do contato usada na Central de Atendimentos. O navegador recebe apenas um
+// redirecionamento temporário para a mídia do WhatsApp; nenhuma foto é persistida.
+app.get('/api/tickets/:ticketNumber/profile-photo', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).end();
+    if (!usuarioPode(req, 'tickets') && !usuarioPode(req, 'chat')) return res.status(403).end();
+    if (!ticketsColl) return res.status(503).end();
+
+    try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        const projection = { numeroReal:1, whatsappNumbers:1, identificadores:1, lastRawJid:1 };
+        const ativo = await ticketsColl.findOne({ ticketNumber }, { projection });
+        const ticket = ativo || (ticketHistoryColl ? await ticketHistoryColl.findOne({ _id: ticketNumber }, { projection }) : null);
+        if (!ticket) return res.status(404).end();
+
+        const url = await obterUrlFotoPerfilWhatsApp(ticket);
+        if (!url) return res.status(404).end();
+        res.setHeader('Cache-Control', 'private, max-age=900');
+        return res.redirect(302, url);
+    } catch (err) {
+        console.warn('[Atendimentos] Não foi possível obter foto do perfil:', err?.message || err);
+        return res.status(404).end();
+    }
+});
+
 // Visão unificada da Central de Atendimentos.
 // `active_tickets` continua sendo a fonte operacional do bot. Quando solicitado,
 // a interface também recebe atendimentos encerrados nos últimos 6 meses a partir
@@ -10157,7 +10224,7 @@ app.get('/api/tickets/conversations', async (req, res) => {
 
         const ativos = await ticketsColl.find({}, {
             projection: {
-                ticketNumber: 1, status: 1, clienteNome: 1, cpf: 1, numeroReal: 1,
+                ticketNumber: 1, status: 1, clienteId: 1, clienteNome: 1, clienteCadastrado: 1, cpf: 1, numeroReal: 1,
                 whatsappNumbers: 1, identificadores: 1, area: 1, menuOptionTitle: 1,
                 menuOptionEmoji: 1, createdAt: 1, lastActivity: 1, lastInboundChatAt: 1,
                 chatLeituras: 1, advogadoResponsavelId: 1, advogadoResponsavelNome: 1,
@@ -10173,6 +10240,7 @@ app.get('/api/tickets/conversations', async (req, res) => {
             return {
                 ticketNumber: ticket.ticketNumber || null,
                 clienteNome: ticket.clienteNome || null,
+                clienteCadastrado: ticket.clienteCadastrado === true || !!ticket.clienteId,
                 cpf: ticket.cpf || null,
                 whatsapp: whatsappDoTicket(ticket),
                 area: ticket.area || ticket.menuOptionTitle || null,
@@ -10214,7 +10282,7 @@ app.get('/api/tickets/conversations', async (req, res) => {
                 ]
             }, {
                 projection: {
-                    ticketNumber: 1, status: 1, clienteNome: 1, cpf: 1, numeroReal: 1,
+                    ticketNumber: 1, status: 1, clienteId: 1, clienteNome: 1, clienteCadastrado: 1, cpf: 1, numeroReal: 1,
                     whatsappNumbers: 1, identificadores: 1, area: 1, menuOptionTitle: 1,
                     menuOptionEmoji: 1, createdAt: 1, lastActivity: 1, updatedAt: 1,
                     archivedAt: 1, closedAt: 1, advogadoResponsavelId: 1,
@@ -10229,6 +10297,7 @@ app.get('/api/tickets/conversations', async (req, res) => {
                 return {
                     ticketNumber,
                     clienteNome: item.clienteNome || null,
+                    clienteCadastrado: item.clienteCadastrado === true || !!item.clienteId,
                     cpf: item.cpf || null,
                     whatsapp: whatsappDoTicket(item),
                     area: item.area || item.menuOptionTitle || null,
@@ -10454,8 +10523,8 @@ app.get('/api/tickets/active', async (req, res) => {
                 pendenteHaMaisDe2h: classificacao.tipo === 'advogado' && idadeUltimaAtividadeMs !== null && idadeUltimaAtividadeMs >= duasHorasMs,
                 origem: ticket.origem || 'organico',
                 clienteNome: ticket.clienteNome || null,
+                clienteCadastrado: ticket.clienteCadastrado === true || !!ticket.clienteId,
                 cpf: ticket.cpf || null,
-                clienteCadastrado: ticket.clienteCadastrado === true,
                 whatsapp: whatsappDoTicket(ticket),
                 area: ticket.area || null,
                 menuOptionTitle: ticket.menuOptionTitle || null,
@@ -10587,8 +10656,8 @@ app.get('/api/tickets/:ticketNumber/detail', async (req, res) => {
                 pendenteHaMaisDe2h: classificacao.tipo === 'advogado' && idadeUltimaAtividadeMs !== null && idadeUltimaAtividadeMs >= duasHorasMs,
                 origem: ticket.origem || 'organico',
                 clienteNome: ticket.clienteNome || null,
+                clienteCadastrado: ticket.clienteCadastrado === true || !!ticket.clienteId,
                 cpf: ticket.cpf || null,
-                clienteCadastrado: ticket.clienteCadastrado === true,
                 whatsapp: whatsappDoTicket(ticket),
                 area: ticket.area || null,
                 menuOptionTitle: ticket.menuOptionTitle || null,
@@ -10813,21 +10882,24 @@ app.get('/api/crm/leads', async (req, res) => {
         // vez a cada 5 minutos.
         reconciliarTicketsAnuncioNoCRMComThrottle();
 
-        // Filtra os leads de anúncio diretamente no MongoDB. A versão anterior buscava até
-        // 3.000 documentos de qualquer origem e descartava os orgânicos apenas no Node.js.
-        // Além de transferir menos dados, isso permite aproveitar os índices existentes.
-        const filtroLeadsAnuncio = {
-            $or: [
-                { origemTipo: 'anuncio' },
-                { origemTecnica: 'lead_anuncio' },
-                { origem: { $in: nomesCRM('origensAnuncio') } }
-            ]
-        };
-        const leads = await crmLeadsColl
-            .find(filtroLeadsAnuncio)
-            .sort({ updatedAt: -1 })
+        // Compatibilidade com o CRM legado: registros criados antes dos campos técnicos
+        // `origemTipo`/`origemTecnica` podem deixar de aparecer se a lista de origens for
+        // alterada posteriormente. Como `crm_leads` é uma coleção exclusivamente comercial,
+        // carregamos a janela recente e excluímos apenas registros explicitamente marcados
+        // como orgânicos. Assim nenhum lead histórico válido desaparece da tela.
+        const leadsBrutos = await crmLeadsColl
+            .find({})
+            .sort({ updatedAt: -1, createdAt: -1 })
             .limit(3000)
             .toArray();
+        const leads = leadsBrutos.filter(lead => {
+            if (lead?.origemTipo === 'organico' || lead?.origemTecnica === 'organico') return false;
+            if (leadCRMDeAnuncio(lead)) return true;
+            // Leads legados que já possuem número CRM/ticket foram efetivamente cadastrados
+            // na base comercial e devem continuar visíveis mesmo que a origem textual tenha
+            // sido renomeada nos parâmetros.
+            return !!(lead?.crmNumber || lead?.ticketNumber);
+        });
         res.json({
             generatedAt: Date.now(),
             resumo: resumoCRM(leads),
