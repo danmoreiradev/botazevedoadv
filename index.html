@@ -4297,86 +4297,85 @@
         }
     </style>
 
-
-
-    <style id="atendimentos-mobile-keyboard-v331">
-        /* V3.3.1 — correção exclusiva mobile para teclado virtual.
-           A conversa passa a ocupar exatamente o VisualViewport visível, inclusive
-           quando iOS/Android deslocam o viewport ao focar o campo de mensagem. */
+    <style id="atendimentos-mobile-keyboard-v332">
+        /* V3.3.2 — hotfix mobile.
+           Não usa position:fixed/offsetTop do VisualViewport no container inteiro,
+           pois isso pode tirar a central de atendimento da área visível em alguns
+           navegadores móveis. Apenas a altura útil acompanha o teclado. */
         @media (max-width: 767.98px) {
-            html.atendimentos-chat-mobile-root,
-            html.atendimentos-chat-mobile-root body {
-                background: #efeae2 !important;
-                overscroll-behavior: none !important;
+            body.atendimentos-chat-mobile-aberto,
+            body.atendimentos-chat-mobile-aberto .app-shell,
+            body.atendimentos-chat-mobile-aberto .main-content,
+            body.atendimentos-chat-mobile-aberto .content-container,
+            body.atendimentos-chat-mobile-aberto #tab-tickets,
+            body.atendimentos-chat-mobile-aberto #tickets-view-active,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-workspace,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-shell,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-history {
+                background-color: #efeae2 !important;
             }
 
             body.atendimentos-chat-mobile-aberto #tickets-view-active.mobile-chat-open {
-                position: fixed !important;
-                z-index: 2050 !important;
-                top: var(--chat-mobile-visual-top, 0px) !important;
-                left: var(--chat-mobile-visual-left, 0px) !important;
-                width: 100vw !important;
+                position: relative !important;
+                inset: auto !important;
+                top: auto !important;
+                left: auto !important;
+                right: auto !important;
+                bottom: auto !important;
+                z-index: auto !important;
+                width: 100% !important;
                 height: var(--chat-mobile-visual-height, 100dvh) !important;
                 min-height: 0 !important;
                 margin: 0 !important;
                 padding: 0 !important;
                 overflow: hidden !important;
-                background: #efeae2 !important;
-                contain: layout paint;
+                contain: none !important;
             }
 
             body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline,
             body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-workspace,
             body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-shell {
                 width: 100% !important;
-                height: 100% !important;
                 min-height: 0 !important;
                 max-height: none !important;
-                background: #efeae2 !important;
+            }
+
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-workspace {
+                height: 100% !important;
             }
 
             body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-shell {
+                height: 100% !important;
                 overflow: hidden !important;
             }
 
             body.atendimentos-chat-mobile-aberto #ticket-chat-history {
                 min-height: 0 !important;
-                background-color: #efeae2 !important;
+                overflow-y: auto !important;
                 overscroll-behavior-y: contain !important;
-                overflow-anchor: none;
+                -webkit-overflow-scrolling: touch;
             }
 
             body.atendimentos-chat-mobile-aberto .ticket-chat-composer {
                 position: relative !important;
                 z-index: 4 !important;
                 flex-shrink: 0 !important;
+                padding-bottom: max(7px, env(safe-area-inset-bottom)) !important;
             }
 
-            /* Enquanto o teclado estiver aberto, removemos qualquer área branca
-               residual criada pelo layout viewport atrás do viewport visual. */
-            body.atendimentos-chat-mobile-aberto::before {
-                content: "";
-                position: fixed;
-                inset: 0;
-                z-index: 2040;
-                pointer-events: none;
-                background: #efeae2;
-            }
-
-            body.atendimentos-chat-mobile-aberto #tickets-view-active.mobile-chat-open {
-                z-index: 2050 !important;
-            }
-        }
-
-        @media (max-width: 767.98px) {
-            html[data-theme="dark"].atendimentos-chat-mobile-root,
-            html[data-theme="dark"].atendimentos-chat-mobile-root body,
-            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto::before,
-            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto #tickets-view-active.mobile-chat-open,
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto,
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto .app-shell,
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto .main-content,
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto .content-container,
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto #tab-tickets,
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto #tickets-view-active,
             html[data-theme="dark"] body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline,
             html[data-theme="dark"] body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-workspace,
-            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-shell {
-                background: #0b141a !important;
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-shell,
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto #ticket-chat-history {
+                background-color: #0b141a !important;
             }
         }
     </style>
@@ -10339,45 +10338,45 @@
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
 
+        let chatMobileViewportRaf = 0;
+        let chatMobileUltimaAltura = 0;
+
         function atualizarAlturaVisualChatMobile() {
             const root = document.documentElement;
             if (window.innerWidth > 767.98) {
                 root.style.removeProperty('--chat-mobile-visual-height');
-                root.style.removeProperty('--chat-mobile-visual-top');
-                root.style.removeProperty('--chat-mobile-visual-left');
+                chatMobileUltimaAltura = 0;
                 return;
             }
 
             const viewport = window.visualViewport;
+            const alturaNova = Math.max(320, Math.round(viewport?.height || window.innerHeight || 0));
+            if (!alturaNova) return;
+
             const history = document.getElementById('ticket-chat-history');
-            const estavaPertoDoFim = history
-                ? (history.scrollHeight - history.scrollTop - history.clientHeight) <= 90
-                : false;
-            const distanciaDoFim = history
+            const conversaAberta = document.body.classList.contains('atendimentos-chat-mobile-aberto');
+            const distanciaDoFim = history && conversaAberta
                 ? Math.max(0, history.scrollHeight - history.scrollTop - history.clientHeight)
                 : 0;
+            const estavaPertoDoFim = distanciaDoFim <= 90;
 
-            const altura = Math.max(320, Math.round(viewport?.height || window.innerHeight || 0));
-            const topo = Math.max(0, Math.round(viewport?.offsetTop || 0));
-            const esquerda = Math.max(0, Math.round(viewport?.offsetLeft || 0));
-
-            root.style.setProperty('--chat-mobile-visual-height', `${altura}px`);
-            root.style.setProperty('--chat-mobile-visual-top', `${topo}px`);
-            root.style.setProperty('--chat-mobile-visual-left', `${esquerda}px`);
-
-            // O navegador pode reposicionar o layout ao abrir o teclado. Reaplicamos
-            // a posição do histórico no próximo frame para que as mensagens não
-            // saltem para o topo da conversa.
-            if (history && document.body.classList.contains('atendimentos-chat-mobile-aberto')) {
-                requestAnimationFrame(() => {
-                    if (!history.isConnected) return;
-                    if (estavaPertoDoFim) {
-                        history.scrollTop = history.scrollHeight;
-                    } else {
-                        history.scrollTop = Math.max(0, history.scrollHeight - history.clientHeight - distanciaDoFim);
-                    }
-                });
+            // Só atualiza quando a altura realmente muda. Ignora offsetTop/offsetLeft:
+            // em iOS eles podem variar ao focar o input e deslocar todo o chat para fora da tela.
+            if (Math.abs(alturaNova - chatMobileUltimaAltura) >= 2) {
+                chatMobileUltimaAltura = alturaNova;
+                root.style.setProperty('--chat-mobile-visual-height', `${alturaNova}px`);
             }
+
+            if (!history || !conversaAberta) return;
+            cancelAnimationFrame(chatMobileViewportRaf);
+            chatMobileViewportRaf = requestAnimationFrame(() => {
+                if (!history.isConnected) return;
+                if (estavaPertoDoFim) {
+                    history.scrollTop = history.scrollHeight;
+                } else {
+                    history.scrollTop = Math.max(0, history.scrollHeight - history.clientHeight - distanciaDoFim);
+                }
+            });
         }
 
         function definirModoConversaMobile(aberto = false) {
@@ -10388,7 +10387,6 @@
             workspace?.classList.toggle('chat-mobile-open', abrir);
             view?.classList.toggle('mobile-chat-open', abrir);
             document.body.classList.toggle('atendimentos-chat-mobile-aberto', abrir);
-            document.documentElement.classList.toggle('atendimentos-chat-mobile-root', abrir);
             atualizarAlturaVisualChatMobile();
         }
 
@@ -10399,14 +10397,14 @@
                 if (window.innerWidth > 767.98) {
                     document.getElementById('tickets-view-active')?.classList.remove('mobile-chat-open');
                     document.body.classList.remove('atendimentos-chat-mobile-aberto');
-                    document.documentElement.classList.remove('atendimentos-chat-mobile-root');
                     document.querySelector('.ticket-chat-workspace')?.classList.remove('chat-mobile-open');
                 } else if (window.activeChatTicketNumber) {
                     definirModoConversaMobile(true);
                 }
             }, { passive:true });
+            // Resize é suficiente para acompanhar o teclado. Não usamos o evento scroll
+            // do VisualViewport, que é justamente o que provocava o deslocamento branco.
             window.visualViewport?.addEventListener('resize', atualizarAlturaVisualChatMobile, { passive:true });
-            window.visualViewport?.addEventListener('scroll', atualizarAlturaVisualChatMobile, { passive:true });
         }
 
         function fecharChatTicket() { cancelarEdicaoChat(false); window.activeChatTicketNumber=null; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; window.activeChatTriageDetails=null; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); fecharDocumentosChat(); fecharTriagemChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); definirModoConversaMobile(false); const h=document.getElementById('ticket-chat-history'); if(h)h.innerHTML='<div class="chat-empty">Selecione um atendimento na lista ao lado.</div>'; renderizarListaConversasChat(); }
