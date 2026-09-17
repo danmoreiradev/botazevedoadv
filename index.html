@@ -8215,15 +8215,30 @@
             tbody.replaceChildren(fragment);
         }
 
+        function resetarBotaoEncerrarChat({ forcar = false } = {}) {
+            const button = document.getElementById('ticket-chat-end');
+            if (!button) return;
+
+            const ticketEmProcessamento = String(button.dataset.encerrandoTicket || '').trim();
+            const ticketAtual = String(window.activeChatTicketNumber || '').trim();
+            if (!forcar && ticketEmProcessamento && ticketEmProcessamento === ticketAtual) return;
+
+            button.disabled = false;
+            button.innerHTML = '<i class="bi bi-check2-circle"></i><span>Encerrar</span>';
+            delete button.dataset.encerrandoTicket;
+        }
+
         async function encerrarTicketPainel(ticketNumber, button = null) {
             const numero = String(ticketNumber || '').trim();
             if (!numero) return;
             if (!(await AppUI.confirm('O atendimento será marcado como encerrado e permanecerá disponível no histórico.',{title:`Encerrar atendimento ${numero}?`,type:'danger',confirmText:'Encerrar e arquivar'}))) return;
 
             const htmlOriginal = button?.innerHTML || '';
+            const ehBotaoCabecalhoChat = button?.id === 'ticket-chat-end';
             if (button) {
+                button.dataset.encerrandoTicket = numero;
                 button.disabled = true;
-                button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Encerrando...';
+                button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> <span>Encerrando...</span>';
             }
 
             try {
@@ -8245,9 +8260,15 @@
                 await atualizarListaConversasChat(true);
             } catch (err) {
                 alert(err.message || 'Não foi possível encerrar o ticket.');
-                if (button?.isConnected) {
+            } finally {
+                // O mesmo botão do cabeçalho é reutilizado ao trocar de conversa.
+                // Só restauramos se ele ainda pertencer à operação que acabou de finalizar.
+                if (button?.isConnected && String(button.dataset.encerrandoTicket || '') === numero) {
                     button.disabled = false;
-                    button.innerHTML = htmlOriginal;
+                    button.innerHTML = ehBotaoCabecalhoChat
+                        ? '<i class="bi bi-check2-circle"></i><span>Encerrar</span>'
+                        : (htmlOriginal || '<i class="bi bi-archive"></i> Encerrar');
+                    delete button.dataset.encerrandoTicket;
                 }
             }
         }
@@ -10488,7 +10509,18 @@
             }
             if(!ownerId||encerrado) fecharTransferenciaChat();
             const endBtn=document.getElementById('ticket-chat-end');
-            if(endBtn) endBtn.classList.toggle('hidden',encerrado);
+            if(endBtn) {
+                endBtn.classList.toggle('hidden',encerrado);
+                const ticketLoading = String(endBtn.dataset.encerrandoTicket || '').trim();
+                const ticketAtual = String(window.activeChatTicketNumber || '').trim();
+                // Se o botão carregava o estado de outro atendimento, ou se o atual
+                // acabou de ser encerrado, restaura imediatamente o estado visual.
+                if (encerrado || (ticketLoading && ticketLoading !== ticketAtual)) {
+                    resetarBotaoEncerrarChat({ forcar: true });
+                } else if (!ticketLoading) {
+                    resetarBotaoEncerrarChat({ forcar: true });
+                }
+            }
             const statusSelect=document.getElementById('ticket-chat-status-select');
             if(statusSelect) statusSelect.disabled=encerrado||!window.activeChatTicketNumber;
 
@@ -10734,6 +10766,9 @@
             const history=document.getElementById('ticket-chat-history');
             window.activeChatTicketNumber=String(ticketNumber||''); window.activeChatMessages=[]; window.activeChatOldest=null;
             window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null;
+            // O cabeçalho é reutilizado entre conversas. Nunca herda spinner/disabled
+            // de um encerramento iniciado no atendimento anterior.
+            resetarBotaoEncerrarChat({ forcar: true });
             if(history) history.innerHTML='<div class="chat-empty">Carregando conversa...</div>';
             if(dialog && typeof dialog.showModal==='function' && !dialog.open) dialog.showModal();
             definirModoConversaMobile(true);

@@ -615,6 +615,51 @@
         @keyframes loginLine { from{transform:translateX(-110%)} to{transform:translateX(300%)} }
     </style>
 
+
+    <style id="login-mobile-compact-header-v341">
+        /* V3.4.1 — cabeçalho compacto somente no login mobile */
+        @media (max-width: 720px) {
+            .brand-panel {
+                min-height: 0 !important;
+                padding: 12px 20px 14px !important;
+                border-radius: 0 0 18px 18px !important;
+            }
+            .brand-logo-wrap {
+                margin: 0 !important;
+                gap: 0 !important;
+            }
+            .brand-logo {
+                width: 170px !important;
+                max-width: 58vw !important;
+                height: 58px !important;
+                transform: scale(1.08) !important;
+                transform-origin: center center !important;
+            }
+            .brand-logo-wrap .brand-kicker {
+                display: inline-flex !important;
+                margin: -1px 0 0 !important;
+                font-size: .56rem !important;
+                line-height: 1.15 !important;
+                letter-spacing: .09em !important;
+            }
+            .brand-logo-wrap .brand-kicker::before {
+                width: 13px !important;
+            }
+            .brand-content,
+            .brand-footer {
+                display: none !important;
+            }
+            .login-panel {
+                padding: 26px 20px 34px !important;
+            }
+        }
+        @media (max-width: 420px) {
+            .brand-panel { padding: 10px 18px 12px !important; }
+            .brand-logo { width: 154px !important; height: 53px !important; }
+            .login-panel { padding: 24px 18px 30px !important; }
+        }
+    </style>
+
 </head>
 
 <body>
