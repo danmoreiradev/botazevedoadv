@@ -7698,15 +7698,26 @@ app.post('/login', async (req, res) => {
     const userInput = String(req.body?.user || '').trim();
     const pass = String(req.body?.pass || '');
     const userLower = normalizarUsuarioLogin(userInput);
+    const querJson = req.xhr || String(req.headers.accept || '').includes('application/json') || String(req.headers['x-requested-with'] || '').toLowerCase() === 'xmlhttprequest';
+
+    const responderErro = (status, erro, codigo) => {
+        if (querJson) return res.status(status).json({ ok: false, erro, codigo });
+        const mapa = { LOGIN_REQUIRED: 'required', LOGIN_INVALID: 'credentials', LOGIN_SESSION: 'session' };
+        return res.redirect(`/login?error=${encodeURIComponent(mapa[codigo] || 'session')}`);
+    };
+
     try {
         if (!userLower || !pass) {
-            return res.send("<script>alert('Informe usuário e senha.'); window.location='/login';</script>");
+            return responderErro(400, 'Informe usuário e senha.', 'LOGIN_REQUIRED');
         }
+
         const conta = await userLoginColl.findOne({
             $or: [{ user: userInput }, { userLower }]
         });
+
+        // Mensagem deliberadamente genérica: não revela se o usuário existe ou está inativo.
         if (!conta || conta.ativo === false || !validarSenhaPainel(pass, conta)) {
-            return res.send("<script>alert('Usuário ou senha inválidos.'); window.location='/login';</script>");
+            return responderErro(401, 'Usuário ou senha inválidos.', 'LOGIN_INVALID');
         }
 
         await migrarSenhaLegadaSeNecessario(conta, pass);
@@ -7716,17 +7727,23 @@ app.post('/login', async (req, res) => {
             { $set: { lastAccessAt: ultimoAcessoEm } }
         );
         conta.lastAccessAt = ultimoAcessoEm;
+
         const painelUser = sessaoPublicaDaConta(conta);
         req.session.loggedIn = true;
         req.session.panelUser = painelUser;
         req.session.userId = painelUser.id;
+
         req.session.save(err => {
-            if (err) return res.status(500).send('Erro ao iniciar sessão.');
-            res.redirect('/');
+            if (err) {
+                console.error('[Login] Falha ao persistir sessão:', err);
+                return responderErro(500, 'Não foi possível iniciar sua sessão. Tente novamente.', 'LOGIN_SESSION');
+            }
+            if (querJson) return res.json({ ok: true, redirect: '/', user: painelUser });
+            return res.redirect('/');
         });
     } catch (e) {
         console.error('[Login] Erro:', e);
-        res.status(500).send('Erro');
+        return responderErro(500, 'Não foi possível processar o acesso neste momento. Tente novamente.', 'LOGIN_SESSION');
     }
 });
 

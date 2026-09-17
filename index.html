@@ -4490,8 +4490,332 @@
         }
     </style>
 
+
+    <style id="app-feedback-system-v34">
+        /* V3.4 — feedback global, confirmações e carregamento */
+        .app-page-loader {
+            position: fixed; inset: 0; z-index: 20050;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(245,246,248,.96);
+            opacity: 1; visibility: visible;
+            transition: opacity .22s ease, visibility .22s ease;
+        }
+        .app-page-loader.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+        .app-page-loader-card {
+            min-width: 210px; padding: 22px 24px; display: flex; align-items: center; gap: 14px;
+            color: var(--adv-blue); background: #fff; border: 1px solid var(--border);
+            border-radius: 16px; box-shadow: 0 20px 55px rgba(22,28,38,.13);
+            font-size: .82rem; font-weight: 750;
+        }
+        .app-page-loader-spinner, .app-inline-spinner {
+            width: 22px; height: 22px; flex: 0 0 22px; border: 2px solid #e2e6eb;
+            border-top-color: var(--adv-gold); border-radius: 50%; animation: appSpin .7s linear infinite;
+        }
+        @keyframes appSpin { to { transform: rotate(360deg); } }
+
+        .app-network-loader {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 20040;
+            height: 3px; opacity: 0; pointer-events: none;
+            transition: opacity .14s ease;
+        }
+        .app-network-loader.is-visible { opacity: 1; }
+        .app-network-loader-bar {
+            width: 38%; height: 100%; border-radius: 0 999px 999px 0;
+            background: linear-gradient(90deg, var(--adv-gold), #e1c686, var(--adv-gold));
+            box-shadow: 0 0 12px rgba(197,160,89,.35);
+            animation: appNetworkMove 1.05s ease-in-out infinite;
+        }
+        @keyframes appNetworkMove {
+            0% { transform: translateX(-110%); width: 24%; }
+            55% { width: 55%; }
+            100% { transform: translateX(380%); width: 28%; }
+        }
+        .app-network-pill {
+            position: fixed; top: 12px; left: 50%; z-index: 20041;
+            transform: translate(-50%, -12px); opacity: 0; pointer-events: none;
+            display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 7px 11px;
+            color: #5c6570; background: rgba(255,255,255,.96); border: 1px solid #e1e5e9;
+            border-radius: 999px; box-shadow: 0 7px 22px rgba(20,27,38,.09);
+            font-size: .70rem; font-weight: 750; transition: opacity .15s ease, transform .15s ease;
+        }
+        .app-network-pill.is-visible { opacity: 1; transform: translate(-50%, 0); }
+        .app-network-pill .app-inline-spinner { width: 14px; height: 14px; flex-basis: 14px; border-width: 1.5px; }
+
+        .app-ui-backdrop {
+            position: fixed; inset: 0; z-index: 20100; padding: 20px;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(16,21,29,.52); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+            opacity: 0; visibility: hidden; pointer-events: none;
+            transition: opacity .16s ease, visibility .16s ease;
+        }
+        .app-ui-backdrop.is-open { opacity: 1; visibility: visible; pointer-events: auto; }
+        .app-ui-dialog {
+            width: min(440px, 100%); overflow: hidden; transform: translateY(8px) scale(.985);
+            color: var(--text); background: #fff; border: 1px solid var(--border);
+            border-radius: 20px; box-shadow: 0 30px 90px rgba(12,17,24,.30);
+            transition: transform .18s ease;
+        }
+        .app-ui-backdrop.is-open .app-ui-dialog { transform: none; }
+        .app-ui-dialog-body { padding: 25px 25px 18px; }
+        .app-ui-icon {
+            width: 46px; height: 46px; margin-bottom: 17px; display: inline-flex;
+            align-items: center; justify-content: center; border-radius: 14px;
+            color: #53606d; background: #f1f3f6; font-size: 1.15rem;
+        }
+        .app-ui-icon.danger, .app-ui-icon.error { color: #a13f39; background: #fff1f0; }
+        .app-ui-icon.warning { color: #8a6108; background: #fff7e1; }
+        .app-ui-icon.success { color: #167541; background: #ecfaf2; }
+        .app-ui-icon.info { color: #245f95; background: #eef6ff; }
+        .app-ui-title { margin: 0; color: var(--adv-blue); font-size: 1.08rem; font-weight: 790; letter-spacing: -.015em; }
+        .app-ui-message { margin: 8px 0 0; color: #626c78; font-size: .86rem; line-height: 1.55; white-space: pre-line; }
+        .app-ui-actions {
+            padding: 14px 18px 18px; display: flex; justify-content: flex-end; gap: 9px;
+            border-top: 1px solid #edf0f3; background: #fafbfc;
+        }
+        .app-ui-btn {
+            min-height: 40px; padding: 8px 14px; border-radius: 10px; font-size: .80rem;
+            font-weight: 760; border: 1px solid var(--border-strong); cursor: pointer;
+        }
+        .app-ui-btn.secondary { color: #59636f; background: #fff; }
+        .app-ui-btn.primary { color: #fff; background: var(--adv-blue); border-color: var(--adv-blue); }
+        .app-ui-btn.danger { color: #fff; background: #b94840; border-color: #b94840; }
+        .app-ui-btn.warning { color: #fff; background: #946a12; border-color: #946a12; }
+        .app-ui-btn:focus-visible { outline: 3px solid rgba(197,160,89,.25); outline-offset: 2px; }
+
+        .app-toast-stack {
+            position: fixed; right: 18px; bottom: 18px; z-index: 20090;
+            width: min(370px, calc(100vw - 28px)); display: grid; gap: 9px; pointer-events: none;
+        }
+        .app-toast {
+            padding: 13px 14px; display: grid; grid-template-columns: 36px minmax(0,1fr) 24px;
+            gap: 10px; align-items: start; background: rgba(255,255,255,.98);
+            border: 1px solid var(--border); border-radius: 13px; box-shadow: 0 18px 50px rgba(17,22,30,.17);
+            pointer-events: auto; animation: appToastIn .2s ease both;
+        }
+        .app-toast.is-leaving { animation: appToastOut .18s ease both; }
+        .app-toast-icon { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: #f1f3f6; }
+        .app-toast.success .app-toast-icon { color:#167541; background:#ecfaf2; }
+        .app-toast.error .app-toast-icon { color:#a13f39; background:#fff1f0; }
+        .app-toast.warning .app-toast-icon { color:#8a6108; background:#fff7e1; }
+        .app-toast-title { color: var(--adv-blue); font-size: .78rem; font-weight: 800; }
+        .app-toast-message { margin-top: 2px; color: #65707b; font-size: .73rem; line-height: 1.42; }
+        .app-toast-close { width: 24px; height: 24px; padding: 0; color: #7b8490; background: transparent; border: 0; border-radius: 7px; }
+        @keyframes appToastIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform:none; } }
+        @keyframes appToastOut { to { opacity:0; transform: translateY(6px); } }
+
+        html[data-theme="dark"] .app-page-loader { background: rgba(24,29,37,.97); }
+        html[data-theme="dark"] .app-page-loader-card,
+        html[data-theme="dark"] .app-ui-dialog,
+        html[data-theme="dark"] .app-toast,
+        html[data-theme="dark"] .app-network-pill { background: #242b34; border-color: #3a434e; color: #edf2f5; }
+        html[data-theme="dark"] .app-ui-actions { background: #20262e; border-color: #343d47; }
+        html[data-theme="dark"] .app-ui-title,
+        html[data-theme="dark"] .app-toast-title { color: #f1f4f7; }
+        html[data-theme="dark"] .app-ui-message,
+        html[data-theme="dark"] .app-toast-message,
+        html[data-theme="dark"] .app-network-pill { color: #b7c0c8; }
+        html[data-theme="dark"] .app-ui-btn.secondary { color:#d8dee4; background:#2b333d; border-color:#46515d; }
+
+        @media (max-width: 575.98px) {
+            .app-ui-backdrop { padding: 12px; align-items: flex-end; }
+            .app-ui-dialog { width: 100%; border-radius: 18px 18px 14px 14px; }
+            .app-ui-dialog-body { padding: 22px 20px 16px; }
+            .app-ui-actions { padding: 12px; }
+            .app-ui-actions .app-ui-btn { flex: 1; }
+            .app-network-pill { top: 8px; }
+            .app-toast-stack { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .app-page-loader-spinner, .app-inline-spinner, .app-network-loader-bar { animation-duration: 1.8s; }
+        }
+    </style>
+
 </head>
 <body class="session-loading">
+
+    <!-- Sistema global de feedback / loading V3.4 -->
+    <div id="app-page-loader" class="app-page-loader" role="status" aria-live="polite">
+        <div class="app-page-loader-card"><span class="app-page-loader-spinner" aria-hidden="true"></span><span>Preparando o painel...</span></div>
+    </div>
+    <div id="app-network-loader" class="app-network-loader" aria-hidden="true"><div class="app-network-loader-bar"></div></div>
+    <div id="app-network-pill" class="app-network-pill" aria-live="polite"><span class="app-inline-spinner" aria-hidden="true"></span><span>Carregando...</span></div>
+    <div id="app-ui-backdrop" class="app-ui-backdrop" aria-hidden="true">
+        <div class="app-ui-dialog" role="dialog" aria-modal="true" aria-labelledby="app-ui-title" aria-describedby="app-ui-message">
+            <div class="app-ui-dialog-body">
+                <div id="app-ui-icon" class="app-ui-icon info" aria-hidden="true"><i class="bi bi-info-lg"></i></div>
+                <h3 id="app-ui-title" class="app-ui-title">Atenção</h3>
+                <p id="app-ui-message" class="app-ui-message"></p>
+            </div>
+            <div id="app-ui-actions" class="app-ui-actions"></div>
+        </div>
+    </div>
+    <div id="app-toast-stack" class="app-toast-stack" aria-live="polite" aria-atomic="false"></div>
+
+
+    <script id="app-feedback-controller-v34">
+    (() => {
+        const AppUI = window.AppUI = window.AppUI || {};
+        let modalResolver = null;
+        let modalLastFocus = null;
+        let activeRequests = 0;
+        let loadingTimer = null;
+        let loadingShownAt = 0;
+        const nativeFetch = window.fetch.bind(window);
+
+        const qs = (id) => document.getElementById(id);
+        const iconByType = {
+            info: 'bi-info-lg', success: 'bi-check2', warning: 'bi-exclamation-lg',
+            danger: 'bi-trash3', error: 'bi-x-lg'
+        };
+        const titleByType = {
+            info: 'Informação', success: 'Concluído', warning: 'Atenção',
+            danger: 'Confirmar ação', error: 'Não foi possível concluir'
+        };
+
+        function closeModal(result=false) {
+            const backdrop = qs('app-ui-backdrop');
+            if (!backdrop?.classList.contains('is-open')) return;
+            backdrop.classList.remove('is-open');
+            backdrop.setAttribute('aria-hidden','true');
+            const resolve = modalResolver;
+            modalResolver = null;
+            setTimeout(() => {
+                try { modalLastFocus?.focus?.({preventScroll:true}); } catch (_) {}
+                modalLastFocus = null;
+                resolve?.(result);
+            }, 120);
+        }
+
+        AppUI.dialog = function({ title='', message='', type='info', confirmText='OK', cancelText=null, dismissible=true }={}) {
+            if (modalResolver) closeModal(false);
+            return new Promise(resolve => {
+                modalResolver = resolve;
+                modalLastFocus = document.activeElement;
+                const backdrop = qs('app-ui-backdrop');
+                const icon = qs('app-ui-icon');
+                const titleEl = qs('app-ui-title');
+                const msgEl = qs('app-ui-message');
+                const actions = qs('app-ui-actions');
+                if (!backdrop || !actions) { resolve(false); return; }
+
+                const safeType = ['info','success','warning','danger','error'].includes(type) ? type : 'info';
+                icon.className = `app-ui-icon ${safeType}`;
+                icon.innerHTML = `<i class="bi ${iconByType[safeType] || iconByType.info}"></i>`;
+                titleEl.textContent = title || titleByType[safeType];
+                msgEl.textContent = String(message || '');
+                actions.replaceChildren();
+
+                if (cancelText) {
+                    const cancel = document.createElement('button');
+                    cancel.type='button'; cancel.className='app-ui-btn secondary'; cancel.textContent=cancelText;
+                    cancel.addEventListener('click', () => closeModal(false));
+                    actions.appendChild(cancel);
+                }
+                const ok = document.createElement('button');
+                ok.type='button';
+                ok.className=`app-ui-btn ${safeType==='danger'||safeType==='error'?'danger':safeType==='warning'?'warning':'primary'}`;
+                ok.textContent=confirmText || 'OK';
+                ok.addEventListener('click', () => closeModal(true));
+                actions.appendChild(ok);
+
+                backdrop.dataset.dismissible = dismissible ? '1' : '0';
+                backdrop.classList.add('is-open');
+                backdrop.setAttribute('aria-hidden','false');
+                setTimeout(() => ok.focus({preventScroll:true}), 40);
+            });
+        };
+
+        AppUI.alert = (message, options={}) => AppUI.dialog({
+            message, type: options.type || inferType(message), title: options.title || '', confirmText: options.confirmText || 'Entendi', dismissible: true
+        });
+        AppUI.confirm = (message, options={}) => AppUI.dialog({
+            message, type: options.type || 'warning', title: options.title || 'Confirmar ação',
+            confirmText: options.confirmText || 'Confirmar', cancelText: options.cancelText || 'Cancelar', dismissible: true
+        });
+
+        function inferType(message='') {
+            const text=String(message).toLowerCase();
+            if (/erro|inválid|invalido|não foi possível|falha|expirad|negad/.test(text)) return 'error';
+            if (/atenção|preencha|informe|selecione|somente/.test(text)) return 'warning';
+            if (/salv|conclu|sucesso|enviado|atualizad/.test(text)) return 'success';
+            return 'info';
+        }
+
+        // Compatibilidade: chamadas legadas de alert() ganham o novo layout automaticamente.
+        window.alert = function(message) { AppUI.alert(message); };
+
+        AppUI.toast = function(message, {title='', type='info', duration=3800}={}) {
+            const stack=qs('app-toast-stack'); if(!stack) return;
+            const safeType=['info','success','warning','error'].includes(type)?type:'info';
+            const toast=document.createElement('div'); toast.className=`app-toast ${safeType}`;
+            toast.innerHTML=`<div class="app-toast-icon"><i class="bi ${iconByType[safeType]||iconByType.info}"></i></div><div><div class="app-toast-title"></div><div class="app-toast-message"></div></div><button type="button" class="app-toast-close" aria-label="Fechar"><i class="bi bi-x"></i></button>`;
+            toast.querySelector('.app-toast-title').textContent=title||titleByType[safeType]||'Aviso';
+            toast.querySelector('.app-toast-message').textContent=String(message||'');
+            const remove=()=>{toast.classList.add('is-leaving');setTimeout(()=>toast.remove(),180)};
+            toast.querySelector('.app-toast-close').onclick=(e)=>{e.stopPropagation();remove();};
+            stack.appendChild(toast);
+            setTimeout(remove, Math.max(1800, Number(duration)||3800));
+        };
+
+        function showNetworkLoading() {
+            clearTimeout(loadingTimer);
+            if (activeRequests <= 0) return;
+            loadingTimer=setTimeout(() => {
+                if (activeRequests <= 0) return;
+                loadingShownAt=Date.now();
+                qs('app-network-loader')?.classList.add('is-visible');
+                qs('app-network-pill')?.classList.add('is-visible');
+            }, 160);
+        }
+        function hideNetworkLoading() {
+            clearTimeout(loadingTimer);
+            const elapsed=Date.now()-loadingShownAt;
+            const finish=()=>{
+                if(activeRequests>0)return;
+                qs('app-network-loader')?.classList.remove('is-visible');
+                qs('app-network-pill')?.classList.remove('is-visible');
+            };
+            elapsed<220 ? setTimeout(finish,220-elapsed) : finish();
+        }
+        AppUI.beginLoading=()=>{activeRequests++; if(activeRequests===1)showNetworkLoading();};
+        AppUI.endLoading=()=>{activeRequests=Math.max(0,activeRequests-1); if(activeRequests===0)hideNetworkLoading();};
+
+        // Toda requisição fetch passa pelo indicador global. Não altera resposta, erro ou semântica.
+        window.fetch = async function(...args) {
+            AppUI.beginLoading();
+            try { return await nativeFetch(...args); }
+            finally { AppUI.endLoading(); }
+        };
+
+        AppUI.setButtonLoading = function(button, loading, label='Processando...') {
+            if(!button) return;
+            if(loading) {
+                if(!button.dataset.appOriginalHtml) button.dataset.appOriginalHtml=button.innerHTML;
+                button.disabled=true;
+                button.innerHTML=`<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>${label}`;
+            } else {
+                if(button.dataset.appOriginalHtml) button.innerHTML=button.dataset.appOriginalHtml;
+                delete button.dataset.appOriginalHtml;
+                button.disabled=false;
+            }
+        };
+
+        document.addEventListener('keydown', e => {
+            if(e.key==='Escape' && qs('app-ui-backdrop')?.classList.contains('is-open') && qs('app-ui-backdrop')?.dataset.dismissible==='1') closeModal(false);
+        });
+        document.addEventListener('click', e => {
+            const backdrop=qs('app-ui-backdrop');
+            if(e.target===backdrop && backdrop?.dataset.dismissible==='1') closeModal(false);
+        });
+        window.addEventListener('load', () => {
+            const loader=qs('app-page-loader');
+            setTimeout(()=>loader?.classList.add('is-hidden'), 120);
+            setTimeout(()=>loader?.remove(), 500);
+        }, {once:true});
+        setTimeout(()=>qs('app-page-loader')?.classList.add('is-hidden'), 3500);
+    })();
+    </script>
+
     <div class="app-shell">
         <aside class="sidebar" id="app-sidebar" aria-label="Navegação principal">
             <div class="sidebar-brand">
@@ -5749,7 +6073,7 @@
         }
         async function excluirTextoRapido(id) {
             const item=(window.panelQuickTexts||[]).find(x=>String(x.id)===String(id));
-            if(!item||!confirm(`Excluir o texto rápido /${item.shortcut}?`))return;
+            if(!item||!(await AppUI.confirm(`Excluir o texto rápido /${item.shortcut}?`,{title:'Excluir texto rápido',type:'danger',confirmText:'Excluir'})))return;
             try{
                 const res=await fetch(`/api/me/quick-texts/${encodeURIComponent(id)}`,{method:'DELETE'});
                 const data=await res.json().catch(()=>({})); if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');
@@ -6606,7 +6930,7 @@
         function ensinarLacunaConhecimento(item={}){limparFormularioConhecimento();alternarPainelKnowledge('base');document.getElementById('knowledge_gap_id').value=String(item?._id?.$oid||item?._id||'');document.getElementById('pergunta_ia').value=String(item.textoExemplo||'');document.getElementById('knowledge-form-title').textContent='Ensinar novo conhecimento';document.getElementById('knowledge-cancel-edit').classList.remove('hidden');document.querySelector('.knowledge-editor-card')?.scrollIntoView({behavior:'auto',block:'start'});setTimeout(()=>document.getElementById('resposta_ia')?.focus({preventScroll:true}),120);}
         async function ignorarLacunaConhecimento(gapId,button){
             if(!gapId)return;
-            if(!confirm('Ignorar esta dúvida? Ela sairá da lista de dúvidas pendentes, mas continuará registrada no banco como ignorada.'))return;
+            if(!(await AppUI.confirm('Ela sairá da lista de dúvidas pendentes, mas continuará registrada no banco como ignorada.',{title:'Ignorar esta dúvida?',type:'warning',confirmText:'Ignorar'})))return;
             const old=button?.innerHTML||'';
             if(button){button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Ignorando';}
             try{
@@ -6620,7 +6944,7 @@
                 if(button){button.disabled=false;button.innerHTML=old;}
             }
         }
-        async function removerConhecimento(id){if(!confirm('Tem certeza que deseja remover este conhecimento?'))return;try{const res=await fetch(`/api/knowledgeColl/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');if(document.getElementById('knowledge_id').value===String(id))limparFormularioConhecimento();await carregarConhecimento();}catch(err){alert(err.message||'Não foi possível excluir o conhecimento.');}}
+        async function removerConhecimento(id){if(!(await AppUI.confirm('O conhecimento será removido da base ativa.',{title:'Remover conhecimento?',type:'danger',confirmText:'Remover'})))return;try{const res=await fetch(`/api/knowledgeColl/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');if(document.getElementById('knowledge_id').value===String(id))limparFormularioConhecimento();await carregarConhecimento();}catch(err){alert(err.message||'Não foi possível excluir o conhecimento.');}}
 
 
         function idFonteSiteIA(item={}){return String(item?._id?.$oid||item?._id||'');}
@@ -6720,7 +7044,7 @@
             if(!id)return;const old=button?.innerHTML||'';if(button){button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm"></span>';}
             try{const res=await fetch(`/api/knowledgeWebSources/${encodeURIComponent(id)}/generate-suggestions`,{method:'POST'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível gerar sugestões.');await carregarFontesSiteIA();alternarPainelKnowledge('sugestoes');}catch(err){alert(err.message||'Não foi possível gerar sugestões.');await carregarFontesSiteIA();}finally{if(button&&button.isConnected){button.disabled=false;button.innerHTML=old;}}
         }
-        async function removerFonteSiteIA(id){if(!confirm('Excluir esta fonte e todas as páginas sincronizadas?'))return;try{const res=await fetch(`/api/knowledgeWebSources/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir a fonte.');if(document.getElementById('knowledge-web-id').value===String(id))limparFonteSiteIA();await carregarFontesSiteIA();}catch(err){alert(err.message||'Não foi possível excluir a fonte.');}}
+        async function removerFonteSiteIA(id){if(!(await AppUI.confirm('Todas as páginas sincronizadas desta fonte também serão removidas.',{title:'Excluir fonte do site?',type:'danger',confirmText:'Excluir'})))return;try{const res=await fetch(`/api/knowledgeWebSources/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir a fonte.');if(document.getElementById('knowledge-web-id').value===String(id))limparFonteSiteIA();await carregarFontesSiteIA();}catch(err){alert(err.message||'Não foi possível excluir a fonte.');}}
         socket.on('knowledge_web_updated',()=>{if(!document.getElementById('tab-ia')?.classList.contains('hidden'))carregarFontesSiteIA().catch(()=>{});});
 
 
@@ -7566,7 +7890,7 @@
         }
 
         async function excluirOpcaoAtendimento(id, titulo) {
-            if (!confirm(`Deseja realmente excluir a opção “${titulo}”?\n\nO histórico dos tickets antigos será preservado.`)) return;
+            if (!(await AppUI.confirm(`O histórico dos atendimentos antigos será preservado.`,{title:`Excluir a opção “${titulo}”?`,type:'danger',confirmText:'Excluir opção'}))) return;
 
             try {
                 const res = await fetch(`/api/menu-options/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -7894,7 +8218,7 @@
         async function encerrarTicketPainel(ticketNumber, button = null) {
             const numero = String(ticketNumber || '').trim();
             if (!numero) return;
-            if (!confirm(`Encerrar e arquivar o ticket ${numero}?\n\nEle será removido da Central de Atendimentos.`)) return;
+            if (!(await AppUI.confirm('O atendimento será marcado como encerrado e permanecerá disponível no histórico.',{title:`Encerrar atendimento ${numero}?`,type:'danger',confirmText:'Encerrar e arquivar'}))) return;
 
             const htmlOriginal = button?.innerHTML || '';
             if (button) {
@@ -9039,7 +9363,7 @@
             }
             const convertidoOuEncerrado = statusFechadoCRMJS(dados.status);
             if (!convertidoOuEncerrado && (!dados.proximaAcao || !dados.dataProximaAcao)) {
-                const continuar = confirm('Este lead ficará aberto sem próxima ação e/ou sem data. Deseja salvar mesmo assim?');
+                const continuar = await AppUI.confirm('Este lead ficará aberto sem próxima ação e/ou sem data.',{title:'Salvar lead sem próxima ação?',type:'warning',confirmText:'Salvar mesmo assim'});
                 if (!continuar) return;
             }
             btn.disabled = true;
@@ -9062,7 +9386,7 @@
 
         async function excluirLeadCRM() {
             const id = window.crmEditingId;
-            if (!id || !confirm('Excluir este lead do CRM? Esta ação não exclui o ticket nem o cadastro do cliente.')) return;
+            if (!id || !(await AppUI.confirm('Esta ação não exclui o atendimento nem o cadastro do cliente.',{title:'Excluir este lead do CRM?',type:'danger',confirmText:'Excluir lead'}))) return;
             const status = document.getElementById('crm-form-status');
             try {
                 const res = await fetch(`/api/crm/leads/${id}`, { method:'DELETE' });
@@ -9470,7 +9794,7 @@
         async function removerCliente(id, nome) {
             const clientId = String(id || '').trim();
             if (!clientId) return;
-            if (!confirm(`Deseja realmente remover o cadastro de ${nome}?\n\nO histórico dos tickets será preservado e o número voltará a aparecer como não cadastrado.`)) return;
+            if (!(await AppUI.confirm('O histórico dos atendimentos será preservado e o número voltará a aparecer como não cadastrado.',{title:`Remover o cadastro de ${nome}?`,type:'danger',confirmText:'Remover cadastro'}))) return;
 
             const status = document.getElementById('clients-status');
             if (status) { status.className = 'menu-save-status text-muted mb-2'; status.textContent = 'Removendo cliente...'; }
@@ -10266,7 +10590,7 @@
             if(!ticket||!userId){ alert('Selecione o usuário que receberá o atendimento.'); return; }
             const users=window.chatTransferUsers||[];
             const alvo=users.find(u=>String(u.id)===userId);
-            if(!confirm(`Transferir o atendimento para ${alvo?.assinatura||alvo?.nome||'o usuário selecionado'}? O cliente será informado sobre o novo responsável.`)) return;
+            if(!(await AppUI.confirm('O cliente será informado automaticamente sobre o novo responsável.',{title:`Transferir para ${alvo?.assinatura||alvo?.nome||'o usuário selecionado'}?`,type:'warning',confirmText:'Transferir atendimento'}))) return;
             const btn=document.getElementById('ticket-transfer-confirm');
             const old=btn?.innerHTML||'Transferir'; if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm"></span> Transferindo...';}
             try{
@@ -10856,7 +11180,7 @@
                 if(!id&&data.boasVindas?.enviado){status.textContent='✓ Usuário salvo. Mensagem de boas-vindas enviada no WhatsApp.';setTimeout(fecharFormularioUsuario,900);}
                 else if(!id&&document.getElementById('user-celular').value.trim()&&data.boasVindas?.motivo==='whatsapp_desconectado'){status.textContent='✓ Usuário salvo. Boas-vindas não enviada porque o WhatsApp está desconectado.';setTimeout(fecharFormularioUsuario,1400);}
                 else {status.textContent='✓ Usuário salvo.';setTimeout(fecharFormularioUsuario,500);}}catch(err){status.textContent=err.message;status.className='client-form-status text-danger mt-2';}finally{btn.disabled=false;}}
-        async function excluirUsuarioAtual(){const id=document.getElementById('user-form-id').value;if(!id||!confirm('Deseja realmente excluir este usuário?'))return;const status=document.getElementById('user-form-status');try{const res=await fetch(`/api/users/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');fecharFormularioUsuario();window.panelUsersLoaded=false;await carregarUsuarios(true);}catch(err){status.textContent=err.message;status.className='client-form-status text-danger mt-2';}}
+        async function excluirUsuarioAtual(){const id=document.getElementById('user-form-id').value;if(!id||!(await AppUI.confirm('O usuário perderá o acesso ao painel.',{title:'Excluir este usuário?',type:'danger',confirmText:'Excluir usuário'})))return;const status=document.getElementById('user-form-status');try{const res=await fetch(`/api/users/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');fecharFormularioUsuario();window.panelUsersLoaded=false;await carregarUsuarios(true);}catch(err){status.textContent=err.message;status.className='client-form-status text-danger mt-2';}}
 
         function diasSelecionadosHorario() {
             return [...document.querySelectorAll('.business-day:checked')]
@@ -10999,9 +11323,14 @@
             }
         }
 
-        function handleWhatsAppLogout() {
-            if(confirm("Deseja realmente desconectar?")) {
-                fetch('/logout-whatsapp');
+        async function handleWhatsAppLogout() {
+            const confirmar = await AppUI.confirm('O bot ficará indisponível até que o WhatsApp seja conectado novamente.',{title:'Desconectar WhatsApp?',type:'danger',confirmText:'Desconectar'});
+            if(!confirmar) return;
+            try {
+                await fetch('/logout-whatsapp');
+                AppUI.toast('WhatsApp desconectado.',{title:'Conexão encerrada',type:'success'});
+            } catch (err) {
+                AppUI.alert(err?.message || 'Não foi possível desconectar o WhatsApp.',{type:'error'});
             }
         }
     </script>

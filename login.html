@@ -578,9 +578,47 @@
         }
     </style>
 
+
+    <style id="login-feedback-v34">
+        .login-feedback {
+            display: none; margin: 0 0 18px; padding: 13px 14px;
+            grid-template-columns: 34px minmax(0,1fr); gap: 10px; align-items: start;
+            border: 1px solid transparent; border-radius: 12px; font-size: .80rem; line-height: 1.45;
+        }
+        .login-feedback.show { display: grid; animation: loginFeedbackIn .18s ease both; }
+        .login-feedback.error { color:#8f3934; background:#fff3f2; border-color:#efd5d2; }
+        .login-feedback.warning { color:#7b5b18; background:#fff8e7; border-color:#f0deb2; }
+        .login-feedback.success { color:#17683d; background:#ecfaf2; border-color:#caecd9; }
+        .login-feedback-icon {
+            width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center;
+            border-radius:10px; background:rgba(255,255,255,.70); font-size:1rem; font-weight:800;
+        }
+        .login-feedback-title { margin-bottom:2px; font-weight:800; }
+        .login-feedback-message { opacity:.88; }
+        @keyframes loginFeedbackIn { from {opacity:0; transform:translateY(-4px)} to {opacity:1; transform:none} }
+        .btn-adv.is-loading { cursor: wait; transform: none !important; }
+        .login-spinner {
+            width:17px; height:17px; border:2px solid rgba(255,255,255,.34); border-top-color:#fff;
+            border-radius:50%; animation:loginSpin .7s linear infinite;
+        }
+        @keyframes loginSpin { to { transform:rotate(360deg); } }
+        .form-control[aria-invalid="true"] { border-color:#d6736d; box-shadow:0 0 0 4px rgba(220,76,69,.09); }
+        .login-loading-line {
+            position:fixed; top:0; left:0; z-index:100; width:100%; height:3px; overflow:hidden;
+            opacity:0; transition:opacity .12s ease;
+        }
+        .login-loading-line.show { opacity:1; }
+        .login-loading-line::after {
+            content:""; display:block; width:38%; height:100%; background:var(--adv-gold);
+            animation:loginLine 1s ease-in-out infinite;
+        }
+        @keyframes loginLine { from{transform:translateX(-110%)} to{transform:translateX(300%)} }
+    </style>
+
 </head>
 
 <body>
+    <div id="login-loading-line" class="login-loading-line" aria-hidden="true"></div>
     <main class="login-shell">
         <section class="brand-panel" aria-label="Azevedo & Juvencio">
             <div class="brand-logo-wrap">
@@ -619,7 +657,9 @@
                     Entre com suas credenciais para acessar o painel administrativo.
                 </p>
 
-                <form action="/login" method="POST">
+                <div id="login-feedback" class="login-feedback" role="alert" aria-live="polite"></div>
+
+                <form id="login-form" action="/login" method="POST" novalidate>
                     <div class="form-group">
                         <label class="form-label" for="user">Usuário</label>
 
@@ -680,7 +720,7 @@
                         </div>
                     </div>
 
-                    <button type="submit" class="btn btn-adv">
+                    <button id="login-submit" type="submit" class="btn btn-adv">
                         Entrar no sistema
                         <svg
                             width="17"
@@ -727,5 +767,82 @@
             </div>
         </section>
     </main>
+
+    <script id="login-controller-v34">
+    (() => {
+        const form=document.getElementById('login-form');
+        const btn=document.getElementById('login-submit');
+        const feedback=document.getElementById('login-feedback');
+        const loadingLine=document.getElementById('login-loading-line');
+        const user=document.getElementById('user');
+        const pass=document.getElementById('pass');
+        if(!form||!btn) return;
+        const originalButton=btn.innerHTML;
+
+        function showFeedback(type,title,message){
+            feedback.className=`login-feedback show ${type}`;
+            const icon=type==='success'?'✓':type==='warning'?'!':'×';
+            feedback.innerHTML='<div class="login-feedback-icon"></div><div><div class="login-feedback-title"></div><div class="login-feedback-message"></div></div>';
+            feedback.querySelector('.login-feedback-icon').textContent=icon;
+            feedback.querySelector('.login-feedback-title').textContent=title;
+            feedback.querySelector('.login-feedback-message').textContent=message;
+        }
+        function hideFeedback(){ feedback.className='login-feedback'; feedback.replaceChildren(); }
+        function setLoading(on){
+            btn.disabled=on; user.disabled=on; pass.disabled=on;
+            loadingLine.classList.toggle('show',on);
+            if(on){btn.classList.add('is-loading');btn.innerHTML='<span class="login-spinner" aria-hidden="true"></span> Validando acesso...';}
+            else {btn.classList.remove('is-loading');btn.innerHTML=originalButton;}
+        }
+        function validate(){
+            user.removeAttribute('aria-invalid'); pass.removeAttribute('aria-invalid');
+            if(!user.value.trim()||!pass.value){
+                if(!user.value.trim()) user.setAttribute('aria-invalid','true');
+                if(!pass.value) pass.setAttribute('aria-invalid','true');
+                showFeedback('warning','Preencha seus dados','Informe usuário e senha para continuar.');
+                (!user.value.trim()?user:pass).focus(); return false;
+            }
+            return true;
+        }
+
+        form.addEventListener('submit', async e => {
+            e.preventDefault(); hideFeedback(); if(!validate()) return;
+            setLoading(true);
+            try{
+                const res=await fetch('/login',{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json','Accept':'application/json','X-Requested-With':'XMLHttpRequest'},
+                    body:JSON.stringify({user:user.value.trim(),pass:pass.value})
+                });
+                const data=await res.json().catch(()=>({}));
+                if(!res.ok || data.ok===false){
+                    if(res.status===401){
+                        user.setAttribute('aria-invalid','true'); pass.setAttribute('aria-invalid','true');
+                        showFeedback('error','Acesso não autorizado',data.erro||'Usuário ou senha inválidos. Confira os dados e tente novamente.');
+                        pass.value=''; pass.focus();
+                    } else {
+                        showFeedback('error','Não foi possível entrar',data.erro||'Houve uma falha ao iniciar sua sessão. Tente novamente.');
+                    }
+                    return;
+                }
+                showFeedback('success','Acesso autorizado','Credenciais validadas. Abrindo o painel...');
+                setTimeout(()=>window.location.assign(data.redirect||'/'),260);
+            }catch(err){
+                showFeedback('error','Falha de conexão','Não foi possível comunicar com o servidor. Verifique sua conexão e tente novamente.');
+            }finally{
+                if(!feedback.classList.contains('success')) setLoading(false);
+            }
+        });
+
+        [user,pass].forEach(el=>el.addEventListener('input',()=>{el.removeAttribute('aria-invalid');if(feedback.classList.contains('show'))hideFeedback();}));
+        const params=new URLSearchParams(location.search);
+        const error=params.get('error');
+        if(error==='credentials') showFeedback('error','Acesso não autorizado','Usuário ou senha inválidos. Confira os dados e tente novamente.');
+        else if(error==='required') showFeedback('warning','Preencha seus dados','Informe usuário e senha para continuar.');
+        else if(error==='session') showFeedback('error','Sessão não iniciada','Não foi possível iniciar sua sessão. Tente novamente.');
+        if(error) history.replaceState({},document.title,location.pathname);
+    })();
+    </script>
+
 </body>
 </html>
