@@ -4671,6 +4671,105 @@
         }
     </style>
 
+
+    <style id="chat-status-dot-loading-v345">
+        /* V3.4.5 — status interno compacto e loading estável nas ações do chat */
+        #ticket-chat-dialog .chat-status-dot-select {
+            width: 30px !important;
+            min-width: 30px !important;
+            max-width: 30px !important;
+            height: 30px !important;
+            min-height: 30px !important;
+            padding: 0 !important;
+            flex: 0 0 30px !important;
+            border-width: 2px !important;
+            border-radius: 50% !important;
+            appearance: none !important;
+            -webkit-appearance: none !important;
+            background-image: none !important;
+            background-position: center !important;
+            color: transparent !important;
+            font-size: 0 !important;
+            line-height: 0 !important;
+            cursor: pointer;
+            text-indent: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+        }
+        #ticket-chat-dialog .chat-status-dot-select:hover:not(:disabled) { transform: scale(1.08); }
+        #ticket-chat-dialog .chat-status-dot-select:focus {
+            outline: 0;
+            transform: scale(1.06);
+        }
+        #ticket-chat-dialog .chat-status-dot-select:disabled { cursor: default; opacity: .48; }
+        #ticket-chat-dialog .chat-status-dot-select option {
+            color: #20242d !important;
+            background: #fff !important;
+            font-size: .82rem !important;
+            line-height: normal !important;
+            text-indent: 0 !important;
+        }
+        #ticket-chat-dialog .ticket-chat-status-legend .ticket-status-legend-item,
+        #ticket-chat-dialog .ticket-chat-status-legend .ticket-status-legend-item > span {
+            max-width: none;
+        }
+        #ticket-chat-dialog .ticket-chat-status-legend .ticket-status-legend-item > span {
+            overflow: visible;
+            text-overflow: clip;
+            white-space: nowrap;
+        }
+        #ticket-chat-dialog button.app-action-loading {
+            cursor: wait !important;
+            pointer-events: none;
+        }
+        #ticket-chat-dialog button.app-action-loading .app-action-loading-spinner {
+            margin: 0;
+            flex: 0 0 auto;
+        }
+        #ticket-chat-dialog button.app-action-loading .app-action-loading-text {
+            display: inline;
+        }
+        html[data-theme="dark"] #ticket-chat-dialog .chat-status-dot-select option {
+            color: #edf1f4 !important;
+            background: #252b34 !important;
+        }
+
+        @media (max-width: 767.98px) {
+            #ticket-chat-dialog .chat-status-dot-select {
+                width: 29px !important;
+                min-width: 29px !important;
+                max-width: 29px !important;
+                height: 29px !important;
+                min-height: 29px !important;
+                flex-basis: 29px !important;
+            }
+            /* Durante ações assíncronas, nenhum botão do chat cresce para exibir texto. */
+            #ticket-chat-dialog button.app-action-loading {
+                width: 34px !important;
+                min-width: 34px !important;
+                max-width: 34px !important;
+                height: 34px !important;
+                min-height: 34px !important;
+                padding: 0 !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                gap: 0 !important;
+                border-radius: 50% !important;
+                flex: 0 0 34px !important;
+            }
+            #ticket-chat-dialog button.app-action-loading .app-action-loading-text {
+                display: none !important;
+            }
+            #ticket-chat-dialog button.app-action-loading .app-action-loading-spinner {
+                width: 15px;
+                height: 15px;
+                margin: 0 !important;
+                border-width: 2px;
+            }
+        }
+    </style>
 </head>
 <body class="session-loading">
 
@@ -5208,7 +5307,7 @@
             <div class="ticket-chat-operations">
                 <div class="ticket-chat-statuses">
                     <span class="chat-op-pill" id="ticket-chat-op-situation"><i class="bi bi-circle-fill"></i><span>Situação</span></span>
-                    <select class="chat-status-select" id="ticket-chat-status-select" title="Alterar status interno do ticket" onchange="alterarStatusInternoPeloChat(this)"><option value="">Sem status</option></select>
+                    <select class="chat-status-select chat-status-dot-select" id="ticket-chat-status-select" title="Alterar status interno do atendimento" aria-label="Alterar status interno do atendimento" onchange="alterarStatusInternoPeloChat(this)"><option value="">Sem status</option></select>
                     <span class="chat-op-pill" id="ticket-chat-op-owner"><i class="bi bi-person-badge"></i><span>Sem responsável</span></span>
                     <button type="button" class="chat-op-pill chat-op-pill-action" id="ticket-chat-op-triage" onclick="toggleTriagemChat(event)" aria-expanded="false" title="Ver perguntas e respostas da triagem"><i class="bi bi-list-check"></i><span>Triagem</span><i class="bi bi-chevron-down chat-op-chevron"></i></button>
                     <span class="chat-op-pill" id="ticket-chat-op-time"><i class="bi bi-clock"></i><span>Atividade</span></span>
@@ -8186,7 +8285,25 @@
                 });
             });
         }
-        function aplicarVisualStatusTicketSelect(select,statusId){const item=(window.ticketStatusOptions||[]).find(x=>String(x.id)===String(statusId||''));select.style.color=item?.cor||'';select.style.borderColor=item?.cor||'';select.style.boxShadow=item?`inset 3px 0 0 ${item.cor}`:'';select.title=item?.nome?`Status interno: ${item.nome}`:'Alterar status interno do atendimento';}
+        function aplicarVisualStatusTicketSelect(select,statusId){
+            const item=(window.ticketStatusOptions||[]).find(x=>String(x.id)===String(statusId||''));
+            if(select?.classList?.contains('chat-status-dot-select')){
+                const cor=String(item?.cor||'#aab4af');
+                select.style.color='transparent';
+                select.style.borderColor=cor;
+                select.style.backgroundColor=item?.cor||'#ffffff';
+                select.style.boxShadow=item?`0 0 0 3px ${cor}20`:'inset 0 0 0 1px #aab4af';
+                const descricao=item?.nome?`Status interno: ${item.nome}. Clique para alterar.`:'Sem status interno. Clique para escolher um status.';
+                select.title=descricao;
+                select.setAttribute('aria-label',descricao);
+                return;
+            }
+            select.style.color=item?.cor||'';
+            select.style.backgroundColor='';
+            select.style.borderColor=item?.cor||'';
+            select.style.boxShadow=item?`inset 3px 0 0 ${item.cor}`:'';
+            select.title=item?.nome?`Status interno: ${item.nome}`:'Alterar status interno do atendimento';
+        }
         async function atualizarStatusInternoTicket(ticketNumber,statusId,select){const anterior=(window.activeTicketsData||[]).find(t=>String(t.ticketNumber)===String(ticketNumber))?.internalStatusId||'';if(select)select.disabled=true;try{const r=await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/internal-status`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({statusId:statusId||null})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.erro||'Não foi possível atualizar o status.');const t=(window.activeTicketsData||[]).find(x=>String(x.ticketNumber)===String(ticketNumber));if(t){t.internalStatusId=d.internalStatusId||null;t.internalStatus=d.internalStatus||null}if(select)aplicarVisualStatusTicketSelect(select,d.internalStatusId)}catch(e){if(select)select.value=anterior;alert(e.message||'Não foi possível atualizar o status interno.')}finally{if(select)select.disabled=false}}
 
         function renderizarTicketsAtivos(tickets = []) {
@@ -8322,6 +8439,42 @@
             tbody.replaceChildren(fragment);
         }
 
+
+        function iniciarLoadingBotaoAcao(button, texto='Processando...') {
+            if (!button) return () => false;
+            const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            const estado = {
+                html: button.innerHTML,
+                title: button.getAttribute('title'),
+                ariaLabel: button.getAttribute('aria-label')
+            };
+            button.dataset.appActionLoadingToken = token;
+            button.disabled = true;
+            button.classList.add('app-action-loading');
+            button.setAttribute('aria-busy', 'true');
+            button.setAttribute('aria-label', texto);
+            button.innerHTML = `<span class="spinner-border spinner-border-sm app-action-loading-spinner" aria-hidden="true"></span><span class="app-action-loading-text">${escapeHtmlChat(texto)}</span>`;
+
+            return ({ html = estado.html } = {}) => {
+                if (!button.isConnected || button.dataset.appActionLoadingToken !== token) return false;
+                button.disabled = false;
+                button.classList.remove('app-action-loading');
+                button.removeAttribute('aria-busy');
+                delete button.dataset.appActionLoadingToken;
+                button.innerHTML = html;
+                if (estado.title === null) button.removeAttribute('title'); else button.setAttribute('title', estado.title);
+                if (estado.ariaLabel === null) button.removeAttribute('aria-label'); else button.setAttribute('aria-label', estado.ariaLabel);
+                return true;
+            };
+        }
+
+        function invalidarLoadingBotaoAcao(button) {
+            if (!button) return;
+            button.classList.remove('app-action-loading');
+            button.removeAttribute('aria-busy');
+            delete button.dataset.appActionLoadingToken;
+        }
+
         function resetarBotaoEncerrarChat({ forcar = false } = {}) {
             const button = document.getElementById('ticket-chat-end');
             if (!button) return;
@@ -8330,6 +8483,7 @@
             const ticketAtual = String(window.activeChatTicketNumber || '').trim();
             if (!forcar && ticketEmProcessamento && ticketEmProcessamento === ticketAtual) return;
 
+            invalidarLoadingBotaoAcao(button);
             button.disabled = false;
             button.innerHTML = '<i class="bi bi-check2-circle"></i><span>Encerrar</span>';
             delete button.dataset.encerrandoTicket;
@@ -8342,11 +8496,8 @@
 
             const htmlOriginal = button?.innerHTML || '';
             const ehBotaoCabecalhoChat = button?.id === 'ticket-chat-end';
-            if (button) {
-                button.dataset.encerrandoTicket = numero;
-                button.disabled = true;
-                button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> <span>Encerrando...</span>';
-            }
+            const restaurarLoadingEncerramento = button ? iniciarLoadingBotaoAcao(button, 'Encerrando...') : () => false;
+            if (button) button.dataset.encerrandoTicket = numero;
 
             try {
                 const res = await fetch(`/api/tickets/${encodeURIComponent(numero)}/archive`, {
@@ -8371,10 +8522,11 @@
                 // O mesmo botão do cabeçalho é reutilizado ao trocar de conversa.
                 // Só restauramos se ele ainda pertencer à operação que acabou de finalizar.
                 if (button?.isConnected && String(button.dataset.encerrandoTicket || '') === numero) {
-                    button.disabled = false;
-                    button.innerHTML = ehBotaoCabecalhoChat
-                        ? '<i class="bi bi-check2-circle"></i><span>Encerrar</span>'
-                        : (htmlOriginal || '<i class="bi bi-archive"></i> Encerrar');
+                    restaurarLoadingEncerramento({
+                        html: ehBotaoCabecalhoChat
+                            ? '<i class="bi bi-check2-circle"></i><span>Encerrar</span>'
+                            : (htmlOriginal || '<i class="bi bi-archive"></i> Encerrar')
+                    });
                     delete button.dataset.encerrandoTicket;
                 }
             }
@@ -10071,8 +10223,7 @@
 
         async function reprocessarDocumentoIAChat(ticketNumber, messageId, button) {
             if (!ticketNumber || !messageId) return;
-            const old = button?.innerHTML || '';
-            if (button) { button.disabled = true; button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Reprocessando'; }
+            const restaurarLoadingReprocessamento = button ? iniciarLoadingBotaoAcao(button, 'Reprocessando...') : () => false;
             try {
                 const res = await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/documents/${encodeURIComponent(messageId)}/retry`, { method:'POST', headers:{'Content-Type':'application/json'} });
                 const data = await res.json().catch(()=>({}));
@@ -10081,7 +10232,7 @@
             } catch (err) {
                 alert(err.message || 'Não foi possível gerar uma nova leitura.');
             } finally {
-                if (button?.isConnected) { button.disabled = false; button.innerHTML = old; }
+                restaurarLoadingReprocessamento();
             }
         }
 
@@ -10558,7 +10709,7 @@
             const valorAnterior=select.value;
             select.replaceChildren();
             const sem=document.createElement('option');sem.value='';sem.textContent='Sem status';select.appendChild(sem);
-            (window.ticketStatusOptions||[]).forEach(item=>{const op=document.createElement('option');const nome=String(item.nome||'Status').trim()||'Status';op.value=String(item.id||'');op.textContent=abreviarNomeStatusTicket(nome,24);op.title=nome;select.appendChild(op);});
+            (window.ticketStatusOptions||[]).forEach(item=>{const op=document.createElement('option');const nome=String(item.nome||'Status').trim()||'Status';op.value=String(item.id||'');op.textContent=nome;op.title=nome;select.appendChild(op);});
             select.value=atual;
             if(select.value!==atual)select.value='';
             aplicarVisualStatusTicketSelect(select,select.value);
@@ -10665,8 +10816,7 @@
                 return;
             }
 
-            const original=triggerButton?.innerHTML||'';
-            if(triggerButton){triggerButton.disabled=true;triggerButton.innerHTML='<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Iniciando...';}
+            const restaurarLoadingAssuncao = triggerButton ? iniciarLoadingBotaoAcao(triggerButton, 'Iniciando...') : () => false;
             try{
                 const res=await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/claim`,{method:'POST',headers:{'Content-Type':'application/json'}});
                 const data=await res.json().catch(()=>({}));
@@ -10689,7 +10839,7 @@
                 alert(err.message||'Não foi possível iniciar o atendimento.');
                 if(Number(err.status)===409){window.activeTicketsLoaded=false;carregarTicketsAtivos(true);}
             }finally{
-                if(triggerButton&&triggerButton.isConnected){triggerButton.disabled=false;triggerButton.innerHTML=original;}
+                restaurarLoadingAssuncao();
             }
         }
 
@@ -10707,6 +10857,8 @@
             const panel=document.getElementById('ticket-transfer-panel');
             if(!panel) return;
             if(!panel.classList.contains('hidden')) { fecharTransferenciaChat(); return; }
+            const triggerButton=event?.currentTarget||document.getElementById('ticket-chat-transfer');
+            const restaurarLoadingTransferencia = triggerButton ? iniciarLoadingBotaoAcao(triggerButton, 'Carregando...') : () => false;
             try {
                 const users=await carregarUsuariosTransferenciaChat();
                 const select=document.getElementById('ticket-transfer-user');
@@ -10716,6 +10868,7 @@
                 }
                 panel.classList.remove('hidden');
             } catch(err) { alert(err.message||'Não foi possível carregar os usuários.'); }
+            finally { restaurarLoadingTransferencia(); }
         }
 
         function fecharTransferenciaChat() {
@@ -10732,14 +10885,14 @@
             const alvo=users.find(u=>String(u.id)===userId);
             if(!(await AppUI.confirm('O cliente será informado automaticamente sobre o novo responsável.',{title:`Transferir para ${alvo?.assinatura||alvo?.nome||'o usuário selecionado'}?`,type:'warning',confirmText:'Transferir atendimento'}))) return;
             const btn=document.getElementById('ticket-transfer-confirm');
-            const old=btn?.innerHTML||'Transferir'; if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm"></span> Transferindo...';}
+            const restaurarLoadingConfirmacaoTransferencia = btn ? iniciarLoadingBotaoAcao(btn, 'Transferindo...') : () => false;
             try{
                 const res=await fetch(`/api/tickets/${encodeURIComponent(ticket)}/transfer`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId})});
                 const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.erro||'Não foi possível transferir o atendimento.');
                 const payload={ticketNumber:ticket,...(data.ticket||{}),advogadoResponsavelId:data.responsavel?.id||data.ticket?.advogadoResponsavelId,advogadoResponsavelNome:data.responsavel?.nome||data.ticket?.advogadoResponsavelNome};
                 aplicarAtribuicaoTicketLocal(payload); recalcularResumoTicketsLocal(); filtrarTicketsAtivos(); atualizarEstadoAtendimentoChat(payload); fecharTransferenciaChat();
             }catch(err){alert(err.message||'Não foi possível transferir o atendimento.');}
-            finally{if(btn){btn.disabled=false;btn.innerHTML=old;}}
+            finally{restaurarLoadingConfirmacaoTransferencia();}
         }
 
         function centralAtendimentosVisivel(){
@@ -10869,7 +11022,7 @@
         async function abrirChatTicket(ticketNumber, triggerButton = null) {
             cancelarRespostaChat(); cancelarGravacaoChat(); fecharTriagemChat(); window.activeChatTriageDetails = null;
             if(!temPermissaoPainel('chat') || !ticketNumber) return;
-            const originalButtonHtml = triggerButton?.innerHTML || '';
+            const restaurarLoadingAbertura = triggerButton ? iniciarLoadingBotaoAcao(triggerButton, 'Abrindo...') : () => false;
             const dialog=document.getElementById('ticket-chat-dialog');
             const history=document.getElementById('ticket-chat-history');
             window.activeChatTicketNumber=String(ticketNumber||''); window.activeChatMessages=[]; window.activeChatOldest=null;
@@ -10881,7 +11034,6 @@
             if(dialog && typeof dialog.showModal==='function' && !dialog.open) dialog.showModal();
             definirModoConversaMobile(true);
             renderizarListaConversasChat();
-            if(triggerButton){triggerButton.disabled=true;triggerButton.innerHTML='<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> Abrindo...';}
 
             try{
                 // IMPORTANTE: abrir chat faz somente GET. Nenhuma assunção/aviso ao cliente.
@@ -10910,7 +11062,7 @@
             }catch(err){
                 if(dialog?.open&&history)history.innerHTML=`<div class="chat-empty">${escapeHtmlChat(err.message||'Erro ao carregar chat.')}</div>`;else alert(err.message||'Não foi possível abrir o atendimento.');
             }finally{
-                if(triggerButton&&triggerButton.isConnected){triggerButton.disabled=false;triggerButton.innerHTML=originalButtonHtml;}
+                restaurarLoadingAbertura();
             }
         }
         function escapeHtmlChat(value='') { const d=document.createElement('div'); d.textContent=String(value); return d.innerHTML; }
@@ -11460,7 +11612,7 @@
 
                 window.businessHoursLoaded = false;
                 status.className = 'menu-save-status text-success';
-                status.textContent = '✓ Horário salvo. A próxima mensagem já respeitara esta configuração.';
+                status.textContent = '✓ Horário salvo. A próxima mensagem já respeitará esta configuração.';
                 atualizarPreviewHorarioFuncionamento();
             } catch (err) {
                 console.error(err);
