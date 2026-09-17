@@ -3704,6 +3704,59 @@
         @media(max-width:767.98px){.param-admin-grid{grid-template-columns:1fr}.param-admin-card,.param-admin-card-compact{padding:12px}.param-admin-tabs{gap:4px}.param-admin-tab{flex:1 1 calc(50% - 4px);justify-content:center}.param-row{grid-template-columns:1fr}.param-row.simple{grid-template-columns:1fr auto}.param-row.ticket-status{grid-template-columns:48px minmax(0,1fr) auto}.ticket-internal-status{min-width:125px}.chat-emoji-grid{grid-template-columns:repeat(7,1fr)}}
     </style>
 
+
+    <style id="chat-whatsapp-workspace-v12">
+        /* Central de conversas em tela cheia, inspirada na organização do WhatsApp Web. */
+        #ticket-chat-dialog{width:100vw!important;height:100dvh!important;max-width:100vw!important;max-height:100dvh!important;margin:0!important;border:0!important;border-radius:0!important;padding:0!important;}
+        #ticket-chat-dialog::backdrop{background:#111b21!important;}
+        .ticket-chat-workspace{width:100%;height:100%;display:grid;grid-template-columns:340px minmax(0,1fr);overflow:hidden;background:#f0f2f5;}
+        .ticket-chat-workspace>.ticket-chat-shell{min-width:0;height:100%;display:grid;grid-template-rows:auto auto auto auto minmax(0,1fr) auto;overflow:hidden;border-left:1px solid #d9dee2;}
+        .ticket-chat-conversations{min-width:0;height:100%;display:flex;flex-direction:column;background:#fff;color:#111b21;overflow:hidden;}
+        .chat-conversations-header{min-height:66px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;background:#f0f2f5;border-bottom:1px solid #e1e5e8;}
+        .chat-conversations-title{font-size:1rem;font-weight:800;color:#111b21;}
+        .chat-conversations-subtitle{margin-top:2px;color:#667781;font-size:.68rem;}
+        .chat-conversations-refresh{width:38px;height:38px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:50%;background:transparent;color:#54656f;}
+        .chat-conversations-refresh:hover{background:#e4e7e9;}
+        .chat-conversations-search{margin:8px 10px;min-height:38px;padding:0 11px;display:flex;align-items:center;gap:9px;background:#f0f2f5;border-radius:8px;color:#667781;}
+        .chat-conversations-search input{width:100%;border:0;outline:0;background:transparent;color:#111b21;font-size:.80rem;}
+        .chat-conversations-list{flex:1;overflow-y:auto;border-top:1px solid #f3f4f5;}
+        .chat-conversations-empty{padding:28px 18px;color:#8696a0;font-size:.78rem;text-align:center;}
+        .chat-conversation-item{position:relative;width:100%;min-height:76px;padding:10px 12px;display:grid;grid-template-columns:47px minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;background:#fff;border:0;border-bottom:1px solid #eef0f2;color:#111b21;}
+        .chat-conversation-item:hover{background:#f5f6f6;}
+        .chat-conversation-item.active{background:#f0f2f5;}
+        .chat-conversation-item.unread strong{font-weight:800;}
+        .chat-conversation-avatar{width:47px;height:47px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:#dfe7e3;color:#60736c;font-weight:800;font-size:1rem;}
+        .chat-conversation-copy{min-width:0;display:block;}
+        .chat-conversation-line{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+        .chat-conversation-line strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.83rem;color:#111b21;}
+        .chat-conversation-line time{flex:0 0 auto;color:#8696a0;font-size:.62rem;}
+        .chat-conversation-preview{display:block;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#667781;font-size:.70rem;}
+        .chat-conversation-ticket{display:block;margin-top:2px;color:#9aa5ab;font-size:.61rem;font-weight:700;}
+        .chat-conversation-unread{width:9px;height:9px;border-radius:50%;background:#25d366;}
+        #ticket-chat-dialog .ticket-chat-header{border-radius:0!important;}
+        #ticket-chat-dialog .ticket-chat-history{position:relative;isolation:isolate;overflow-y:auto!important;background-color:#efeae2!important;background-image:none!important;}
+        #ticket-chat-dialog .ticket-chat-history::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:url('https://azevedoejuvencioadvogados.com.br/wp-content/uploads/2024/01/cropped-Prancheta-4-e1706712675977-32x32.png') center center/220px auto no-repeat;opacity:.055;filter:grayscale(1);}
+        .ticket-chat-end{min-height:36px;padding:7px 10px;display:inline-flex;align-items:center;gap:6px;color:#8f3934;background:#fff7f6;border:1px solid #efd5d2;border-radius:9px;font-size:.72rem;font-weight:760;}
+        .chat-status-select{min-height:30px;max-width:190px;padding:4px 28px 4px 9px;border:1px solid #e0e5e2;border-radius:999px;background-color:#f5f7f6;color:#56635d;font-size:.68rem;font-weight:700;box-shadow:none;}
+        .chat-status-select:focus{outline:none;box-shadow:0 0 0 2px rgba(0,168,132,.10);}
+        .ticket-chat-end:hover:not(:disabled){color:#fff;background:#dc4c45;border-color:#dc4c45;}
+        .knowledge-gap-ignore{white-space:nowrap;border:1px solid #e2d9d3;background:#fff;color:#80665a;border-radius:8px;padding:6px 9px;font-size:.66rem;font-weight:800;}
+        .knowledge-gap-ignore:hover{background:#faf4f0;border-color:#cfbdb2;}
+        html[data-theme="dark"] .ticket-chat-workspace{background:#0b141a;}
+        html[data-theme="dark"] .ticket-chat-conversations{background:#111b21;color:#e9edef;}
+        html[data-theme="dark"] .chat-conversations-header,html[data-theme="dark"] .chat-conversations-search{background:#202c33;border-color:#2f3b43;}
+        html[data-theme="dark"] .chat-conversations-title,html[data-theme="dark"] .chat-conversation-line strong{color:#e9edef;}
+        html[data-theme="dark"] .chat-conversations-subtitle,html[data-theme="dark"] .chat-conversation-preview,html[data-theme="dark"] .chat-conversation-ticket,html[data-theme="dark"] .chat-conversation-line time{color:#8696a0;}
+        html[data-theme="dark"] .chat-conversations-search input{color:#e9edef;}
+        html[data-theme="dark"] .chat-conversation-item{background:#111b21;border-color:#202c33;color:#e9edef;}
+        html[data-theme="dark"] .chat-conversation-item:hover{background:#182229;}
+        html[data-theme="dark"] .chat-conversation-item.active{background:#2a3942;}
+        html[data-theme="dark"] #ticket-chat-dialog .ticket-chat-history::before{opacity:.035;filter:grayscale(1) invert(1);}
+        html[data-theme="dark"] .knowledge-gap-ignore{background:#252c34;border-color:#4a403b;color:#d7c4bb;}
+        html[data-theme="dark"] .chat-status-select{background:#253139;color:#c6cfd5;border-color:#39474f;}
+        @media(max-width:900px){.ticket-chat-workspace{grid-template-columns:280px minmax(0,1fr);}}
+        @media(max-width:700px){.ticket-chat-workspace{grid-template-columns:1fr}.ticket-chat-conversations{display:none}.ticket-chat-workspace>.ticket-chat-shell{border-left:0}.ticket-chat-operation-actions span{display:none}.ticket-chat-end{width:36px;height:36px;padding:0;justify-content:center}.ticket-chat-operations{overflow-x:auto}}
+    </style>
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -4427,11 +4480,24 @@
                     <div class="d-flex gap-2"><button type="button" class="btn btn-outline-secondary" onclick="fecharCadastroCliente()">Cancelar</button><button type="submit" id="client-save-btn" class="btn text-white" style="background: var(--adv-blue)"><i class="bi bi-check2 me-1"></i> Salvar cliente</button></div>
                 </div>
             </form>
+            </div>
         </div>
     </dialog>
 
     <dialog id="ticket-chat-dialog">
-        <div class="ticket-chat-shell">
+        <div class="ticket-chat-workspace">
+            <aside class="ticket-chat-conversations" id="ticket-chat-conversations">
+                <div class="chat-conversations-header">
+                    <div>
+                        <div class="chat-conversations-title">Conversas</div>
+                        <div class="chat-conversations-subtitle">Tickets ativos e histórico recente</div>
+                    </div>
+                    <button type="button" class="chat-conversations-refresh" onclick="atualizarListaConversasChat(true)" title="Atualizar conversas"><i class="bi bi-arrow-clockwise"></i></button>
+                </div>
+                <div class="chat-conversations-search"><i class="bi bi-search"></i><input type="search" id="chat-conversations-search" placeholder="Pesquisar conversa" oninput="renderizarListaConversasChat()"></div>
+                <div class="chat-conversations-list" id="chat-conversations-list"><div class="chat-conversations-empty">Carregando conversas...</div></div>
+            </aside>
+            <div class="ticket-chat-shell">
             <div class="ticket-chat-header">
                 <div class="ticket-chat-contact">
                     <div class="ticket-chat-avatar"><i class="bi bi-person-fill"></i></div>
@@ -4448,6 +4514,7 @@
             <div class="ticket-chat-operations">
                 <div class="ticket-chat-statuses">
                     <span class="chat-op-pill" id="ticket-chat-op-situation"><i class="bi bi-circle-fill"></i><span>Situação</span></span>
+                    <select class="chat-status-select" id="ticket-chat-status-select" title="Alterar status interno do ticket" onchange="alterarStatusInternoPeloChat(this)"><option value="">Sem status</option></select>
                     <span class="chat-op-pill" id="ticket-chat-op-owner"><i class="bi bi-person-badge"></i><span>Sem responsável</span></span>
                     <button type="button" class="chat-op-pill chat-op-pill-action" id="ticket-chat-op-triage" onclick="toggleTriagemChat(event)" aria-expanded="false" title="Ver perguntas e respostas da triagem"><i class="bi bi-list-check"></i><span>Triagem</span><i class="bi bi-chevron-down chat-op-chevron"></i></button>
                     <span class="chat-op-pill" id="ticket-chat-op-time"><i class="bi bi-clock"></i><span>Atividade</span></span>
@@ -4459,6 +4526,7 @@
                     <button type="button" class="ticket-chat-claim hidden" id="ticket-chat-claim" onclick="iniciarAtendimentoTicket(window.activeChatTicketNumber, this, false)" title="Iniciar atendimento">
                         <i class="bi bi-headset"></i><span>Iniciar atendimento</span>
                     </button>
+                    <button type="button" class="ticket-chat-end" id="ticket-chat-end" onclick="encerrarTicketPainel(window.activeChatTicketNumber, this)" title="Encerrar e arquivar atendimento"><i class="bi bi-check2-circle"></i><span>Encerrar</span></button>
                     <div class="ticket-transfer-wrap">
                         <button type="button" class="ticket-chat-transfer hidden" id="ticket-chat-transfer" onclick="toggleTransferenciaChat(event)" title="Transferir atendimento para outro usuário">
                             <i class="bi bi-arrow-left-right"></i><span>Transferir atendimento</span>
@@ -4809,12 +4877,18 @@
         // ---------------------------------------------------------------------
         // PERFIL E TEMA DO USUÁRIO
         // ---------------------------------------------------------------------
-        const PANEL_THEME_STORAGE_KEY='aj_panel_theme_v1';
+        const PANEL_THEME_STORAGE_KEY='aj_panel_theme_v2';
+        const PANEL_THEME_EXPLICIT_KEY='aj_panel_theme_explicit_v1';
         function normalizarTemaPainel(valor){return String(valor||'').toLowerCase()==='dark'?'dark':'light';}
-        function aplicarTemaPainel(tema,{persistirLocal=true}={}){
+        function aplicarTemaPainel(tema,{persistirLocal=true,marcarExplicito=false}={}){
             const valor=normalizarTemaPainel(tema);
             document.documentElement.setAttribute('data-theme',valor);
-            if(persistirLocal){try{localStorage.setItem(PANEL_THEME_STORAGE_KEY,valor);}catch(_){}}
+            if(persistirLocal){
+                try{
+                    localStorage.setItem(PANEL_THEME_STORAGE_KEY,valor);
+                    if(marcarExplicito) localStorage.setItem(PANEL_THEME_EXPLICIT_KEY,'1');
+                }catch(_){}
+            }
             const sw=document.getElementById('panel-theme-switch'); if(sw)sw.classList.toggle('active',valor==='dark');
             const icon=document.getElementById('panel-theme-icon'); if(icon)icon.className=valor==='dark'?'bi bi-sun':'bi bi-moon-stars';
             const title=document.getElementById('panel-theme-title'); if(title)title.textContent=valor==='dark'?'Modo claro':'Modo escuro';
@@ -4822,11 +4896,13 @@
             return valor;
         }
         function temaLocalPainel(){try{return normalizarTemaPainel(localStorage.getItem(PANEL_THEME_STORAGE_KEY)||'light');}catch(_){return 'light';}}
-        aplicarTemaPainel(temaLocalPainel(),{persistirLocal:false});
+        function temaFoiEscolhidoExplicitamente(){try{return localStorage.getItem(PANEL_THEME_EXPLICIT_KEY)==='1';}catch(_){return false;}}
+        // Sempre inicia claro quando ainda não existe uma escolha explícita neste navegador.
+        aplicarTemaPainel(temaFoiEscolhidoExplicitamente()?temaLocalPainel():'light',{persistirLocal:false});
 
         async function alternarTemaPainel(){
             const atual=document.documentElement.getAttribute('data-theme')==='dark'?'dark':'light';
-            const novo=aplicarTemaPainel(atual==='dark'?'light':'dark');
+            const novo=aplicarTemaPainel(atual==='dark'?'light':'dark',{persistirLocal:true,marcarExplicito:true});
             fecharPanelUserMenu();
             try{
                 const res=await fetch('/api/me/preferences',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme:novo})});
@@ -5056,7 +5132,7 @@
                 if (res.status === 401) { window.location.href='/login'; return; }
                 const data = await res.json();
                 window.panelSessionUser = data.user || null;
-                if(window.panelSessionUser?.theme) aplicarTemaPainel(window.panelSessionUser.theme);
+                aplicarTemaPainel(temaFoiEscolhidoExplicitamente()?temaLocalPainel():'light',{persistirLocal:false});
                 aplicarPermissoesPainel();
                 carregarProfissionaisPainel();
                 carregarTextosRapidos(false);
@@ -5542,6 +5618,7 @@
             if (!numero) return;
             window.activeTicketsData = (window.activeTicketsData || []).filter(item => String(item.ticketNumber || '') !== numero);
             if (String(window.activeChatTicketNumber || '') === numero) fecharChatTicket();
+            renderizarListaConversasChat();
             if (String(window.activeTicketDialogNumber || '') === numero) fecharDetalheTicket();
             preencherFiltroAreasTickets(window.activeTicketsData || []);
             recalcularResumoTicketsLocal();
@@ -5750,7 +5827,7 @@
                 conhecimentos.forEach(k=>{const id=String(k?._id?.$oid||k?._id||'');const opt=document.createElement('option');opt.value=id;opt.textContent=String(k.pergunta||'Conhecimento');select.appendChild(opt);});
                 const link=document.createElement('button');link.type='button';link.className='knowledge-gap-link-btn';link.innerHTML='<i class="bi bi-link-45deg me-1"></i>Vincular';link.disabled=true;select.addEventListener('change',()=>{link.disabled=!select.value;});link.onclick=()=>vincularLacunaConhecimento(gapId,select,link);
                 const teach=document.createElement('button');teach.type='button';teach.className='knowledge-gap-use';teach.innerHTML='<i class="bi bi-plus-circle me-1"></i>Ensinar novo';teach.onclick=()=>ensinarLacunaConhecimento(item);
-                actions.append(select,link,teach);row.append(copy,actions);frag.appendChild(row);
+                const ignore=document.createElement('button');ignore.type='button';ignore.className='knowledge-gap-ignore';ignore.innerHTML='<i class="bi bi-eye-slash me-1"></i>Ignorar';ignore.title='Ignorar esta dúvida e removê-la da lista';ignore.onclick=()=>ignorarLacunaConhecimento(gapId,ignore);actions.append(select,link,teach,ignore);row.append(copy,actions);frag.appendChild(row);
             });box.appendChild(frag);
         }
         async function vincularLacunaConhecimento(gapId,select,button){
@@ -5760,6 +5837,22 @@
             catch(err){alert(err.message||'Não foi possível vincular a dúvida.');if(button){button.disabled=false;button.innerHTML=old;}}
         }
         function ensinarLacunaConhecimento(item={}){limparFormularioConhecimento();alternarPainelKnowledge('base');document.getElementById('knowledge_gap_id').value=String(item?._id?.$oid||item?._id||'');document.getElementById('pergunta_ia').value=String(item.textoExemplo||'');document.getElementById('knowledge-form-title').textContent='Ensinar novo conhecimento';document.getElementById('knowledge-cancel-edit').classList.remove('hidden');document.querySelector('.knowledge-editor-card')?.scrollIntoView({behavior:'auto',block:'start'});setTimeout(()=>document.getElementById('resposta_ia')?.focus({preventScroll:true}),120);}
+        async function ignorarLacunaConhecimento(gapId,button){
+            if(!gapId)return;
+            if(!confirm('Ignorar esta dúvida? Ela sairá da lista de dúvidas pendentes, mas continuará registrada no banco como ignorada.'))return;
+            const old=button?.innerHTML||'';
+            if(button){button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Ignorando';}
+            try{
+                const res=await fetch(`/api/knowledgeColl/gaps/${encodeURIComponent(gapId)}/ignore`,{method:'POST'});
+                const data=await res.json().catch(()=>({}));
+                if(!res.ok)throw new Error(data.erro||'Não foi possível ignorar a dúvida.');
+                window.knowledgeGaps=(window.knowledgeGaps||[]).filter(item=>String(item?._id?.$oid||item?._id||'')!==String(gapId));
+                renderizarLacunasConhecimento(window.knowledgeGaps);
+            }catch(err){
+                alert(err.message||'Não foi possível ignorar a dúvida.');
+                if(button){button.disabled=false;button.innerHTML=old;}
+            }
+        }
         async function removerConhecimento(id){if(!confirm('Tem certeza que deseja remover este conhecimento?'))return;try{const res=await fetch(`/api/knowledgeColl/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');if(document.getElementById('knowledge_id').value===String(id))limparFormularioConhecimento();await carregarConhecimento();}catch(err){alert(err.message||'Não foi possível excluir o conhecimento.');}}
 
 
@@ -9268,6 +9361,30 @@
             if (time) time.querySelector('span:last-child').textContent = data.lastActivity ? `Atividade ${formatarDataTicket(data.lastActivity)}` : 'Atividade não informada';
         }
 
+        function atualizarSeletorStatusChat(ticketData={}){
+            const select=document.getElementById('ticket-chat-status-select'); if(!select)return;
+            const atual=String(ticketData.internalStatusId||'');
+            const valorAnterior=select.value;
+            select.replaceChildren();
+            const sem=document.createElement('option');sem.value='';sem.textContent='Sem status';select.appendChild(sem);
+            (window.ticketStatusOptions||[]).forEach(item=>{const op=document.createElement('option');op.value=String(item.id||'');op.textContent=String(item.nome||'Status');select.appendChild(op);});
+            select.value=atual;
+            if(select.value!==atual)select.value='';
+            aplicarVisualStatusTicketSelect(select,select.value);
+            select.disabled=!window.activeChatTicketNumber;
+        }
+        async function alterarStatusInternoPeloChat(select){
+            const ticket=String(window.activeChatTicketNumber||'');if(!ticket||!select)return;
+            const anterior=String(window.activeChatTicketData?.internalStatusId||'');
+            await atualizarStatusInternoTicket(ticket,select.value,select);
+            const local=(window.activeTicketsData||[]).find(t=>String(t.ticketNumber)===ticket);
+            const id=String(local?.internalStatusId||select.value||'');
+            window.activeChatTicketData={...(window.activeChatTicketData||{}),internalStatusId:id,internalStatus:local?.internalStatus||null};
+            atualizarStatusOperacionalChat(window.activeChatTicketData);
+            renderizarListaConversasChat();
+            if(select.value!==id) select.value=id||anterior;
+        }
+
         function atualizarEstadoAtendimentoChat(ticketData = {}) {
             if(!window.activeChatTicketNumber) return;
             const local=(window.activeTicketsData||[]).find(item=>String(item.ticketNumber)===String(window.activeChatTicketNumber));
@@ -9281,6 +9398,7 @@
             window.activeChatCanSend=ehMeu;
             window.activeChatTicketData=combinado;
             atualizarStatusOperacionalChat(combinado);
+            atualizarSeletorStatusChat(combinado);
 
             const usuarioAtual=window.panelSessionUser?.assinatura||window.panelSessionUser?.nome||'usuário conectado';
             const userLine=document.getElementById('ticket-chat-current-user');
@@ -9410,6 +9528,42 @@
             finally{if(btn){btn.disabled=false;btn.innerHTML=old;}}
         }
 
+        function textoConversaChat(item={}){
+            const nome=String(item.clienteNome||item.nomeCliente||'Cliente não cadastrado').trim();
+            const area=String(item.area||item.menuOptionTitle||'').trim();
+            return `${nome} ${item.ticketNumber||''} ${area} ${item.advogadoResponsavelNome||''}`.toLowerCase();
+        }
+        function renderizarListaConversasChat(){
+            const box=document.getElementById('chat-conversations-list'); if(!box)return;
+            const termo=String(document.getElementById('chat-conversations-search')?.value||'').trim().toLowerCase();
+            const ativos=[...(window.activeTicketsData||[])].sort((a,b)=>Number(b.lastActivity||b.updatedAt||0)-Number(a.lastActivity||a.updatedAt||0));
+            const itens=ativos.filter(item=>!termo||textoConversaChat(item).includes(termo));
+            box.replaceChildren();
+            if(!itens.length){box.innerHTML='<div class="chat-conversations-empty">Nenhuma conversa encontrada.</div>';return;}
+            const frag=document.createDocumentFragment();
+            itens.forEach(item=>{
+                const numero=String(item.ticketNumber||'');
+                const btn=document.createElement('button');btn.type='button';btn.className='chat-conversation-item';
+                if(numero===String(window.activeChatTicketNumber||''))btn.classList.add('active');
+                if(item.temMensagemNaoLida)btn.classList.add('unread');
+                const inicial=String(item.clienteNome||'C').trim().charAt(0).toUpperCase()||'C';
+                const nome=escapeHtmlChat(item.clienteNome||'Cliente não cadastrado');
+                const area=escapeHtmlChat(item.area||item.menuOptionTitle||'Sem área');
+                const status=escapeHtmlChat(item.internalStatus?.nome||item.statusLabel||item.status||'Em atendimento');
+                const hora=item.lastActivity?new Date(Number(item.lastActivity)).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
+                btn.innerHTML=`<span class="chat-conversation-avatar">${escapeHtmlChat(inicial)}</span><span class="chat-conversation-copy"><span class="chat-conversation-line"><strong>${nome}</strong><time>${hora}</time></span><span class="chat-conversation-preview">${area} · ${status}</span><span class="chat-conversation-ticket">${escapeHtmlChat(numero)}</span></span>${item.temMensagemNaoLida?'<span class="chat-conversation-unread"></span>':''}`;
+                btn.onclick=()=>{ if(numero&&numero!==String(window.activeChatTicketNumber||'')) abrirChatTicket(numero,btn); };
+                frag.appendChild(btn);
+            });
+            box.appendChild(frag);
+        }
+        async function atualizarListaConversasChat(forcar=false){
+            try{
+                if(forcar||!(window.activeTicketsData||[]).length){window.activeTicketsLoaded=false;await carregarTicketsAtivos(true);}
+            }catch(_){}
+            renderizarListaConversasChat();
+        }
+
         async function abrirChatTicket(ticketNumber, triggerButton = null) {
             cancelarRespostaChat(); cancelarGravacaoChat(); fecharTriagemChat(); window.activeChatTriageDetails = null;
             if(!temPermissaoPainel('chat') || !ticketNumber) return;
@@ -9420,6 +9574,7 @@
             window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null;
             if(history) history.innerHTML='<div class="chat-empty">Carregando conversa...</div>';
             if(dialog && !dialog.open) { if(typeof dialog.showModal==='function') dialog.showModal(); else dialog.setAttribute('open',''); }
+            renderizarListaConversasChat();
             if(triggerButton){triggerButton.disabled=true;triggerButton.innerHTML='<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> Abrindo...';}
 
             try{
@@ -9440,6 +9595,7 @@
                 recalcularResumoTicketsLocal(); filtrarTicketsAtivos();
                 renderizarChat(window.activeChatMessages,window.activeChatHasMore);
                 atualizarEstadoAtendimentoChat(data.ticket||{});
+                renderizarListaConversasChat();
                 if(window.activeChatCanSend) document.getElementById('ticket-chat-input')?.focus();
             }catch(err){
                 if(dialog?.open&&history)history.innerHTML=`<div class="chat-empty">${escapeHtmlChat(err.message||'Erro ao carregar chat.')}</div>`;else alert(err.message||'Não foi possível abrir o atendimento.');

@@ -11626,6 +11626,34 @@ app.post('/api/knowledgeColl/gaps/:id/link', async (req, res) => {
     }
 });
 
+app.post('/api/knowledgeColl/gaps/:id/ignore', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
+    if (!knowledgeGapsColl) return res.json({ ok: true });
+    try {
+        const idRaw = String(req.params.id || '').trim();
+        if (!ObjectId.isValid(idRaw)) return res.status(400).json({ erro: 'Dúvida inválida.' });
+        const id = new ObjectId(idRaw);
+        const agora = Date.now();
+        const result = await knowledgeGapsColl.updateOne(
+            { _id: id, resolvido: { $ne: true } },
+            { $set: {
+                resolvido: true,
+                ignorado: true,
+                resolvidoTipo: 'ignorado',
+                resolvidoEm: agora,
+                ignoradoEm: agora,
+                updatedAt: agora
+            } }
+        );
+        if (!result.matchedCount) return res.status(404).json({ erro: 'Dúvida pendente não encontrada.' });
+        io.emit('knowledge_updated', { action: 'gap_ignored', gapId: idRaw });
+        return res.json({ ok: true });
+    } catch (err) {
+        console.error('[IA] Erro ao ignorar dúvida:', err);
+        return res.status(400).json({ erro: 'Não foi possível ignorar esta dúvida.' });
+    }
+});
+
 app.post('/api/knowledgeColl/gaps/:id/resolve', async (req, res) => {
     if (!req.session.loggedIn) return res.status(401).send('Acesso negado');
     if (!knowledgeGapsColl) return res.json({ ok: true });
