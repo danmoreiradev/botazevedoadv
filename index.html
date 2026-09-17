@@ -4380,6 +4380,116 @@
         }
     </style>
 
+    <style id="atendimentos-mobile-composer-v333">
+        /* V3.3.3 — corrige exclusivamente a estrutura do chat no mobile.
+           A shell vira uma coluna flexível: histórico cresce; composer fica no rodapé. */
+        @media (max-width: 767.98px) {
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-shell {
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: stretch !important;
+                justify-content: flex-start !important;
+                width: 100% !important;
+                height: 100% !important;
+                min-height: 0 !important;
+                overflow: hidden !important;
+            }
+
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-header,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-operations,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .chat-triage-panel,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-user,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-archived-banner,
+            body.atendimentos-chat-mobile-aberto #ticket-chat-dialog.ticket-chat-inline .ticket-chat-composer {
+                flex: 0 0 auto !important;
+            }
+
+            body.atendimentos-chat-mobile-aberto #ticket-chat-history {
+                flex: 1 1 auto !important;
+                width: 100% !important;
+                height: auto !important;
+                min-height: 0 !important;
+                overflow-y: auto !important;
+                overscroll-behavior: contain !important;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            body.atendimentos-chat-mobile-aberto .ticket-chat-composer {
+                display: grid !important;
+                position: relative !important;
+                left: auto !important;
+                right: auto !important;
+                top: auto !important;
+                bottom: auto !important;
+                width: 100% !important;
+                min-height: 56px !important;
+                max-height: none !important;
+                margin: 0 !important;
+                padding: 7px 6px max(7px, env(safe-area-inset-bottom)) !important;
+                grid-template-columns: auto minmax(0,1fr) auto !important;
+                align-items: end !important;
+                z-index: 12 !important;
+                overflow: visible !important;
+                background: #f0f2f5 !important;
+                border-top: 1px solid #d8dfe3 !important;
+            }
+
+            body.atendimentos-chat-mobile-aberto .chat-input-wrap {
+                position: relative !important;
+                min-width: 0 !important;
+                width: 100% !important;
+                pointer-events: auto !important;
+                touch-action: manipulation;
+            }
+
+            body.atendimentos-chat-mobile-aberto #ticket-chat-input {
+                display: block !important;
+                width: 100% !important;
+                min-width: 0 !important;
+                min-height: 42px !important;
+                height: 42px;
+                max-height: 112px !important;
+                margin: 0 !important;
+                padding: 10px 11px !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+                pointer-events: auto !important;
+                touch-action: manipulation;
+                -webkit-user-select: text;
+                user-select: text;
+                font-size: 16px !important;
+                line-height: 1.32 !important;
+                background: #fff !important;
+                color: #111b21 !important;
+                border-radius: 12px !important;
+            }
+
+            body.atendimentos-chat-mobile-aberto #ticket-chat-input:focus {
+                outline: none !important;
+                box-shadow: 0 0 0 2px rgba(35,117,94,.10) !important;
+            }
+
+            body.atendimentos-chat-mobile-aberto #ticket-chat-input:disabled {
+                pointer-events: none !important;
+                background: #e9edef !important;
+                color: #8696a0 !important;
+            }
+
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto .ticket-chat-composer {
+                background: #20252d !important;
+                border-top-color: #353b46 !important;
+            }
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto #ticket-chat-input {
+                background: #2a3038 !important;
+                color: #edf0f4 !important;
+            }
+            html[data-theme="dark"] body.atendimentos-chat-mobile-aberto #ticket-chat-input:disabled {
+                background: #263139 !important;
+                color: #7f8d95 !important;
+            }
+        }
+    </style>
+
 </head>
 <body class="session-loading">
     <div class="app-shell">
@@ -10679,6 +10789,16 @@
 
         // Ctrl+V / Cmd+V mantém texto normal e envia imagens/arquivos presentes no clipboard.
         const ticketChatInput=document.getElementById('ticket-chat-input');
+        // Mobile: garante que o toque no textarea realmente entregue o foco ao campo,
+        // sem mover a página nem abrir o teclado ao apenas selecionar a conversa.
+        if (ticketChatInput && !window.__ticketChatMobileFocusBound) {
+            window.__ticketChatMobileFocusBound = true;
+            ticketChatInput.addEventListener('touchend', () => {
+                if (window.innerWidth > 767.98 || ticketChatInput.disabled) return;
+                try { ticketChatInput.focus({ preventScroll: true }); }
+                catch (_) { ticketChatInput.focus(); }
+            }, { passive: true });
+        }
         ticketChatInput?.addEventListener('paste',processarColagemChat);
         ticketChatInput?.addEventListener('input',()=>{window.quickTextSuggestionIndex=0;renderizarSugestoesTextosRapidos();ajustarAlturaComposerChat();});
         ticketChatInput?.addEventListener('focus',()=>{if(String(ticketChatInput.value||'').trim().startsWith('/'))renderizarSugestoesTextosRapidos();});
