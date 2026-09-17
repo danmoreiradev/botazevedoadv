@@ -4931,6 +4931,56 @@
         }
     </style>
 
+
+    <style id="chat-status-two-lines-v348">
+        /* V3.4.8 — bolinha em cima + status abreviado em até duas linhas abaixo */
+        #ticket-chat-dialog .chat-status-compact-control {
+            min-width: 50px !important;
+            flex-basis: 50px !important;
+            gap: 2px !important;
+            overflow: visible !important;
+        }
+        #ticket-chat-dialog .chat-status-dot-select {
+            width: 15px !important;
+            min-width: 15px !important;
+            max-width: 15px !important;
+            height: 15px !important;
+            min-height: 15px !important;
+            flex-basis: 15px !important;
+        }
+        #ticket-chat-dialog .chat-status-short-label {
+            width: 50px !important;
+            max-width: 50px !important;
+            min-height: 17px !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+            white-space: pre-line !important;
+            word-break: normal !important;
+            line-height: .96 !important;
+            font-size: .47rem !important;
+            text-align: center !important;
+        }
+        @media (max-width: 767.98px) {
+            #ticket-chat-dialog .chat-status-compact-control {
+                min-width: 46px !important;
+                flex-basis: 46px !important;
+            }
+            #ticket-chat-dialog .chat-status-dot-select {
+                width: 14px !important;
+                min-width: 14px !important;
+                max-width: 14px !important;
+                height: 14px !important;
+                min-height: 14px !important;
+                flex-basis: 14px !important;
+            }
+            #ticket-chat-dialog .chat-status-short-label {
+                width: 46px !important;
+                max-width: 46px !important;
+                font-size: .45rem !important;
+            }
+        }
+    </style>
+
 </head>
 <body class="session-loading">
 
@@ -8453,31 +8503,41 @@
 
         function abreviarStatusCompacto(nome='') {
             const original=String(nome||'').trim();
-            if(!original) return 'Sem status';
+            if(!original) return 'Sem\nstatus';
 
-            const mapa={
-                'aguardando':'Aguard.','aguarda':'Aguard.','documentacao':'Doc.','documento':'Doc.','documentos':'Docs.',
-                'cliente':'Cli.','clientes':'Cli.','retorno':'Ret.','resposta':'Resp.','analise':'Anál.','andamento':'And.',
-                'pagamento':'Pag.','assinatura':'Assin.','audiencia':'Audi.','decisao':'Dec.','cumprimento':'Cump.',
-                'sentenca':'Sent.','pericia':'Per.','proposta':'Prop.','atendimento':'Atend.','contato':'Cont.',
-                'advogado':'Adv.','advogada':'Adv.','revisao':'Rev.','finalizacao':'Final.','finalizado':'Final.',
-                'finalizada':'Final.','concluido':'Concl.','concluida':'Concl.','pendente':'Pend.','pendencia':'Pend.',
-                'processo':'Proc.','processual':'Proc.','juridico':'Jur.','juridica':'Jur.','acordo':'Acord.',
-                'negociacao':'Neg.','protocolar':'Prot.','protocolo':'Prot.','recurso':'Rec.','contrato':'Contr.'
+            // O controle do chat é propositalmente estreito. Usamos até duas linhas:
+            // 1ª linha = ação/estado curto; 2ª linha = assunto principal.
+            // O nome integral continua na legenda, tooltip e nas opções do select.
+            const primeiraLinha={
+                'aguardando':'Ag','aguarda':'Ag','analise':'Anál.','analisando':'Anál.','retorno':'Ret.',
+                'pendente':'Pend.','pendencia':'Pend.','revisao':'Rev.','finalizacao':'Final.','finalizado':'Final.',
+                'finalizada':'Final.','concluido':'Concl.','concluida':'Concl.','atendimento':'Atend.',
+                'negociacao':'Neg.','protocolar':'Prot.','protocolo':'Prot.','recurso':'Rec.','cumprimento':'Cump.'
+            };
+            const segundaLinha={
+                'documentacao':'Doc.','documento':'Doc.','documentos':'Docs.','pagamento':'Pagamen.',
+                'cliente':'Cli.','clientes':'Cli.','resposta':'Resp.','assinatura':'Assin.','audiencia':'Audi.',
+                'decisao':'Dec.','sentenca':'Sent.','pericia':'Per.','proposta':'Prop.','contato':'Cont.',
+                'advogado':'Adv.','advogada':'Adv.','processo':'Proc.','processual':'Proc.','juridico':'Jur.',
+                'juridica':'Jur.','acordo':'Acord.','contrato':'Contr.'
             };
             const stop=new Set(['de','da','do','das','dos','em','para','por','com','e','a','o']);
             const normalizar=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
-            const palavras=original.split(/\s+/).filter(Boolean).filter(p=>!stop.has(normalizar(p)));
-            const escolhidas=(palavras.length?palavras:[original]).slice(0,2);
-            const partes=escolhidas.map(p=>{
-                const chave=normalizar(p);
+            const palavras=original.split(/\s+/).filter(Boolean).filter(p=>!stop.has(normalizar(p))).slice(0,2);
+            if(!palavras.length) return 'Sem\nstatus';
+
+            const encurtar=(palavra,indice)=>{
+                const chave=normalizar(palavra);
+                const mapa=indice===0?primeiraLinha:segundaLinha;
                 if(mapa[chave]) return mapa[chave];
-                const limpo=String(p).replace(/[^\p{L}\p{N}]/gu,'');
-                if(limpo.length<=6) return limpo;
-                return `${limpo.slice(0,5)}.`;
-            }).filter(Boolean);
-            const resultado=partes.join(' ');
-            return resultado.length<=15?resultado:`${resultado.slice(0,14).trimEnd()}…`;
+                const limpo=String(palavra).replace(/[^\p{L}\p{N}]/gu,'');
+                const limite=indice===0?4:8;
+                if(limpo.length<=limite) return limpo;
+                return `${limpo.slice(0,limite-1)}.`;
+            };
+
+            const linhas=palavras.map((p,i)=>encurtar(p,i)).filter(Boolean);
+            return linhas.join('\n');
         }
 
         function renderizarLegendaStatusTickets(){

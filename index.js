@@ -20,6 +20,7 @@ const session = require('express-session');
 const crypto = require('crypto');
 const dns = require('dns').promises;
 const net = require('net');
+const { spawn } = require('child_process');
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 let genAI = null;
@@ -10061,6 +10062,128 @@ app.put('/api/tickets/:ticketNumber/chat/messages/:messageId', async (req, res) 
     }
 });
 
+
+// -----------------------------------------------------------------------------
+// NORMALIZAÇÃO DE ÁUDIO DO CHAT PARA WHATSAPP
+// -----------------------------------------------------------------------------
+// MediaRecorder varia por navegador: Chrome/Android costuma produzir WebM/Opus e
+// Safari/iOS pode produzir MP4/AAC. Mensagem de voz (PTT) é muito mais confiável no
+// WhatsApp quando enviada como OGG/Opus. A conversão é feita por pipe, sem gravar o
+// áudio do cliente em disco. Não há shell/interpolação de parâmetros.
+const CHAT_AUDIO_TRANSCODE_TIMEOUT_MS = Math.max(8000, Number(process.env.CHAT_AUDIO_TRANSCODE_TIMEOUT_MS || 30000));
+const CHAT_AUDIO_TRANSCODE_MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
+
+function caminhoFfmpegChat() {
+    if (String(process.env.FFMPEG_PATH || '').trim()) return String(process.env.FFMPEG_PATH).trim();
+    try {
+        // Opcional: se o projeto já tiver ffmpeg-static instalado, aproveitamos.
+        const estatico = require('ffmpeg-static');
+        if (estatico) return estatico;
+    } catch (_) {}
+    return 'ffmpeg';
+}
+
+function converterAudioChatParaOggOpus(buffer) {
+    return new Promise((resolve, reject) => {
+        if (!Buffer.isBuffer(buffer) || !buffer.length) return reject(new Error('Áudio vazio ou inválido.'));
+
+        const args = [
+            '-nostdin', '-hide_banner', '-loglevel', 'error',
+            '-i', 'pipe:0',
+            '-vn', '-map_metadata', '-1',
+            '-ac', '1', '-ar', '48000',
+            '-c:a', 'libopus', '-b:a', '32k', '-vbr', 'on', '-application', 'voip',
+            '-f', 'ogg', 'pipe:1'
+        ];
+
+        let processo;
+        try {
+            processo = spawn(caminhoFfmpegChat(), args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+        } catch (err) {
+            return reject(err);
+        }
+
+        const saida = [];
+        const erros = [];
+        let total = 0;
+        let finalizado = false;
+
+        const concluirErro = (err) => {
+            if (finalizado) return;
+            finalizado = true;
+            try { processo.kill('SIGKILL'); } catch (_) {}
+            reject(err);
+        };
+
+        const timer = setTimeout(() => {
+            concluirErro(new Error('A conversão do áudio excedeu o tempo limite.'));
+        }, CHAT_AUDIO_TRANSCODE_TIMEOUT_MS);
+        timer.unref?.();
+
+        processo.stdout.on('data', chunk => {
+            total += chunk.length;
+            if (total > CHAT_AUDIO_TRANSCODE_MAX_OUTPUT_BYTES) {
+                concluirErro(new Error('O áudio convertido excedeu o limite permitido.'));
+                return;
+            }
+            saida.push(chunk);
+        });
+        processo.stderr.on('data', chunk => {
+            if (erros.reduce((n, b) => n + b.length, 0) < 12_000) erros.push(chunk);
+        });
+        processo.on('error', err => {
+            clearTimeout(timer);
+            concluirErro(err);
+        });
+        processo.on('close', code => {
+            clearTimeout(timer);
+            if (finalizado) return;
+            finalizado = true;
+            if (code !== 0 || !saida.length) {
+                const detalhe = Buffer.concat(erros).toString('utf8').trim().slice(0, 700);
+                return reject(new Error(detalhe || `FFmpeg finalizou com código ${code}.`));
+            }
+            resolve(Buffer.concat(saida));
+        });
+
+        processo.stdin.on('error', err => {
+            if (!['EPIPE', 'ERR_STREAM_DESTROYED'].includes(err?.code)) concluirErro(err);
+        });
+        processo.stdin.end(buffer);
+    });
+}
+
+async function prepararAudioChatParaWhatsapp(buffer, mimeOriginal = '', { voz = false } = {}) {
+    const mimeBruto = String(mimeOriginal || '').trim().toLowerCase();
+    const mimeBase = mimeBruto.split(';')[0].trim();
+    const precisaNormalizar = voz || ['audio/webm', 'audio/wav', 'audio/x-wav', 'audio/opus'].includes(mimeBase);
+
+    if (!precisaNormalizar) {
+        return { buffer, mimeType: mimeBase || 'audio/mpeg', ptt: false, convertido: false };
+    }
+
+    try {
+        const convertido = await converterAudioChatParaOggOpus(buffer);
+        return {
+            buffer: convertido,
+            mimeType: 'audio/ogg; codecs=opus',
+            ptt: voz === true,
+            convertido: true
+        };
+    } catch (err) {
+        console.warn(`[Chat][Áudio] Não foi possível normalizar ${mimeBruto || 'áudio'} para OGG/Opus:`, err?.message || err);
+
+        // OGG já recebido pode seguir como PTT mesmo quando o transcoder estiver
+        // indisponível. Nos demais formatos, preservamos o arquivo como áudio comum
+        // em vez de descartar a mensagem silenciosamente.
+        if (mimeBase === 'audio/ogg') {
+            return { buffer, mimeType: 'audio/ogg; codecs=opus', ptt: voz === true, convertido: false };
+        }
+        return { buffer, mimeType: mimeBase || 'audio/mpeg', ptt: false, convertido: false, fallback: true };
+    }
+}
+
+
 app.post(
     '/api/tickets/:ticketNumber/chat/files',
     express.raw({ type: 'application/octet-stream', limit: CHAT_MAX_UPLOAD_BYTES }),
@@ -10086,8 +10209,11 @@ app.post(
             if (!jid) return res.status(409).json({ erro: 'Não foi possível identificar o WhatsApp deste ticket.' });
 
             const nomeArquivo = limitarTextoChat(req.query.name || 'arquivo', 240);
-            const mimeInformado = limitarTextoChat(req.query.mimeType || 'application/octet-stream', 120).toLowerCase().split(';')[0].trim();
-            const mimeType = (!mimeInformado || mimeInformado === 'application/octet-stream' ? mimePorExtensao(nomeArquivo) : mimeInformado) || 'application/octet-stream';
+            // Preserva codec/container informados pelo MediaRecorder (ex.: audio/webm;codecs=opus).
+            // O MIME base ainda é usado para classificação da mídia.
+            const mimeInformadoBruto = limitarTextoChat(req.query.mimeType || 'application/octet-stream', 160).toLowerCase().trim();
+            const mimeInformado = mimeInformadoBruto.split(';')[0].trim();
+            let mimeType = (!mimeInformado || mimeInformado === 'application/octet-stream' ? mimePorExtensao(nomeArquivo) : mimeInformado) || 'application/octet-stream';
             const legenda = limitarTextoChat(req.query.caption || '', CHAT_MAX_CAPTION_CHARS);
             const replyToMessageId = limitarTextoChat(req.query.replyToMessageId || '', 180);
             const gravacaoVoz = String(req.query.voice || '') === '1';
@@ -10103,7 +10229,21 @@ app.post(
             } else if (mimeType.startsWith('video/')) {
                 tipo = 'video'; payload = { video: req.body, mimetype: mimeType, caption: captionAssinada };
             } else if (mimeType.startsWith('audio/')) {
-                tipo = 'audio'; payload = { audio: req.body, mimetype: mimeType, ptt: gravacaoVoz && /(?:audio\/(?:ogg|opus)|opus)/i.test(mimeType) };
+                tipo = 'audio';
+                const audioPreparado = await prepararAudioChatParaWhatsapp(
+                    req.body,
+                    mimeInformadoBruto || mimeType,
+                    { voz: gravacaoVoz }
+                );
+                mimeType = audioPreparado.mimeType;
+                payload = {
+                    audio: audioPreparado.buffer,
+                    mimetype: audioPreparado.mimeType,
+                    ptt: audioPreparado.ptt === true
+                };
+                if (gravacaoVoz && audioPreparado.fallback) {
+                    console.warn(`[Chat][Áudio] Ticket ${ticketNumber}: gravação enviada como áudio comum porque OGG/Opus não pôde ser gerado.`);
+                }
             } else {
                 payload = { document: req.body, mimetype: mimeType, fileName: nomeArquivo, caption: captionAssinada };
             }
@@ -10147,7 +10287,7 @@ app.post(
                 texto: tipo === 'audio' ? '' : legenda,
                 fileName: nomeArquivo,
                 mimeType,
-                fileSize: req.body.length,
+                fileSize: tipo === 'audio' && Buffer.isBuffer(payload?.audio) ? payload.audio.length : req.body.length,
                 mediaRef: mediaRefEnviada,
                 senderId: advogado.id,
                 senderName: advogado.assinatura,
