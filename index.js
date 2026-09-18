@@ -8,7 +8,7 @@ const {
     downloadMediaMessage,
     makeCacheableSignalKeyStore
 } = require('@whiskeysockets/baileys');
-const { MongoClient, ObjectId } = require('mongodb');
+const { MongoClient, ObjectId, GridFSBucket } = require('mongodb');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -1121,6 +1121,8 @@ function liberarPayloadEntrada(fingerprint) {
 }
 
 let ticketsColl, authColl, knowledgeColl, knowledgeGapsColl, knowledgeWebSourcesColl, knowledgeWebPagesColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl, ticketMessagesColl, baileysSentMessagesColl;
+let chatMediaBucket = null;
+let chatMediaFilesColl = null;
 
 // -----------------------------------------------------------------------------
 // USUÁRIOS, PERMISSÕES E CHAT DO PAINEL
@@ -1620,6 +1622,130 @@ function enviarBufferMidiaChat(req, res, buffer, mimeType, fileName, download = 
     return res.end(buffer);
 }
 
+
+// -----------------------------------------------------------------------------
+// MÍDIA PERSISTENTE DO CHAT
+// -----------------------------------------------------------------------------
+// Mensagens de voz enviadas pelo painel não podem depender apenas da URL temporária
+// do WhatsApp para serem reproduzidas depois. O binário final já normalizado é salvo
+// no GridFS e ticket_messages guarda somente o id do arquivo.
+const CHAT_MEDIA_PERSIST_DAYS = Math.max(30, Number(process.env.CHAT_MEDIA_PERSIST_DAYS || 180));
+const CHAT_MEDIA_PERSIST_MAX_BYTES = CHAT_MAX_UPLOAD_BYTES;
+let chatMediaCleanupTimer = null;
+
+function salvarMidiaPersistenteChat(buffer, {
+    ticketNumber,
+    messageId,
+    mimeType = 'application/octet-stream',
+    fileName = 'arquivo',
+    direction = 'out'
+} = {}) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            if (!chatMediaBucket || !chatMediaFilesColl) return resolve(null);
+            if (!Buffer.isBuffer(buffer) || !buffer.length) return resolve(null);
+            if (buffer.length > CHAT_MEDIA_PERSIST_MAX_BYTES) return resolve(null);
+            const ticket = String(ticketNumber || '').trim();
+            const mensagem = String(messageId || '').trim();
+            if (!ticket || !mensagem) return resolve(null);
+
+            const existente = await chatMediaFilesColl.findOne(
+                { 'metadata.ticketNumber': ticket, 'metadata.messageId': mensagem },
+                { projection: { _id: 1 } }
+            );
+            if (existente?._id) return resolve(String(existente._id));
+
+            const id = new ObjectId();
+            const nomeSeguro = limitarTextoChat(fileName || `midia-${mensagem}`, 240) || `midia-${mensagem}`;
+            const upload = chatMediaBucket.openUploadStreamWithId(id, nomeSeguro, {
+                contentType: limitarTextoChat(mimeType || 'application/octet-stream', 160),
+                metadata: {
+                    ticketNumber: ticket,
+                    messageId: mensagem,
+                    direction: direction === 'in' ? 'in' : 'out',
+                    savedAt: Date.now()
+                }
+            });
+
+            let terminou = false;
+            const falhar = err => {
+                if (terminou) return;
+                terminou = true;
+                reject(err);
+            };
+            upload.on('error', falhar);
+            upload.on('finish', () => {
+                if (terminou) return;
+                terminou = true;
+                resolve(String(id));
+            });
+            upload.end(buffer);
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+async function lerMidiaPersistenteChat(storedMediaId) {
+    if (!chatMediaBucket || !chatMediaFilesColl || !storedMediaId || !ObjectId.isValid(String(storedMediaId))) return null;
+    const objectId = new ObjectId(String(storedMediaId));
+    const arquivo = await chatMediaFilesColl.findOne(
+        { _id: objectId },
+        { projection: { filename: 1, contentType: 1, metadata: 1 } }
+    );
+    if (!arquivo) return null;
+
+    const buffer = await new Promise((resolve, reject) => {
+        const chunks = [];
+        let total = 0;
+        const stream = chatMediaBucket.openDownloadStream(objectId);
+        stream.on('data', chunk => {
+            total += chunk.length;
+            if (total > CHAT_MEDIA_PERSIST_MAX_BYTES) {
+                stream.destroy(new Error('Mídia persistida acima do limite permitido.'));
+                return;
+            }
+            chunks.push(chunk);
+        });
+        stream.on('error', err => {
+            if (err?.code === 'ENOENT' || /FileNotFound/i.test(String(err?.message || ''))) return resolve(null);
+            reject(err);
+        });
+        stream.on('end', () => resolve(chunks.length ? Buffer.concat(chunks) : null));
+    });
+    if (!Buffer.isBuffer(buffer) || !buffer.length) return null;
+    return {
+        buffer,
+        mimeType: String(arquivo.contentType || 'application/octet-stream'),
+        fileName: String(arquivo.filename || 'arquivo')
+    };
+}
+
+async function limparMidiasPersistentesAntigasChat() {
+    if (!chatMediaBucket || !chatMediaFilesColl) return;
+    const limite = Date.now() - (CHAT_MEDIA_PERSIST_DAYS * 24 * 60 * 60 * 1000);
+    try {
+        const antigos = await chatMediaFilesColl.find(
+            { 'metadata.savedAt': { $lt: limite } },
+            { projection: { _id: 1 } }
+        ).limit(200).toArray();
+        for (const item of antigos) {
+            try { await chatMediaBucket.delete(item._id); } catch (_) {}
+        }
+    } catch (err) {
+        console.warn('[Chat][Mídia] Falha na limpeza de mídias antigas:', err?.message || err);
+    }
+}
+
+function agendarLimpezaMidiaPersistenteChat() {
+    if (chatMediaCleanupTimer) return;
+    limparMidiasPersistentesAntigasChat().catch(() => {});
+    chatMediaCleanupTimer = setInterval(() => {
+        limparMidiasPersistentesAntigasChat().catch(() => {});
+    }, 24 * 60 * 60 * 1000);
+    chatMediaCleanupTimer.unref?.();
+}
+
 function normalizarReplyToChat(replyTo = null) {
     if (!replyTo || typeof replyTo !== 'object') return null;
     const messageId = limitarTextoChat(replyTo.messageId || '', 180);
@@ -1687,7 +1813,10 @@ function snapshotReplyToDocChat(doc = {}) {
 async function prepararQuotedMessageChat(ticketNumber, jid, replyToMessageId) {
     const id = limitarTextoChat(replyToMessageId || '', 180);
     if (!id || !ticketMessagesColl) return { quoted: null, snapshot: null };
-    const original = await ticketMessagesColl.findOne({ ticketNumber: String(ticketNumber), messageId: id });
+    let original = await ticketMessagesColl.findOne({ ticketNumber: String(ticketNumber), messageId: id });
+    // A Central agrupa todos os tickets do mesmo cliente. Uma resposta pode citar
+    // uma mensagem registrada em ticket anterior, por isso fazemos fallback pelo ID.
+    if (!original) original = await ticketMessagesColl.findOne({ messageId: id });
     if (!original) {
         const erro = new Error('A mensagem escolhida para resposta não está mais disponível no histórico.');
         erro.statusCode = 409;
@@ -1721,7 +1850,8 @@ function serializarMensagemChat(doc = {}) {
         fileName: doc.fileName || null,
         mimeType: doc.mimeType || null,
         fileSize: Number(doc.fileSize || 0) || null,
-        hasMedia: !!doc.mediaRef || ['image', 'audio', 'video', 'document', 'sticker'].includes(doc.tipo),
+        storedMediaId: doc.storedMediaId ? String(doc.storedMediaId) : null,
+        hasMedia: !!doc.mediaRef || !!doc.storedMediaId || ['image', 'audio', 'video', 'document', 'sticker'].includes(doc.tipo),
         senderId: doc.senderId || null,
         senderName: doc.senderName || null,
         replyTo: normalizarReplyToChat(doc.replyTo || null),
@@ -1769,6 +1899,7 @@ async function registrarMensagemChat(documento = {}) {
         mimeType: documento.mimeType ? limitarTextoChat(documento.mimeType, 120) : null,
         fileSize: Number(documento.fileSize || 0) || null,
         mediaRef: documento.mediaRef ? String(documento.mediaRef).slice(0, CHAT_MEDIA_REF_MAX_CHARS) : null,
+        storedMediaId: documento.storedMediaId ? String(documento.storedMediaId).slice(0, 80) : null,
         senderId: documento.senderId ? String(documento.senderId).slice(0, 120) : null,
         senderName: documento.senderName ? limitarTextoChat(documento.senderName, 180) : null,
         replyTo: normalizarReplyToChat(documento.replyTo || null),
@@ -1780,6 +1911,7 @@ async function registrarMensagemChat(documento = {}) {
     if (!registro.mimeType) delete registro.mimeType;
     if (!registro.fileSize) delete registro.fileSize;
     if (!registro.mediaRef) delete registro.mediaRef;
+    if (!registro.storedMediaId) delete registro.storedMediaId;
     if (!registro.senderId) delete registro.senderId;
     if (!registro.senderName) delete registro.senderName;
     if (!registro.replyTo) delete registro.replyTo;
@@ -1826,6 +1958,54 @@ function dadosMensagemChatWhatsApp(msg) {
     };
 }
 
+function persistirAudioMensagemChatEmBackground(ticket, msg, dados, direction = 'in') {
+    if (!ticket?.ticketNumber || !msg?.key?.id || dados?.tipo !== 'audio' || !dados?.mediaRef) return;
+
+    // Não bloqueia o fluxo de atendimento. A cópia persistente serve exclusivamente
+    // para reprodução histórica no painel quando a URL de mídia do WhatsApp expirar.
+    Promise.resolve().then(async () => {
+        try {
+            const buffer = await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+                {
+                    logger: P({ level: 'silent' }),
+                    reuploadRequest: sock?.updateMediaMessage ? sock.updateMediaMessage.bind(sock) : undefined
+                }
+            );
+            if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > CHAT_MEDIA_PERSIST_MAX_BYTES) return;
+
+            let persistencia = buffer;
+            let mimePersistencia = dados.mimeType || 'audio/ogg';
+            let nomePersistencia = dados.fileName || `audio-${msg.key.id}`;
+            try {
+                persistencia = await converterAudioChatParaMp3(buffer);
+                mimePersistencia = 'audio/mpeg';
+                nomePersistencia = `audio-${msg.key.id}.mp3`;
+            } catch (err) {
+                console.warn(`[Chat][Mídia] MP3 de compatibilidade não gerado para ${msg.key.id}:`, err?.message || err);
+            }
+
+            const storedMediaId = await salvarMidiaPersistenteChat(persistencia, {
+                ticketNumber: ticket.ticketNumber,
+                messageId: String(msg.key.id),
+                mimeType: mimePersistencia,
+                fileName: nomePersistencia,
+                direction: direction === 'out' ? 'out' : 'in'
+            });
+            if (!storedMediaId) return;
+
+            await ticketMessagesColl.updateOne(
+                { ticketNumber: String(ticket.ticketNumber), messageId: String(msg.key.id) },
+                { $set: { storedMediaId } }
+            );
+        } catch (err) {
+            console.warn(`[Chat][Mídia] Não foi possível persistir o áudio ${msg?.key?.id || ''}:`, err?.message || err);
+        }
+    });
+}
+
 async function registrarMensagemClienteChat(ticket, msg) {
     if (!ticket?.ticketNumber || !msg?.key?.id || msg?.key?.fromMe) return;
     const dados = dadosMensagemChatWhatsApp(msg);
@@ -1860,13 +2040,15 @@ async function registrarMensagemClienteChat(ticket, msg) {
         lastInboundChatAt: agora,
         hasNewInbound: !!registrada
     });
+
+    if (registrada) persistirAudioMensagemChatEmBackground(ticket, msg, dados, 'in');
 }
 
 async function registrarMensagemManualWhatsAppChat(ticket, msg) {
     if (!ticket?.ticketNumber || !msg?.key?.id || !msg?.key?.fromMe) return;
     const dados = dadosMensagemChatWhatsApp(msg);
     if (!dados.texto && dados.tipo === 'text') return;
-    await registrarMensagemChat({
+    const registrada = await registrarMensagemChat({
         ticketNumber: ticket.ticketNumber,
         messageId: msg.key.id,
         direction: 'out',
@@ -1875,6 +2057,7 @@ async function registrarMensagemManualWhatsAppChat(ticket, msg) {
         ...dados,
         createdAt: Date.now()
     });
+    if (registrada) persistirAudioMensagemChatEmBackground(ticket, msg, dados, 'out');
 }
 
 function filtrosTicketPorJidChat(jid = '') {
@@ -6223,6 +6406,8 @@ async function startBotInterno() {
         settingsColl = db.collection('settings');
         crmLeadsColl = db.collection('crm_leads');
         ticketMessagesColl = db.collection('ticket_messages');
+        chatMediaBucket = new GridFSBucket(db, { bucketName: 'chat_media' });
+        chatMediaFilesColl = db.collection('chat_media.files');
         baileysSentMessagesColl = db.collection('baileys_sent_messages');
         waRuntimeLocksColl = db.collection('wa_runtime_locks');
 
@@ -6316,6 +6501,9 @@ async function startBotInterno() {
             ticketMessagesColl.createIndex({ ticketNumber: 1, createdAt: -1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, direction: 1, createdAt: -1 }),
             ticketMessagesColl.createIndex({ ticketNumber: 1, messageId: 1 }, { unique: true }),
+            ticketMessagesColl.createIndex({ createdAt: -1, ticketNumber: 1 }),
+            chatMediaFilesColl.createIndex({ 'metadata.ticketNumber': 1, 'metadata.messageId': 1 }, { unique: true, sparse: true }),
+            chatMediaFilesColl.createIndex({ 'metadata.savedAt': 1 }),
             baileysSentMessagesColl.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
             baileysSentMessagesColl.createIndex({ messageId: 1 })
         ]);
@@ -6324,6 +6512,7 @@ async function startBotInterno() {
         // de 60 dias em ticket_messages. Apenas retirar createIndex não basta, pois o
         // índice permanece no MongoDB; por isso removemos explicitamente o TTL legado.
         await removerPoliticasLegadasHistoricoChat();
+        agendarLimpezaMidiaPersistenteChat();
         
         apiKeysColl = db.collection('api_keys');
         const geminiKeyDoc = await apiKeysColl.findOne({ nome: "gemini" });
@@ -7689,6 +7878,15 @@ async function useMongoDBAuthState(collection) {
         saveCreds: () => enfileirarEscrita(() => writeData(creds, 'creds'))
     };
 }
+
+// Assets estáticos versionados do painel (CSS separado para cache do navegador).
+// O HTML administrativo deixa de carregar centenas de KB de CSS inline em toda navegação.
+app.use('/assets', express.static(path.join(__dirname, 'assets'), {
+    maxAge: '7d',
+    etag: true,
+    lastModified: true,
+    fallthrough: true
+}));
 
 app.get('/login', (req, res) => {
     if (req.session?.loggedIn && req.session?.panelUser) return res.redirect('/');
@@ -9306,6 +9504,167 @@ function whatsappDoTicket(ticket = {}) {
     );
 }
 
+
+function chaveConversaCliente(ticket = {}) {
+    const whatsapp = whatsappDoTicket(ticket);
+    if (whatsapp) return `wa:${whatsapp}`;
+
+    const clienteId = ticket?.clienteId ? String(ticket.clienteId) : '';
+    if (clienteId) return `cliente:${clienteId}`;
+
+    const cpf = String(ticket?.cpf || '').replace(/\D/g, '');
+    if (cpf) return `cpf:${cpf}`;
+
+    const numero = String(ticket?.ticketNumber || ticket?._id || '').trim();
+    return `ticket:${numero || 'sem-identificador'}`;
+}
+
+function filtroTicketsMesmoCliente(ticket = {}) {
+    const filtros = [];
+    const whatsapp = whatsappDoTicket(ticket);
+    const clienteId = ticket?.clienteId || null;
+    const cpf = String(ticket?.cpf || '').replace(/\D/g, '');
+
+    if (clienteId) filtros.push({ clienteId });
+    if (whatsapp) filtros.push({ numeroReal: whatsapp }, { whatsappNumbers: whatsapp });
+    if (cpf) filtros.push({ cpf });
+
+    if (!filtros.length) {
+        const ticketNumber = String(ticket?.ticketNumber || ticket?._id || '').trim();
+        return ticketNumber ? { $or: [{ ticketNumber }, { _id: ticketNumber }] } : { _id: '__sem_ticket__' };
+    }
+    return filtros.length === 1 ? filtros[0] : { $or: filtros };
+}
+
+const PROJECAO_TICKET_CONVERSA_CLIENTE = {
+    ticketNumber: 1, status: 1, origem: 1, clienteId: 1, clienteNome: 1, clienteCadastrado: 1, cpf: 1,
+    numeroReal: 1, whatsappNumbers: 1, identificadores: 1, lastRawJid: 1,
+    area: 1, menuOptionTitle: 1, menuOptionEmoji: 1,
+    createdAt: 1, lastActivity: 1, updatedAt: 1, archivedAt: 1, closedAt: 1,
+    lastInboundChatAt: 1, chatLeituras: 1,
+    advogadoResponsavelId: 1, advogadoResponsavelNome: 1, atendimentoAssumidoEm: 1,
+    internalStatusId: 1, paused: 1
+};
+
+async function obterTicketsRelacionadosConversa(ticketBase = {}) {
+    if (!ticketBase || !ticketsColl) return [];
+    const filtro = filtroTicketsMesmoCliente(ticketBase);
+    const [ativos, historicos] = await Promise.all([
+        ticketsColl.find(filtro, { projection: PROJECAO_TICKET_CONVERSA_CLIENTE }).toArray(),
+        ticketHistoryColl
+            ? ticketHistoryColl.find(filtro, { projection: PROJECAO_TICKET_CONVERSA_CLIENTE }).toArray()
+            : Promise.resolve([])
+    ]);
+
+    const porNumero = new Map();
+    for (const item of historicos) {
+        const numero = String(item.ticketNumber || item._id || '').trim();
+        if (!numero) continue;
+        porNumero.set(numero, { ...item, ticketNumber: numero, isActive: false, isArchived: true });
+    }
+    for (const item of ativos) {
+        const numero = String(item.ticketNumber || '').trim();
+        if (!numero) continue;
+        porNumero.set(numero, {
+            ...(porNumero.get(numero) || {}),
+            ...item,
+            ticketNumber: numero,
+            isActive: true,
+            isArchived: false
+        });
+    }
+
+    return [...porNumero.values()].sort((a, b) => {
+        const ativoA = a.isActive ? 1 : 0;
+        const ativoB = b.isActive ? 1 : 0;
+        if (ativoA !== ativoB) return ativoB - ativoA;
+        return Number(b.createdAt || b.lastActivity || b.updatedAt || 0) - Number(a.createdAt || a.lastActivity || a.updatedAt || 0);
+    });
+}
+
+function resumoTicketHistoricoConversa(ticket = {}) {
+    const ativo = ticket.isActive === true && ticket.isArchived !== true;
+    return {
+        ticketNumber: String(ticket.ticketNumber || ticket._id || ''),
+        isActive: ativo,
+        isArchived: !ativo,
+        status: ticket.status || (ativo ? null : 'encerrado'),
+        statusLabel: ativo ? classificarPendenciaTicket(ticket).statusLabel : 'Encerrado',
+        area: ticket.area || ticket.menuOptionTitle || null,
+        createdAt: Number(ticket.createdAt || 0) || null,
+        lastActivity: Number(ticket.lastActivity || ticket.updatedAt || ticket.archivedAt || ticket.closedAt || 0) || null,
+        closedAt: Number(ticket.archivedAt || ticket.closedAt || 0) || null,
+        advogadoResponsavelId: ticket.advogadoResponsavelId || null,
+        advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
+        internalStatusId: ticket.internalStatusId || null,
+        internalStatus: statusTicketPorId(ticket.internalStatusId)
+    };
+}
+
+function agruparConversasCliente(itens = []) {
+    const grupos = new Map();
+
+    for (const item of itens) {
+        if (!item?.ticketNumber) continue;
+        const chave = chaveConversaCliente(item);
+        let grupo = grupos.get(chave);
+        if (!grupo) {
+            grupo = {
+                conversationKey: chave,
+                tickets: [], ticketNumbers: [], activeTicketNumbers: [], archivedTicketNumbers: [],
+                activeTicketsCount: 0, historyTicketsCount: 0,
+                temMensagemNaoLida: false, unreadTicketsCount: 0,
+                lastActivity: 0, primary: null
+            };
+            grupos.set(chave, grupo);
+        }
+
+        grupo.tickets.push(item);
+        grupo.ticketNumbers.push(String(item.ticketNumber));
+        if (item.isActive !== false && !item.isArchived) {
+            grupo.activeTicketNumbers.push(String(item.ticketNumber));
+            grupo.activeTicketsCount += 1;
+        } else {
+            grupo.archivedTicketNumbers.push(String(item.ticketNumber));
+            grupo.historyTicketsCount += 1;
+        }
+        if (item.temMensagemNaoLida) {
+            grupo.temMensagemNaoLida = true;
+            grupo.unreadTicketsCount += 1;
+        }
+        grupo.lastActivity = Math.max(grupo.lastActivity, Number(item.lastActivity || item.archivedAt || item.createdAt || 0));
+
+        const atual = grupo.primary;
+        const itemAtivo = item.isActive !== false && !item.isArchived;
+        const atualAtivo = atual && atual.isActive !== false && !atual.isArchived;
+        if (!atual || (itemAtivo && !atualAtivo) ||
+            (itemAtivo === atualAtivo && Number(item.createdAt || item.lastActivity || 0) > Number(atual.createdAt || atual.lastActivity || 0))) {
+            grupo.primary = item;
+        }
+    }
+
+    return [...grupos.values()].map(grupo => {
+        const principal = grupo.primary || grupo.tickets[0] || {};
+        return {
+            ...principal,
+            conversationKey: grupo.conversationKey,
+            primaryTicketNumber: principal.ticketNumber || null,
+            ticketNumber: principal.ticketNumber || null,
+            ticketNumbers: [...new Set(grupo.ticketNumbers)],
+            activeTicketNumbers: [...new Set(grupo.activeTicketNumbers)],
+            archivedTicketNumbers: [...new Set(grupo.archivedTicketNumbers)],
+            ticketsCount: grupo.ticketNumbers.length,
+            activeTicketsCount: grupo.activeTicketsCount,
+            historyTicketsCount: grupo.historyTicketsCount,
+            temMensagemNaoLida: grupo.temMensagemNaoLida,
+            unreadTicketsCount: grupo.unreadTicketsCount,
+            lastActivity: grupo.lastActivity || Number(principal.lastActivity || principal.createdAt || 0),
+            isActive: grupo.activeTicketsCount > 0,
+            isArchived: grupo.activeTicketsCount === 0
+        };
+    }).sort((a, b) => Number(b.lastActivity || 0) - Number(a.lastActivity || 0));
+}
+
 function pesoStatusDocumentoIA(status = '') {
     return ({ concluida: 7, erro: 6, nao_suportado: 6, processando_ia: 5, baixando: 4, na_fila: 3, analisando: 2 }[status] || 1);
 }
@@ -9478,86 +9837,96 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
     if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
     if (!ticketMessagesColl || !ticketsColl) return res.status(503).json({ erro: 'Chat ainda não está disponível.' });
     try {
-        const ticketNumber = String(req.params.ticketNumber || '').trim();
-        const [ticketAtivo, historicoChat] = await Promise.all([
-            ticketsColl.findOne({ ticketNumber }),
-            ticketHistoryColl ? ticketHistoryColl.findOne({ _id: ticketNumber }) : Promise.resolve(null)
+        const ticketNumberSolicitado = String(req.params.ticketNumber || '').trim();
+        const [ticketAtivoSolicitado, historicoSolicitado] = await Promise.all([
+            ticketsColl.findOne({ ticketNumber: ticketNumberSolicitado }),
+            ticketHistoryColl ? ticketHistoryColl.findOne({ _id: ticketNumberSolicitado }) : Promise.resolve(null)
         ]);
-        const ticket = ticketAtivo || historicoChat;
-        if (!ticket) return res.status(404).json({ erro: 'Atendimento não encontrado.' });
-        const atendimentoAtivo = !!ticketAtivo;
+        const baseSolicitada = ticketAtivoSolicitado || historicoSolicitado;
+        if (!baseSolicitada) return res.status(404).json({ erro: 'Atendimento não encontrado.' });
 
-        // A análise dos anexos fica persistida no ticket/histórico e é carregada junto
-        // do chat. Atendimentos encerrados continuam consultáveis em modo somente leitura.
-        const documentosIAChat = mesclarDocumentosIATicket(ticketAtivo || {}, historicoChat || {}, { detalhado: true });
+        const ticketsRelacionados = await obterTicketsRelacionadosConversa(baseSolicitada);
+        const ticketOperacional = ticketsRelacionados.find(item => item.isActive) || ticketsRelacionados[0] || baseSolicitada;
+        const ticketNumberOperacional = String(ticketOperacional.ticketNumber || ticketNumberSolicitado);
+        const atendimentoAtivo = ticketOperacional.isActive === true && ticketOperacional.isArchived !== true;
+        const ticketNumbers = [...new Set(ticketsRelacionados.map(item => String(item.ticketNumber || '')).filter(Boolean))];
+        if (!ticketNumbers.length) ticketNumbers.push(ticketNumberSolicitado);
+
+        const historicoOperacional = ticketHistoryColl
+            ? await ticketHistoryColl.findOne({ _id: ticketNumberOperacional })
+            : null;
+
+        const documentosIAChat = mesclarDocumentosIATicket(
+            atendimentoAtivo ? ticketOperacional : {},
+            historicoOperacional || (!atendimentoAtivo ? ticketOperacional : {}),
+            { detalhado: true }
+        );
         const documentoIAPorMensagem = new Map(
-            documentosIAChat
-                .filter(doc => doc?.messageId)
-                .map(doc => [String(doc.messageId), doc])
+            documentosIAChat.filter(doc => doc?.messageId).map(doc => [String(doc.messageId), doc])
         );
 
         const limite = Math.min(CHAT_LIST_LIMIT_MAX, Math.max(10, Number(req.query.limit || CHAT_LIST_LIMIT_DEFAULT)));
-        const filtro = { ticketNumber };
+        const filtro = { ticketNumber: { $in: ticketNumbers } };
         if (req.query.before) {
             const antes = new Date(Number(req.query.before));
             if (!Number.isNaN(antes.getTime())) filtro.createdAt = { $lt: antes };
         }
+
         const docsDesc = await ticketMessagesColl.find(filtro).sort({ createdAt: -1 }).limit(limite + 1).toArray();
         const hasMore = docsDesc.length > limite;
         const docs = docsDesc.slice(0, limite).reverse();
-        // Marca como lido somente até a mensagem efetivamente carregada. Se uma nova
-        // mensagem chegar entre a consulta e este update, ela continuará aparecendo
-        // como não lida na lista do advogado.
         const lidoEm = docs.length
             ? Math.max(...docs.map(item => item.createdAt instanceof Date ? item.createdAt.getTime() : Number(item.createdAt || 0)).filter(Number.isFinite))
             : Date.now();
-        if (atendimentoAtivo) {
-            await marcarTicketChatComoLido(ticketNumber, req, lidoEm).catch(() => {});
-        } else if (ticketHistoryColl) {
-            const chaveLeitura = chaveLeituraChatUsuario(req);
-            if (chaveLeitura) {
-                await ticketHistoryColl.updateOne(
-                    { _id: ticketNumber },
-                    { $set: { [`chatLeituras.${chaveLeitura}`]: lidoEm } }
-                ).catch(() => {});
-            }
-        }
+
+        const ativosRelacionados = ticketsRelacionados.filter(item => item.isActive === true && item.isArchived !== true);
+        await Promise.allSettled(
+            ativosRelacionados.map(item => marcarTicketChatComoLido(item.ticketNumber, req, lidoEm))
+        );
+
+        const classificacao = atendimentoAtivo
+            ? classificarPendenciaTicket(ticketOperacional)
+            : { statusLabel: 'Encerrado', tipo: 'encerrado', label: 'Encerrado' };
+        const triagemBase = dadosTriagemTicket(ticketOperacional, historicoOperacional || {});
+        const triagem = progressoTriagemTicket(triagemBase.ticket, triagemBase.respostas);
+
         res.json({
             readAt: lidoEm,
-            ticket: (() => {
-                const classificacao = atendimentoAtivo ? classificarPendenciaTicket(ticket) : { statusLabel: 'Encerrado', tipo: 'encerrado', label: 'Encerrado' };
-                const triagemBase = dadosTriagemTicket(ticket, historicoChat || {});
-                const triagem = progressoTriagemTicket(triagemBase.ticket, triagemBase.respostas);
-                return {
-                    ticketNumber,
-                    isActive: atendimentoAtivo,
-                    isArchived: !atendimentoAtivo,
-                    archivedAt: !atendimentoAtivo ? Number(historicoChat?.archivedAt || historicoChat?.closedAt || 0) || null : null,
-                    clienteNome: ticket.clienteNome || null,
-                    clienteCadastrado: ticket.clienteCadastrado === true || !!ticket.clienteId,
-                    whatsapp: whatsappDoTicket(ticket),
-                    area: ticket.area || ticket.menuOptionTitle || null,
-                    status: ticket.status || null,
-                    statusLabel: classificacao.statusLabel,
-                    pendenciaTipo: classificacao.tipo,
-                    pendenciaLabel: classificacao.label,
-                    paused: ticket.paused === true,
-                    createdAt: Number(ticket.createdAt || 0) || null,
-                    lastActivity: Number(ticket.lastActivity || 0) || null,
-                    triagem,
-                    advogadoResponsavelId: ticket.advogadoResponsavelId || null,
-                    advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
-                    atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null,
-                internalStatusId: ticket.internalStatusId || null,
-                internalStatus: statusTicketPorId(ticket.internalStatusId)
-                };
-            })(),
+            conversation: {
+                key: chaveConversaCliente(baseSolicitada),
+                requestedTicketNumber: ticketNumberSolicitado,
+                primaryTicketNumber: ticketNumberOperacional,
+                ticketNumbers,
+                activeTicketNumbers: ativosRelacionados.map(item => String(item.ticketNumber)),
+                ticketsCount: ticketsRelacionados.length,
+                tickets: ticketsRelacionados.map(resumoTicketHistoricoConversa)
+            },
+            ticket: {
+                ticketNumber: ticketNumberOperacional,
+                isActive: atendimentoAtivo,
+                isArchived: !atendimentoAtivo,
+                archivedAt: !atendimentoAtivo ? Number(ticketOperacional.archivedAt || ticketOperacional.closedAt || 0) || null : null,
+                clienteNome: ticketOperacional.clienteNome || baseSolicitada.clienteNome || null,
+                clienteCadastrado: ticketOperacional.clienteCadastrado === true || !!ticketOperacional.clienteId,
+                whatsapp: whatsappDoTicket(ticketOperacional) || whatsappDoTicket(baseSolicitada),
+                area: ticketOperacional.area || ticketOperacional.menuOptionTitle || null,
+                status: ticketOperacional.status || null,
+                statusLabel: classificacao.statusLabel,
+                pendenciaTipo: classificacao.tipo,
+                pendenciaLabel: classificacao.label,
+                paused: ticketOperacional.paused === true,
+                createdAt: Number(ticketOperacional.createdAt || 0) || null,
+                lastActivity: Number(ticketOperacional.lastActivity || 0) || null,
+                triagem,
+                advogadoResponsavelId: ticketOperacional.advogadoResponsavelId || null,
+                advogadoResponsavelNome: ticketOperacional.advogadoResponsavelNome || null,
+                atendimentoAssumidoEm: ticketOperacional.atendimentoAssumidoEm || null,
+                internalStatusId: ticketOperacional.internalStatusId || null,
+                internalStatus: statusTicketPorId(ticketOperacional.internalStatusId)
+            },
             messages: docs.map(item => {
                 const mensagem = serializarMensagemChat(item);
-                return {
-                    ...mensagem,
-                    documentAI: documentoIAPorMensagem.get(String(item.messageId || '')) || null
-                };
+                return { ...mensagem, documentAI: documentoIAPorMensagem.get(String(item.messageId || '')) || null };
             }),
             documents: documentosIAChat,
             documentsSummary: resumoDocumentosIATicket(documentosIAChat),
@@ -9664,13 +10033,23 @@ app.get('/api/tickets/:ticketNumber/chat/media/:messageId', async (req, res) => 
         const messageId = String(req.params.messageId || '').trim();
         const doc = await ticketMessagesColl.findOne(
             { ticketNumber, messageId },
-            { projection: { messageId: 1, direction: 1, tipo: 1, fileName: 1, mimeType: 1, mediaRef: 1 } }
+            { projection: { messageId: 1, direction: 1, tipo: 1, fileName: 1, mimeType: 1, mediaRef: 1, storedMediaId: 1 } }
         );
         if (!doc) return res.status(404).json({ erro: 'Anexo não encontrado no histórico.' });
 
         const chaveCache = `${ticketNumber}:${messageId}`;
         const cache = obterMidiaCacheChat(chaveCache);
         if (cache) return enviarBufferMidiaChat(req, res, cache.buffer, cache.mimeType, cache.fileName, req.query.download === '1');
+
+        if (doc.storedMediaId) {
+            const persistida = await lerMidiaPersistenteChat(doc.storedMediaId);
+            if (persistida?.buffer) {
+                const mimePersistido = persistida.mimeType || doc.mimeType || 'application/octet-stream';
+                const nomePersistido = persistida.fileName || doc.fileName || 'arquivo';
+                salvarMidiaCacheChat(chaveCache, persistida.buffer, mimePersistido, nomePersistido);
+                return enviarBufferMidiaChat(req, res, persistida.buffer, mimePersistido, nomePersistido, req.query.download === '1');
+            }
+        }
 
         let mediaRef = doc.mediaRef || null;
         if (!mediaRef) {
@@ -9712,6 +10091,27 @@ app.get('/api/tickets/:ticketNumber/chat/media/:messageId', async (req, res) => 
         const mimeType = doc.mimeType || mediaInfo?.mimeType || 'application/octet-stream';
         const fileName = doc.fileName || mediaInfo?.nomeArquivo || 'arquivo';
         salvarMidiaCacheChat(chaveCache, buffer, mimeType, fileName);
+
+        // Áudio recuperado do WhatsApp é persistido após a primeira leitura bem-sucedida.
+        // Assim reproduções futuras não dependem mais da referência temporária da plataforma.
+        if (doc.tipo === 'audio' && !doc.storedMediaId) {
+            (async()=>{
+                let bufferPersistencia=buffer;
+                let mimePersistencia=mimeType;
+                let nomePersistencia=fileName;
+                try {
+                    bufferPersistencia=await converterAudioChatParaMp3(buffer);
+                    mimePersistencia='audio/mpeg';
+                    nomePersistencia=`audio-${messageId}.mp3`;
+                } catch (_) {}
+                const storedMediaId=await salvarMidiaPersistenteChat(bufferPersistencia, {
+                    ticketNumber, messageId, mimeType:mimePersistencia, fileName:nomePersistencia, direction:doc.direction||'in'
+                });
+                if (storedMediaId) {
+                    await ticketMessagesColl.updateOne({ ticketNumber, messageId }, { $set: { storedMediaId } });
+                }
+            })().catch(()=>{});
+        }
         return enviarBufferMidiaChat(req, res, buffer, mimeType, fileName, req.query.download === '1');
     } catch (err) {
         console.warn('[Chat] Falha ao carregar anexo:', err?.message || err);
@@ -9765,10 +10165,22 @@ app.post('/api/tickets/:ticketNumber/claim', async (req, res) => {
 app.post('/api/tickets/:ticketNumber/chat/read', async (req, res) => {
     if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
     try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        const [ativo, historico] = await Promise.all([
+            ticketsColl.findOne({ ticketNumber }),
+            ticketHistoryColl ? ticketHistoryColl.findOne({ _id: ticketNumber }) : Promise.resolve(null)
+        ]);
+        const base = ativo || historico;
+        if (!base) return res.status(404).json({ erro: 'Atendimento não encontrado.' });
+
+        const relacionados = await obterTicketsRelacionadosConversa(base);
+        const ativos = relacionados.filter(item => item.isActive === true && item.isArchived !== true);
         const lidoEm = Date.now();
-        const ok = await marcarTicketChatComoLido(req.params.ticketNumber, req, lidoEm);
-        if (!ok) return res.status(404).json({ erro: 'Ticket ativo não encontrado.' });
-        return res.json({ ok: true, readAt: lidoEm });
+        const resultados = await Promise.allSettled(
+            ativos.map(item => marcarTicketChatComoLido(item.ticketNumber, req, lidoEm))
+        );
+        const algum = resultados.some(item => item.status === 'fulfilled' && item.value);
+        return res.json({ ok: algum || !ativos.length, readAt: lidoEm, ticketsMarcados: ativos.length });
     } catch (err) {
         console.error('[Chat] Erro ao marcar leitura:', err);
         return res.status(500).json({ erro: 'Não foi possível registrar a leitura.' });
@@ -10153,6 +10565,31 @@ function converterAudioChatParaOggOpus(buffer) {
     });
 }
 
+function converterAudioChatParaMp3(buffer) {
+    return new Promise((resolve, reject) => {
+        if (!Buffer.isBuffer(buffer) || !buffer.length) return reject(new Error('Áudio vazio ou inválido.'));
+        const args = [
+            '-nostdin', '-hide_banner', '-loglevel', 'error',
+            '-i', 'pipe:0', '-vn', '-map_metadata', '-1',
+            '-ac', '1', '-ar', '44100', '-c:a', 'libmp3lame', '-b:a', '64k',
+            '-f', 'mp3', 'pipe:1'
+        ];
+        let processo;
+        try { processo = spawn(caminhoFfmpegChat(), args, { stdio: ['pipe','pipe','pipe'], windowsHide:true }); }
+        catch (err) { return reject(err); }
+        const saida=[]; const erros=[]; let total=0; let finalizado=false;
+        const concluirErro=err=>{if(finalizado)return;finalizado=true;try{processo.kill('SIGKILL')}catch(_){}reject(err)};
+        const timer=setTimeout(()=>concluirErro(new Error('A conversão do áudio para reprodução excedeu o tempo limite.')),CHAT_AUDIO_TRANSCODE_TIMEOUT_MS);
+        timer.unref?.();
+        processo.stdout.on('data',chunk=>{total+=chunk.length;if(total>CHAT_AUDIO_TRANSCODE_MAX_OUTPUT_BYTES)return concluirErro(new Error('O áudio convertido excedeu o limite permitido.'));saida.push(chunk)});
+        processo.stderr.on('data',chunk=>{if(erros.reduce((n,b)=>n+b.length,0)<12000)erros.push(chunk)});
+        processo.on('error',err=>{clearTimeout(timer);concluirErro(err)});
+        processo.on('close',code=>{clearTimeout(timer);if(finalizado)return;finalizado=true;if(code!==0||!saida.length){const detalhe=Buffer.concat(erros).toString('utf8').trim().slice(0,700);return reject(new Error(detalhe||`FFmpeg finalizou com código ${code}.`))}resolve(Buffer.concat(saida))});
+        processo.stdin.on('error',err=>{if(!['EPIPE','ERR_STREAM_DESTROYED'].includes(err?.code))concluirErro(err)});
+        processo.stdin.end(buffer);
+    });
+}
+
 async function prepararAudioChatParaWhatsapp(buffer, mimeOriginal = '', { voz = false } = {}) {
     const mimeBruto = String(mimeOriginal || '').trim().toLowerCase();
     const mimeBase = mimeBruto.split(';')[0].trim();
@@ -10173,11 +10610,16 @@ async function prepararAudioChatParaWhatsapp(buffer, mimeOriginal = '', { voz = 
     } catch (err) {
         console.warn(`[Chat][Áudio] Não foi possível normalizar ${mimeBruto || 'áudio'} para OGG/Opus:`, err?.message || err);
 
-        // OGG já recebido pode seguir como PTT mesmo quando o transcoder estiver
-        // indisponível. Nos demais formatos, preservamos o arquivo como áudio comum
-        // em vez de descartar a mensagem silenciosamente.
+        // Para gravação de voz não enviamos WebM/MP4 cru como PTT: alguns clientes
+        // aceitam inicialmente e depois exibem “áudio não disponível”. É melhor
+        // falhar explicitamente do que entregar uma mensagem de voz inválida.
         if (mimeBase === 'audio/ogg') {
             return { buffer, mimeType: 'audio/ogg; codecs=opus', ptt: voz === true, convertido: false };
+        }
+        if (voz === true) {
+            const erro = new Error('Não foi possível preparar a mensagem de voz. Verifique se o FFmpeg está disponível no servidor e tente novamente.');
+            erro.code = 'CHAT_AUDIO_TRANSCODE_REQUIRED';
+            throw erro;
         }
         return { buffer, mimeType: mimeBase || 'audio/mpeg', ptt: false, convertido: false, fallback: true };
     }
@@ -10274,6 +10716,37 @@ app.post(
                 setTimeout(() => panelMessageIds.delete(sent.key.id), 2 * 60 * 1000);
             }
             const mediaRefEnviada = sent ? criarReferenciaMidiaChat(sent) : null;
+
+            // Mensagens de voz enviadas pelo painel são persistidas no GridFS.
+            // O WhatsApp recebe o buffer normalmente, mas o player do painel deixa de
+            // depender da URL temporária gerada pela plataforma.
+            let storedMediaId = null;
+            if (tipo === 'audio' && Buffer.isBuffer(payload?.audio)) {
+                try {
+                    let bufferPersistencia = payload.audio;
+                    let mimePersistencia = mimeType;
+                    let nomePersistencia = gravacaoVoz ? `voz-${messageId}.ogg` : (nomeArquivo || `audio-${messageId}`);
+                    // MP3 é reproduzido de forma consistente em Chrome, Edge, Firefox,
+                    // Safari/iOS e Android. O WhatsApp continua recebendo OGG/Opus.
+                    try {
+                        bufferPersistencia = await converterAudioChatParaMp3(payload.audio);
+                        mimePersistencia = 'audio/mpeg';
+                        nomePersistencia = `voz-${messageId}.mp3`;
+                    } catch (err) {
+                        console.warn(`[Chat][Mídia] MP3 de compatibilidade não gerado para ${messageId}:`, err?.message || err);
+                    }
+                    storedMediaId = await salvarMidiaPersistenteChat(bufferPersistencia, {
+                        ticketNumber,
+                        messageId,
+                        mimeType: mimePersistencia,
+                        fileName: nomePersistencia,
+                        direction: 'out'
+                    });
+                } catch (err) {
+                    console.warn(`[Chat][Mídia] Não foi possível persistir o áudio ${messageId}:`, err?.message || err);
+                }
+            }
+
             // Arquivo enviado pelo advogado também é uma intervenção humana real.
             const agora = Date.now();
             await atualizarEstadoPosEnvioChat({ ticket, ticketNumber, advogado, acessoTicket, agora });
@@ -10289,6 +10762,7 @@ app.post(
                 mimeType,
                 fileSize: tipo === 'audio' && Buffer.isBuffer(payload?.audio) ? payload.audio.length : req.body.length,
                 mediaRef: mediaRefEnviada,
+                storedMediaId,
                 senderId: advogado.id,
                 senderName: advogado.assinatura,
                 replyTo,
@@ -10379,99 +10853,63 @@ app.get('/api/tickets/conversations', async (req, res) => {
         const inicioHistoricoMs = inicioHistorico.getTime();
         const chaveLeitura = chaveLeituraChatUsuario(req);
 
-        const ativos = await ticketsColl.find({}, {
-            projection: {
-                ticketNumber: 1, status: 1, clienteId: 1, clienteNome: 1, clienteCadastrado: 1, cpf: 1, numeroReal: 1,
-                whatsappNumbers: 1, identificadores: 1, area: 1, menuOptionTitle: 1,
-                menuOptionEmoji: 1, createdAt: 1, lastActivity: 1, lastInboundChatAt: 1,
-                chatLeituras: 1, advogadoResponsavelId: 1, advogadoResponsavelNome: 1,
-                atendimentoAssumidoEm: 1, internalStatusId: 1, paused: 1, origem: 1
-            }
-        }).toArray();
-
-        const conversasAtivas = ativos.map(ticket => {
+        const ativosBrutos = await ticketsColl.find({}, { projection: PROJECAO_TICKET_CONVERSA_CLIENTE }).toArray();
+        const ativos = ativosBrutos.map(ticket => {
             const classificacao = classificarPendenciaTicket(ticket);
             const ultimaMensagemClienteEm = Number(ticket.lastInboundChatAt || 0) || null;
             const chatLidoEm = timestampLeituraChatTicket(ticket, chaveLeitura);
-            const temMensagemNaoLida = !!ultimaMensagemClienteEm && ultimaMensagemClienteEm > chatLidoEm;
             return {
-                ticketNumber: ticket.ticketNumber || null,
-                clienteNome: ticket.clienteNome || null,
+                ...ticket,
+                ticketNumber: String(ticket.ticketNumber || ''),
                 clienteCadastrado: ticket.clienteCadastrado === true || !!ticket.clienteId,
-                cpf: ticket.cpf || null,
                 whatsapp: whatsappDoTicket(ticket),
                 area: ticket.area || ticket.menuOptionTitle || null,
-                menuOptionTitle: ticket.menuOptionTitle || null,
-                menuOptionEmoji: ticket.menuOptionEmoji || '',
-                status: ticket.status || null,
                 statusLabel: classificacao.statusLabel,
                 pendenciaTipo: classificacao.tipo,
                 pendenciaLabel: classificacao.label,
                 createdAt: Number(ticket.createdAt || 0) || null,
                 lastActivity: Number(ticket.lastActivity || ticket.createdAt || 0) || null,
-                advogadoResponsavelId: ticket.advogadoResponsavelId || null,
-                advogadoResponsavelNome: ticket.advogadoResponsavelNome || null,
-                atendimentoAssumidoEm: ticket.atendimentoAssumidoEm || null,
-                internalStatusId: ticket.internalStatusId || null,
                 internalStatus: statusTicketPorId(ticket.internalStatusId),
-                origem: ticket.origem || 'organico',
                 ultimaMensagemClienteEm,
                 chatLidoEm: chatLidoEm || null,
-                temMensagemNaoLida,
+                temMensagemNaoLida: !!ultimaMensagemClienteEm && ultimaMensagemClienteEm > chatLidoEm,
                 isActive: true,
                 isArchived: false,
                 archivedAt: null
             };
-        });
+        }).filter(item => item.ticketNumber);
 
-        let conversasEncerradas = [];
+        let encerrados = [];
         if (incluirEncerrados && ticketHistoryColl) {
+            const ativosSet = new Set(ativos.map(item => String(item.ticketNumber)));
             const historicos = await ticketHistoryColl.find({
-                $and: [
-                    { _id: { $nin: conversasAtivas.map(item => item.ticketNumber).filter(Boolean) } },
-                    {
-                        $or: [
-                            { archivedAt: { $gte: inicioHistoricoMs } },
-                            { closedAt: { $gte: inicioHistoricoMs } },
-                            { updatedAt: { $gte: inicioHistoricoMs }, status: { $regex: /^encerrado/i } }
-                        ]
-                    }
+                $or: [
+                    { archivedAt: { $gte: inicioHistoricoMs } },
+                    { closedAt: { $gte: inicioHistoricoMs } },
+                    { updatedAt: { $gte: inicioHistoricoMs }, status: { $regex: /^encerrado/i } }
                 ]
-            }, {
-                projection: {
-                    ticketNumber: 1, status: 1, clienteId: 1, clienteNome: 1, clienteCadastrado: 1, cpf: 1, numeroReal: 1,
-                    whatsappNumbers: 1, identificadores: 1, area: 1, menuOptionTitle: 1,
-                    menuOptionEmoji: 1, createdAt: 1, lastActivity: 1, updatedAt: 1,
-                    archivedAt: 1, closedAt: 1, advogadoResponsavelId: 1,
-                    advogadoResponsavelNome: 1, atendimentoAssumidoEm: 1,
-                    internalStatusId: 1, origem: 1
-                }
-            }).sort({ archivedAt: -1, closedAt: -1, updatedAt: -1 }).limit(3000).toArray();
+            }, { projection: PROJECAO_TICKET_CONVERSA_CLIENTE })
+                .sort({ archivedAt: -1, closedAt: -1, updatedAt: -1 })
+                .limit(3000)
+                .toArray();
 
-            conversasEncerradas = historicos.map(item => {
+            encerrados = historicos.map(item => {
                 const ticketNumber = String(item.ticketNumber || item._id || '');
+                if (!ticketNumber || ativosSet.has(ticketNumber)) return null;
                 const encerradoEm = Number(item.archivedAt || item.closedAt || item.updatedAt || item.lastActivity || item.createdAt || 0) || null;
                 return {
+                    ...item,
                     ticketNumber,
-                    clienteNome: item.clienteNome || null,
                     clienteCadastrado: item.clienteCadastrado === true || !!item.clienteId,
-                    cpf: item.cpf || null,
                     whatsapp: whatsappDoTicket(item),
                     area: item.area || item.menuOptionTitle || null,
-                    menuOptionTitle: item.menuOptionTitle || null,
-                    menuOptionEmoji: item.menuOptionEmoji || '',
                     status: item.status || 'encerrado',
                     statusLabel: 'Encerrado',
                     pendenciaTipo: 'encerrado',
                     pendenciaLabel: 'Encerrado',
                     createdAt: Number(item.createdAt || 0) || null,
                     lastActivity: encerradoEm,
-                    advogadoResponsavelId: item.advogadoResponsavelId || null,
-                    advogadoResponsavelNome: item.advogadoResponsavelNome || null,
-                    atendimentoAssumidoEm: item.atendimentoAssumidoEm || null,
-                    internalStatusId: item.internalStatusId || null,
                     internalStatus: statusTicketPorId(item.internalStatusId),
-                    origem: item.origem || 'organico',
                     ultimaMensagemClienteEm: null,
                     chatLidoEm: null,
                     temMensagemNaoLida: false,
@@ -10479,20 +10917,20 @@ app.get('/api/tickets/conversations', async (req, res) => {
                     isArchived: true,
                     archivedAt: encerradoEm
                 };
-            }).filter(item => item.ticketNumber);
+            }).filter(Boolean);
         }
 
-        const conversations = [...conversasAtivas, ...conversasEncerradas]
-            .sort((a, b) => Number(b.lastActivity || 0) - Number(a.lastActivity || 0));
-
+        const conversations = agruparConversasCliente([...ativos, ...encerrados]);
         return res.json({
             generatedAt: agora,
             historyMonths: 6,
             includeArchived: incluirEncerrados,
+            groupedByClient: true,
             resumo: {
-                ativos: conversasAtivas.length,
-                mensagensNaoLidas: conversasAtivas.filter(item => item.temMensagemNaoLida).length,
-                encerradosExibidos: conversasEncerradas.length,
+                ativos: ativos.length,
+                conversasAtivas: conversations.filter(item => item.activeTicketsCount > 0).length,
+                mensagensNaoLidas: conversations.filter(item => item.temMensagemNaoLida).length,
+                encerradosExibidos: encerrados.length,
                 exibidos: conversations.length
             },
             ticketStatusOptions: statusTicketsAtivos(),
@@ -10519,18 +10957,30 @@ app.get('/api/tickets/unread-summary', async (req, res) => {
         const inicioRastreamento = Number(chatUnreadTrackingStartedAt || 0);
         const candidatos = await ticketsColl.find(
             { lastInboundChatAt: { $gt: inicioRastreamento } },
-            { projection: { lastInboundChatAt: 1, chatLeituras: 1 } }
+            {
+                projection: {
+                    ticketNumber: 1, clienteId: 1, cpf: 1, numeroReal: 1, whatsappNumbers: 1,
+                    identificadores: 1, lastRawJid: 1, lastInboundChatAt: 1, chatLeituras: 1
+                }
+            }
         ).toArray();
 
-        let ticketsNaoLidos = 0;
+        // A Central trabalha por cliente/conversa, não por ticket. Se o mesmo cliente
+        // tiver dois tickets ativos com mensagem pendente, o badge deve contar UMA
+        // conversa não lida em vez de duplicar o alerta.
+        const conversasNaoLidas = new Set();
         for (const ticket of candidatos) {
             const ultimaEntrada = Number(ticket.lastInboundChatAt || 0);
             if (!ultimaEntrada) continue;
             const lidoEm = timestampLeituraChatTicket(ticket, chaveLeitura);
-            if (ultimaEntrada > lidoEm) ticketsNaoLidos += 1;
+            if (ultimaEntrada > lidoEm) conversasNaoLidas.add(chaveConversaCliente(ticket));
         }
 
-        return res.json({ ticketsNaoLidos, generatedAt: Date.now() });
+        return res.json({
+            ticketsNaoLidos: conversasNaoLidas.size, // compatibilidade com o frontend existente
+            conversasNaoLidas: conversasNaoLidas.size,
+            generatedAt: Date.now()
+        });
     } catch (err) {
         console.error('[Tickets] Erro ao carregar resumo de não lidos:', err);
         return res.status(500).json({ erro: 'Não foi possível consultar as mensagens não lidas.' });
