@@ -5281,3 +5281,35 @@ html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.chat-swipe-ready .
     justify-content:center;
     gap:9px;
 }
+
+
+/* ===== V3.5.7 — status compacto na lista de conversas ===== */
+.chat-conversation-preview{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    min-width:0;
+}
+.chat-conversation-preview-text{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.chat-conversation-status-dot{
+    flex:0 0 auto;
+    width:7px;
+    height:7px;
+    border-radius:50%;
+    background:var(--chat-status-color,#8696a0);
+    box-shadow:0 0 0 1px rgba(17,27,33,.08);
+}
+html[data-theme="dark"] #ticket-chat-dialog .chat-conversation-status-dot{
+    box-shadow:0 0 0 1px rgba(255,255,255,.10);
+}
+@media (max-width:767.98px){
+    .chat-conversation-status-dot{
+        width:6px;
+        height:6px;
+    }
+}

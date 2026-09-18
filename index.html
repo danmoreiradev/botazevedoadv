@@ -11,7 +11,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     
-    <link rel="stylesheet" href="/assets/panel.css?v=3.5.5">
+    <link rel="stylesheet" href="/assets/panel.css?v=3.5.7">
 
 </head>
 <body class="session-loading">
@@ -1969,7 +1969,24 @@
         });
 
 
-        socket.on('ticket_internal_status_updated', payload=>{const t=(window.activeTicketsData||[]).find(x=>String(x.ticketNumber)===String(payload?.ticketNumber));if(t){t.internalStatusId=payload.internalStatusId||null;t.internalStatus=payload.internalStatus||null;filtrarTicketsAtivos()}if(String(window.activeChatTicketNumber||'')===String(payload?.ticketNumber||'')){window.activeChatTicketData={...(window.activeChatTicketData||{}),internalStatusId:payload.internalStatusId||null,internalStatus:payload.internalStatus||null}}});
+        socket.on('ticket_internal_status_updated', payload=>{
+            const numero=String(payload?.ticketNumber||'');
+            const t=(window.activeTicketsData||[]).find(x=>String(x.ticketNumber)===numero);
+            if(t){
+                t.internalStatusId=payload.internalStatusId||null;
+                t.internalStatus=payload.internalStatus||null;
+                filtrarTicketsAtivos();
+            }
+            atualizarStatusConversaLocal(numero,payload.internalStatusId||null,payload.internalStatus||null);
+            if(String(window.activeChatTicketNumber||'')===numero){
+                window.activeChatTicketData={
+                    ...(window.activeChatTicketData||{}),
+                    internalStatusId:payload.internalStatusId||null,
+                    internalStatus:payload.internalStatus||null
+                };
+                atualizarSeletorStatusChat(window.activeChatTicketData);
+            }
+        });
         socket.on('ticket_parameters_updated', payload=>{window.ticketStatusOptions=Array.isArray(payload?.status)?payload.status:[];renderizarLegendaStatusTickets();if(window.activeChatTicketData)atualizarSeletorStatusChat(window.activeChatTicketData);if(window.activeTicketsData?.length)filtrarTicketsAtivos();if(window.ticketParametrosAdmin)carregarParametrosTickets(true)});
         socket.on('crm_parameters_updated', ()=>{window.crmLoaded=false;window.crmOptions=null;if(window.crmParametrosAdmin)carregarParametrosCRM(true)});
 
@@ -6499,9 +6516,10 @@
             await atualizarStatusInternoTicket(ticket,select.value,select);
             const local=(window.activeTicketsData||[]).find(t=>String(t.ticketNumber)===ticket);
             const id=String(local?.internalStatusId||select.value||'');
-            window.activeChatTicketData={...(window.activeChatTicketData||{}),internalStatusId:id,internalStatus:local?.internalStatus||null};
+            const statusAtual=local?.internalStatus||(window.ticketStatusOptions||[]).find(item=>String(item.id||'')===id)||null;
+            window.activeChatTicketData={...(window.activeChatTicketData||{}),internalStatusId:id,internalStatus:statusAtual};
             atualizarStatusOperacionalChat(window.activeChatTicketData);
-            renderizarListaConversasChat();
+            atualizarStatusConversaLocal(ticket,id,statusAtual);
             if(select.value!==id) select.value=id||anterior;
         }
 
@@ -6701,8 +6719,16 @@
         }
         function nomeExibicaoAtendimento(item={}){
             const numero=formatarNumeroIdentificacaoChat(item.whatsapp||'');
-            if(item.clienteCadastrado!==true && numero)return numero;
-            return String(item.clienteNome||numero||'Cliente não cadastrado').trim();
+            const nome=String(item.clienteNome||'').trim();
+            const nomePlaceholder=/^cliente\s+n[aã]o\s+cadastrado$/i.test(nome);
+
+            // Mantém a identificação visual clara no chat sem perder o número:
+            // Cliente não cadastrado (+55 19 99999-9999)
+            if(numero && (item.clienteCadastrado!==true || nomePlaceholder)){
+                return `Cliente não cadastrado (${numero})`;
+            }
+
+            return String(nome||numero||'Cliente não cadastrado').trim();
         }
         function urlFotoAtendimento(ticketNumber=''){
             return ticketNumber?`/api/tickets/${encodeURIComponent(String(ticketNumber))}/profile-photo`:'';
@@ -6719,6 +6745,39 @@
             img.onload=()=>{img.classList.remove('hidden');fallback.classList.add('hidden');};
             img.onerror=()=>{img.classList.add('hidden');fallback.classList.remove('hidden');};
             img.src=src;
+        }
+
+        function corStatusConversaChat(status={}){
+            const cor=String(status?.cor||'').trim();
+            // Os status do painel usam cor hexadecimal; restringir o valor evita
+            // injetar conteúdo arbitrário em style="".
+            if(/^#[0-9a-f]{3,8}$/i.test(cor))return cor;
+            return '#8696a0';
+        }
+
+        function atualizarStatusConversaLocal(ticketNumber, internalStatusId=null, internalStatus=null){
+            const numero=String(ticketNumber||'');
+            if(!numero)return;
+
+            let alterou=false;
+            (window.atendimentosConversasData||[]).forEach(item=>{
+                const tickets=Array.isArray(item.ticketNumbers)?item.ticketNumbers.map(String):[];
+                const principal=String(item.primaryTicketNumber||item.ticketNumber||'');
+                if(principal!==numero && !tickets.includes(numero))return;
+
+                // O status exibido na barra lateral representa o ticket operacional
+                // principal da conversa. Um ticket histórico não deve sobrescrevê-lo.
+                if(principal && principal!==numero)return;
+
+                item.internalStatusId=internalStatusId||null;
+                item.internalStatus=internalStatus||null;
+                alterou=true;
+            });
+
+            if(alterou){
+                window.chatConversationRenderKey='';
+                renderizarListaConversasChat();
+            }
         }
 
         function textoConversaChat(item={}){
@@ -6743,7 +6802,7 @@
                 item.lastActivity||0,
                 item.temMensagemNaoLida?1:0,
                 item.ticketsCount||1,
-                item.internalStatus?.id||item.internalStatus?.nome||item.status||''
+                `${item.internalStatus?.id||item.internalStatus?.nome||item.status||''}:${item.internalStatus?.cor||''}`
             ].join(':')).join('|');
         }
 
@@ -6770,7 +6829,10 @@
                 const nome=escapeHtmlChat(nomeExibicao);
                 const fotoUrl=urlFotoAtendimento(numero);
                 const area=escapeHtmlChat(item.area||item.menuOptionTitle||'Sem área');
-                const status=item.isArchived||item.isActive===false?'Encerrado':escapeHtmlChat(item.internalStatus?.nome||item.statusLabel||item.status||'Em atendimento');
+                const statusInterno=(item.isArchived||item.isActive===false)?null:(item.internalStatus||null);
+                const statusDot=statusInterno?.nome
+                    ? `<span class="chat-conversation-status-dot" style="--chat-status-color:${corStatusConversaChat(statusInterno)}" title="${escapeHtmlChat(statusInterno.nome)}" aria-label="Status: ${escapeHtmlChat(statusInterno.nome)}"></span>`
+                    : '';
                 const dataRef=Number(item.lastActivity||item.archivedAt||0);
                 const hora=dataRef?new Date(dataRef).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}):'';
                 const encerrado=item.isArchived||item.isActive===false?'<span class="chat-conversation-archived"><i class="bi bi-archive"></i> encerrado</span>':'';
@@ -6780,7 +6842,7 @@
                 const ticketLine=totalTickets>1
                     ? `${escapeHtmlChat(numero)} <span class="chat-conversation-ticket-count">· ${totalTickets} tickets</span>`
                     : escapeHtmlChat(numero);
-                btn.innerHTML=`<span class="chat-conversation-avatar"><span class="chat-avatar-fallback">${fallbackAvatar}</span>${fotoHtml}</span><span class="chat-conversation-copy"><span class="chat-conversation-line"><strong>${nome}${encerrado}</strong><time>${hora}</time></span><span class="chat-conversation-preview">${area} · ${status}</span><span class="chat-conversation-ticket">${ticketLine}</span></span>${item.temMensagemNaoLida?'<span class="chat-conversation-unread"></span>':''}`;
+                btn.innerHTML=`<span class="chat-conversation-avatar"><span class="chat-avatar-fallback">${fallbackAvatar}</span>${fotoHtml}</span><span class="chat-conversation-copy"><span class="chat-conversation-line"><strong>${nome}${encerrado}</strong><time>${hora}</time></span><span class="chat-conversation-preview"><span class="chat-conversation-preview-text">${area}</span>${statusDot}</span><span class="chat-conversation-ticket">${ticketLine}</span></span>${item.temMensagemNaoLida?'<span class="chat-conversation-unread"></span>':''}`;
                 btn.onclick=()=>abrirChatTicket(numero,btn,chave);
                 frag.appendChild(btn);
             });
