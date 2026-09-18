@@ -1122,6 +1122,9 @@ function liberarPayloadEntrada(fingerprint) {
 
 let ticketsColl, authColl, knowledgeColl, knowledgeGapsColl, knowledgeWebSourcesColl, knowledgeWebPagesColl, userLoginColl, clientsColl, ticketHistoryColl, countersColl, menuOptionsColl, settingsColl, crmLeadsColl, ticketMessagesColl, baileysSentMessagesColl;
 let chatMediaBucket = null;
+// Recibos do WhatsApp podem chegar alguns milissegundos antes de a mensagem enviada
+// ser persistida no MongoDB. Mantemos esse pequeno buffer para não perder o ✓✓.
+const chatDeliveryStatusPending = new Map();
 let chatMediaFilesColl = null;
 
 // -----------------------------------------------------------------------------
@@ -1838,26 +1841,49 @@ async function prepararQuotedMessageChat(ticketNumber, jid, replyToMessageId) {
     return { quoted, snapshot: snapshotReplyToDocChat(original) };
 }
 
+function normalizarStatusEntregaChat(valor = null) {
+    if (valor === null || valor === undefined || valor === '') return null;
+    if (typeof valor === 'number' || /^\d+$/.test(String(valor))) {
+        const n = Number(valor);
+        if (n >= 5) return 'played';
+        if (n >= 4) return 'read';
+        if (n >= 3) return 'delivered';
+        if (n >= 2) return 'sent';
+        if (n >= 1) return 'pending';
+        return 'error';
+    }
+    const texto = String(valor || '').trim().toLowerCase();
+    if (['played','read','delivered','sent','pending','error'].includes(texto)) return texto;
+    return null;
+}
+
 function serializarMensagemChat(doc = {}) {
+    const apagada = !!doc.deletedAt;
+    const direction = doc.direction || 'in';
     return {
         id: String(doc._id || `${doc.ticketNumber || ''}:${doc.messageId || ''}`),
         ticketNumber: doc.ticketNumber || null,
         messageId: doc.messageId || null,
-        direction: doc.direction || 'in',
+        direction,
         source: doc.source || 'cliente',
         tipo: doc.tipo || 'text',
-        texto: doc.texto || '',
-        fileName: doc.fileName || null,
-        mimeType: doc.mimeType || null,
-        fileSize: Number(doc.fileSize || 0) || null,
-        storedMediaId: doc.storedMediaId ? String(doc.storedMediaId) : null,
-        hasMedia: !!doc.mediaRef || !!doc.storedMediaId || ['image', 'audio', 'video', 'document', 'sticker'].includes(doc.tipo),
+        texto: apagada ? '' : (doc.texto || ''),
+        fileName: apagada ? null : (doc.fileName || null),
+        mimeType: apagada ? null : (doc.mimeType || null),
+        fileSize: apagada ? null : (Number(doc.fileSize || 0) || null),
+        storedMediaId: apagada ? null : (doc.storedMediaId ? String(doc.storedMediaId) : null),
+        hasMedia: apagada ? false : (!!doc.mediaRef || !!doc.storedMediaId || ['image', 'audio', 'video', 'document', 'sticker'].includes(doc.tipo)),
         senderId: doc.senderId || null,
         senderName: doc.senderName || null,
         replyTo: normalizarReplyToChat(doc.replyTo || null),
         createdAt: doc.createdAt instanceof Date ? doc.createdAt.getTime() : Number(doc.createdAt || Date.now()),
         editedAt: doc.editedAt instanceof Date ? doc.editedAt.getTime() : (Number(doc.editedAt || 0) || null),
-        editCount: Number(doc.editCount || 0) || 0
+        editCount: Number(doc.editCount || 0) || 0,
+        deliveryStatus: direction === 'out' ? (normalizarStatusEntregaChat(doc.deliveryStatus) || 'sent') : null,
+        deliveryUpdatedAt: doc.deliveryUpdatedAt instanceof Date ? doc.deliveryUpdatedAt.getTime() : (Number(doc.deliveryUpdatedAt || 0) || null),
+        deletedAt: doc.deletedAt instanceof Date ? doc.deletedAt.getTime() : (Number(doc.deletedAt || 0) || null),
+        deletedById: doc.deletedById || null,
+        deletedByName: doc.deletedByName || null
     };
 }
 
@@ -1887,6 +1913,9 @@ async function removerPoliticasLegadasHistoricoChat() {
 
 async function registrarMensagemChat(documento = {}) {
     if (!ticketMessagesColl || !documento.ticketNumber || !documento.messageId) return null;
+    const statusPendenteEntrega = documento.direction === 'out'
+        ? chatDeliveryStatusPending.get(String(documento.messageId))?.status
+        : null;
     const registro = {
         _id: documento._id || `msg_${documento.ticketNumber}_${documento.messageId}`,
         ticketNumber: String(documento.ticketNumber),
@@ -1900,9 +1929,12 @@ async function registrarMensagemChat(documento = {}) {
         fileSize: Number(documento.fileSize || 0) || null,
         mediaRef: documento.mediaRef ? String(documento.mediaRef).slice(0, CHAT_MEDIA_REF_MAX_CHARS) : null,
         storedMediaId: documento.storedMediaId ? String(documento.storedMediaId).slice(0, 80) : null,
+        remoteJid: documento.remoteJid ? String(documento.remoteJid).slice(0, 220) : null,
         senderId: documento.senderId ? String(documento.senderId).slice(0, 120) : null,
         senderName: documento.senderName ? limitarTextoChat(documento.senderName, 180) : null,
         replyTo: normalizarReplyToChat(documento.replyTo || null),
+        deliveryStatus: documento.direction === 'out' ? (normalizarStatusEntregaChat(statusPendenteEntrega || documento.deliveryStatus) || 'sent') : null,
+        deliveryUpdatedAt: documento.direction === 'out' ? new Date(Number(documento.deliveryUpdatedAt || Date.now())) : null,
         createdAt: documento.createdAt instanceof Date ? documento.createdAt : new Date(Number(documento.createdAt || Date.now()))
     };
 
@@ -1912,12 +1944,16 @@ async function registrarMensagemChat(documento = {}) {
     if (!registro.fileSize) delete registro.fileSize;
     if (!registro.mediaRef) delete registro.mediaRef;
     if (!registro.storedMediaId) delete registro.storedMediaId;
+    if (!registro.remoteJid) delete registro.remoteJid;
     if (!registro.senderId) delete registro.senderId;
     if (!registro.senderName) delete registro.senderName;
     if (!registro.replyTo) delete registro.replyTo;
+    if (!registro.deliveryStatus) delete registro.deliveryStatus;
+    if (!registro.deliveryUpdatedAt) delete registro.deliveryUpdatedAt;
 
     try {
         await ticketMessagesColl.insertOne(registro);
+        chatDeliveryStatusPending.delete(String(registro.messageId));
         const serializada = serializarMensagemChat(registro);
         io.emit('ticket_chat_message', { ticketNumber: registro.ticketNumber, message: serializada });
         apararHistoricoChatSeNecessario(registro.ticketNumber);
@@ -2016,6 +2052,7 @@ async function registrarMensagemClienteChat(ticket, msg) {
         messageId: msg.key.id,
         direction: 'in',
         source: 'cliente',
+        remoteJid: msg.key.remoteJid || null,
         ...dados,
         createdAt: agora
     });
@@ -2053,6 +2090,7 @@ async function registrarMensagemManualWhatsAppChat(ticket, msg) {
         messageId: msg.key.id,
         direction: 'out',
         source: 'whatsapp_manual',
+        remoteJid: msg.key.remoteJid || null,
         senderName: 'Escritório (WhatsApp)',
         ...dados,
         createdAt: Date.now()
@@ -2084,11 +2122,80 @@ async function registrarMensagemAutomaticaChat(jid, sent, content) {
         messageId: sent.key.id,
         direction: 'out',
         source: 'bot',
+        remoteJid: sent.key.remoteJid || jid || null,
         tipo: 'text',
         texto: limitarTextoChat(content.text, CHAT_MAX_TEXT_CHARS),
         senderName: 'Assistente automático',
         createdAt: Date.now()
     });
+}
+
+
+const CHAT_DELIVERY_STATUS_PRIORITY = Object.freeze({ error: 0, pending: 1, sent: 2, delivered: 3, read: 4, played: 5 });
+
+async function atualizarStatusEntregaMensagemChat(messageId, statusBruto, origem = 'messages.update') {
+    if (!ticketMessagesColl || !messageId) return;
+    const status = normalizarStatusEntregaChat(statusBruto);
+    if (!status || status === 'error' || status === 'pending') return;
+
+    try {
+        const docs = await ticketMessagesColl.find(
+            { messageId: String(messageId), direction: 'out', deletedAt: { $exists: false } },
+            { projection: { _id: 1, ticketNumber: 1, deliveryStatus: 1 } }
+        ).limit(5).toArray();
+        if (!docs.length) {
+            const id = String(messageId);
+            const atualPendente = chatDeliveryStatusPending.get(id)?.status || null;
+            if ((CHAT_DELIVERY_STATUS_PRIORITY[status] || 0) > (CHAT_DELIVERY_STATUS_PRIORITY[atualPendente] || 0)) {
+                chatDeliveryStatusPending.set(id, { status, savedAt: Date.now() });
+                setTimeout(() => {
+                    const item = chatDeliveryStatusPending.get(id);
+                    if (item && Date.now() - Number(item.savedAt || 0) >= 60000) chatDeliveryStatusPending.delete(id);
+                }, 61000).unref?.();
+            }
+            return;
+        }
+
+        for (const doc of docs) {
+            const atual = normalizarStatusEntregaChat(doc.deliveryStatus) || 'sent';
+            if ((CHAT_DELIVERY_STATUS_PRIORITY[status] || 0) <= (CHAT_DELIVERY_STATUS_PRIORITY[atual] || 0)) continue;
+            const agora = new Date();
+            await ticketMessagesColl.updateOne(
+                { _id: doc._id },
+                { $set: { deliveryStatus: status, deliveryUpdatedAt: agora } }
+            );
+            io.emit('ticket_chat_message_status', {
+                ticketNumber: doc.ticketNumber,
+                messageId: String(messageId),
+                deliveryStatus: status,
+                deliveryUpdatedAt: agora.getTime(),
+                origem
+            });
+        }
+    } catch (err) {
+        console.warn(`[Chat] Não foi possível atualizar confirmação de entrega ${messageId}:`, err?.message || err);
+    }
+}
+
+async function processarAtualizacoesEntregaBaileys(atualizacoes = []) {
+    const lote = Array.isArray(atualizacoes) ? atualizacoes : [];
+    await Promise.allSettled(lote.map(item => {
+        const messageId = item?.key?.id;
+        const status = item?.update?.status;
+        if (!messageId || status === undefined || status === null) return Promise.resolve();
+        return atualizarStatusEntregaMensagemChat(messageId, status, 'messages.update');
+    }));
+}
+
+async function processarRecibosEntregaBaileys(recibos = []) {
+    const lote = Array.isArray(recibos) ? recibos : [];
+    await Promise.allSettled(lote.map(item => {
+        const messageId = item?.key?.id;
+        if (!messageId) return Promise.resolve();
+        const receipt = item?.receipt || {};
+        const status = receipt.readTimestamp || receipt.playedTimestamp ? 'read' : (receipt.receiptTimestamp ? 'delivered' : null);
+        return status ? atualizarStatusEntregaMensagemChat(messageId, status, 'message-receipt.update') : Promise.resolve();
+    }));
 }
 
 async function destinoWhatsAppTicket(ticket = {}) {
@@ -7692,6 +7799,21 @@ socketAtual.ev.on('messages.upsert', (m = {}) => {
     });
 });
 
+
+// Confirmações de envio/entrega/leitura para reproduzir os indicadores do WhatsApp
+// no painel. O evento é leve e atualiza somente a mensagem correspondente.
+socketAtual.ev.on('messages.update', atualizacoes => {
+    processarAtualizacoesEntregaBaileys(atualizacoes).catch(err =>
+        console.warn('[Chat] Falha ao processar confirmação de mensagem:', err?.message || err)
+    );
+});
+
+socketAtual.ev.on('message-receipt.update', recibos => {
+    processarRecibosEntregaBaileys(recibos).catch(err =>
+        console.warn('[Chat] Falha ao processar recibo de mensagem:', err?.message || err)
+    );
+});
+
         // Atualiza o cadastro quando o Baileys informar um novo mapeamento LID <-> número.
         // O fluxo principal não depende deste evento; ele é apenas uma camada extra de persistência.
         socketAtual.ev.on('lid-mapping.update', async ({ lid, pn }) => {
@@ -10033,9 +10155,10 @@ app.get('/api/tickets/:ticketNumber/chat/media/:messageId', async (req, res) => 
         const messageId = String(req.params.messageId || '').trim();
         const doc = await ticketMessagesColl.findOne(
             { ticketNumber, messageId },
-            { projection: { messageId: 1, direction: 1, tipo: 1, fileName: 1, mimeType: 1, mediaRef: 1, storedMediaId: 1 } }
+            { projection: { messageId: 1, direction: 1, tipo: 1, fileName: 1, mimeType: 1, mediaRef: 1, storedMediaId: 1, deletedAt: 1 } }
         );
         if (!doc) return res.status(404).json({ erro: 'Anexo não encontrado no histórico.' });
+        if (doc.deletedAt) return res.status(410).json({ erro: 'Esta mensagem foi apagada.' });
 
         const chaveCache = `${ticketNumber}:${messageId}`;
         const cache = obterMidiaCacheChat(chaveCache);
@@ -10390,6 +10513,7 @@ app.post('/api/tickets/:ticketNumber/chat/messages', async (req, res) => {
             source: 'painel',
             tipo: 'text',
             texto,
+            remoteJid: sent?.key?.remoteJid || jid,
             senderId: advogado.id,
             senderName: advogado.assinatura,
             replyTo,
@@ -10471,6 +10595,81 @@ app.put('/api/tickets/:ticketNumber/chat/messages/:messageId', async (req, res) 
     } catch (err) {
         console.error('[Chat] Erro ao editar mensagem:', err);
         return res.status(Number(err?.statusCode || 500)).json({ erro: err?.message || 'Não foi possível editar a mensagem.' });
+    }
+});
+
+
+app.delete('/api/tickets/:ticketNumber/chat/messages/:messageId', async (req, res) => {
+    if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
+    if (!sock?.user) return res.status(503).json({ erro: 'O WhatsApp do escritório não está conectado.' });
+    if (!ticketMessagesColl) return res.status(503).json({ erro: 'Histórico do chat ainda não está disponível.' });
+
+    try {
+        const ticketNumber = String(req.params.ticketNumber || '').trim();
+        const messageId = String(req.params.messageId || '').trim();
+        if (!ticketNumber || !messageId) return res.status(400).json({ erro: 'Mensagem inválida para exclusão.' });
+
+        const advogado = identidadeAdvogadoSessao(req);
+        const acessoTicket = await garantirTicketDoAdvogado(ticketNumber, advogado);
+        if (!acessoTicket.ok) {
+            return res.status(acessoTicket.status || 409).json({
+                erro: acessoTicket.erro || 'Este ticket está sendo atendido por outro advogado.',
+                codigo: acessoTicket.codigo || null,
+                responsavel: acessoTicket.responsavel || null
+            });
+        }
+
+        const original = await ticketMessagesColl.findOne({ ticketNumber, messageId });
+        if (!original) return res.status(404).json({ erro: 'Mensagem não encontrada no histórico.' });
+        if (original.deletedAt) return res.json({ ok: true, message: serializarMensagemChat(original) });
+        if (original.direction !== 'out' || original.source !== 'painel') {
+            return res.status(409).json({ erro: 'Somente mensagens enviadas pelo painel podem ser apagadas por aqui.' });
+        }
+        if (original.senderId && advogado.id && String(original.senderId) !== String(advogado.id)) {
+            return res.status(403).json({ erro: 'Somente o advogado que enviou a mensagem pode apagá-la.' });
+        }
+
+        const ticket = acessoTicket.ticket;
+        const jid = await destinoWhatsAppTicket(ticket);
+        if (!jid) return res.status(409).json({ erro: 'Não foi possível identificar o WhatsApp deste ticket.' });
+
+        // O próprio WhatsApp valida a janela disponível para "Apagar para todos".
+        // Só alteramos o banco depois que a plataforma aceitar a revogação.
+        const jidOriginal = normalizarJid(original.remoteJid) || original.remoteJid || jid;
+        const deleteKey = { remoteJid: jidOriginal, id: messageId, fromMe: true };
+        await enviarMensagemBaileys(jidOriginal, { delete: deleteKey });
+
+        const agora = new Date();
+        const update = {
+            $set: {
+                deletedAt: agora,
+                deletedById: advogado.id ? String(advogado.id).slice(0, 120) : null,
+                deletedByName: limitarTextoChat(advogado.assinatura || advogado.nome || '', 180)
+            },
+            $unset: {
+                texto: '', fileName: '', mimeType: '', fileSize: '', mediaRef: '', storedMediaId: ''
+            }
+        };
+        await ticketMessagesColl.updateOne({ _id: original._id }, update);
+
+        // Remove imediatamente a cópia persistente quando existir. Falha de limpeza
+        // não desfaz a revogação já aceita pelo WhatsApp.
+        if (original.storedMediaId && chatMediaBucket && ObjectId.isValid(String(original.storedMediaId))) {
+            try { await chatMediaBucket.delete(new ObjectId(String(original.storedMediaId))); } catch (_) {}
+        }
+        chatMediaCache.delete(`${ticketNumber}:${messageId}`);
+
+        const atualizado = await ticketMessagesColl.findOne({ _id: original._id });
+        const serializada = serializarMensagemChat(atualizado || { ...original, deletedAt: agora, texto: '', mediaRef: null, storedMediaId: null });
+        io.emit('ticket_chat_message_deleted', { ticketNumber, message: serializada });
+        return res.json({ ok: true, message: serializada });
+    } catch (err) {
+        console.error('[Chat] Erro ao apagar mensagem:', err);
+        const texto = String(err?.message || '');
+        const mensagem = /forbidden|not-authorized|not allowed|timed out|too old|revoke/i.test(texto)
+            ? 'O WhatsApp não permitiu apagar esta mensagem para todos. Ela pode estar fora da janela de exclusão.'
+            : (err?.message || 'Não foi possível apagar a mensagem.');
+        return res.status(Number(err?.statusCode || 500)).json({ erro: mensagem });
     }
 });
 
@@ -10763,6 +10962,7 @@ app.post(
                 fileSize: tipo === 'audio' && Buffer.isBuffer(payload?.audio) ? payload.audio.length : req.body.length,
                 mediaRef: mediaRefEnviada,
                 storedMediaId,
+                remoteJid: sent?.key?.remoteJid || jid,
                 senderId: advogado.id,
                 senderName: advogado.assinatura,
                 replyTo,
