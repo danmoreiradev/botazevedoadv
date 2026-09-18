@@ -11077,6 +11077,39 @@ async function obterUrlFotoPerfilWhatsApp(ticket = {}) {
     return null;
 }
 
+// Foto da conta WhatsApp conectada do escritório, usada nos áudios enviados.
+app.get('/api/whatsapp/profile-photo', async (req, res) => {
+    if (!req.session.loggedIn) return res.status(401).end();
+    if (!usuarioPode(req, 'tickets') && !usuarioPode(req, 'chat')) return res.status(403).end();
+
+    try {
+        let url = currentUser?.pic || null;
+
+        if (!url && sock?.user && typeof sock.profilePictureUrl === 'function') {
+            try {
+                url = await sock.profilePictureUrl(sock.user.id, 'image');
+                if (url) {
+                    currentUser = {
+                        ...(currentUser || {}),
+                        number: currentUser?.number || String(sock.user.id || '').split(':')[0],
+                        name: currentUser?.name || 'Azevedo e Juvencio',
+                        pic: url
+                    };
+                }
+            } catch (_) {
+                url = null;
+            }
+        }
+
+        if (!url) return res.status(404).end();
+        res.setHeader('Cache-Control', 'private, max-age=900');
+        return res.redirect(302, url);
+    } catch (err) {
+        console.warn('[WhatsApp] Não foi possível obter a foto do perfil do escritório:', err?.message || err);
+        return res.status(404).end();
+    }
+});
+
 // Foto do contato usada na Central de Atendimentos. O navegador recebe apenas um
 // redirecionamento temporário para a mídia do WhatsApp; nenhuma foto é persistida.
 app.get('/api/tickets/:ticketNumber/profile-photo', async (req, res) => {
