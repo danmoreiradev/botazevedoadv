@@ -6574,7 +6574,13 @@ async function startBotInterno() {
             clientsColl.createIndex({ advogadoResponsavel: 1 }),
             ticketHistoryColl.createIndex({ ticketNumber: 1 }, { unique: true }),
             ticketHistoryColl.createIndex({ identificadores: 1 }),
+            ticketHistoryColl.createIndex({ clienteId: 1 }),
+            ticketHistoryColl.createIndex({ whatsappNumbers: 1 }),
+            ticketHistoryColl.createIndex({ numeroReal: 1 }),
+            ticketHistoryColl.createIndex({ cpf: 1 }),
             ticketsColl.createIndex({ ticketNumber: 1 }, { unique: true, sparse: true }),
+            ticketsColl.createIndex({ clienteId: 1 }),
+            ticketsColl.createIndex({ cpf: 1 }),
             // Estes campos são consultados em TODA mensagem recebida. Sem índices, o MongoDB
             // precisa varrer active_tickets e a resposta do chatbot cresce conforme o uso.
             ticketsColl.createIndex({ identificadores: 1 }),
@@ -9958,12 +9964,26 @@ async function atualizarEstadoPosEnvioChat({ ticket, ticketNumber, advogado, ace
 app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
     if (!usuarioPode(req, 'chat')) return res.status(403).json({ erro: 'Seu usuário não possui permissão para o chat.' });
     if (!ticketMessagesColl || !ticketsColl) return res.status(503).json({ erro: 'Chat ainda não está disponível.' });
+
     try {
         const ticketNumberSolicitado = String(req.params.ticketNumber || '').trim();
+        const incluirDocumentos = String(req.query.includeDocuments ?? '1') !== '0';
+
+        // A descoberta da conversa precisa apenas dos campos de identidade/estado.
+        // Evita trazer documentos e arrays extensos antes de sabermos qual é o ticket operacional.
         const [ticketAtivoSolicitado, historicoSolicitado] = await Promise.all([
-            ticketsColl.findOne({ ticketNumber: ticketNumberSolicitado }),
-            ticketHistoryColl ? ticketHistoryColl.findOne({ _id: ticketNumberSolicitado }) : Promise.resolve(null)
+            ticketsColl.findOne(
+                { ticketNumber: ticketNumberSolicitado },
+                { projection: PROJECAO_TICKET_CONVERSA_CLIENTE }
+            ),
+            ticketHistoryColl
+                ? ticketHistoryColl.findOne(
+                    { _id: ticketNumberSolicitado },
+                    { projection: PROJECAO_TICKET_CONVERSA_CLIENTE }
+                )
+                : Promise.resolve(null)
         ]);
+
         const baseSolicitada = ticketAtivoSolicitado || historicoSolicitado;
         if (!baseSolicitada) return res.status(404).json({ erro: 'Atendimento não encontrado.' });
 
@@ -9974,18 +9994,45 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
         const ticketNumbers = [...new Set(ticketsRelacionados.map(item => String(item.ticketNumber || '')).filter(Boolean))];
         if (!ticketNumbers.length) ticketNumbers.push(ticketNumberSolicitado);
 
-        const historicoOperacional = ticketHistoryColl
-            ? await ticketHistoryColl.findOne({ _id: ticketNumberOperacional })
-            : null;
+        // Busca somente os campos pesados realmente necessários à abertura.
+        // Documentos podem ser excluídos da primeira resposta e carregados em seguida
+        // pelo endpoint /chat/documents, deixando as mensagens aparecerem antes.
+        const projecaoAtivoDetalhe = {
+            ticketNumber: 1,
+            perguntasFluxo: 1,
+            respostasFluxo: 1,
+            ...(incluirDocumentos ? { documentosIA: 1 } : {})
+        };
+        const projecaoHistoricoDetalhe = {
+            perguntasTriagem: 1,
+            respostasTriagem: 1,
+            ...(incluirDocumentos ? { documentosIA: 1 } : {})
+        };
 
-        const documentosIAChat = mesclarDocumentosIATicket(
-            atendimentoAtivo ? ticketOperacional : {},
-            historicoOperacional || (!atendimentoAtivo ? ticketOperacional : {}),
-            { detalhado: true }
-        );
-        const documentoIAPorMensagem = new Map(
-            documentosIAChat.filter(doc => doc?.messageId).map(doc => [String(doc.messageId), doc])
-        );
+        const [ticketAtivoDetalhe, historicoOperacional] = await Promise.all([
+            atendimentoAtivo
+                ? ticketsColl.findOne({ ticketNumber: ticketNumberOperacional }, { projection: projecaoAtivoDetalhe })
+                : Promise.resolve(null),
+            ticketHistoryColl
+                ? ticketHistoryColl.findOne({ _id: ticketNumberOperacional }, { projection: projecaoHistoricoDetalhe })
+                : Promise.resolve(null)
+        ]);
+
+        const ticketDetalhado = {
+            ...ticketOperacional,
+            ...(ticketAtivoDetalhe || {})
+        };
+
+        const documentosIAChat = incluirDocumentos
+            ? mesclarDocumentosIATicket(
+                atendimentoAtivo ? ticketDetalhado : {},
+                historicoOperacional || (!atendimentoAtivo ? ticketDetalhado : {}),
+                { detalhado: true }
+            )
+            : [];
+        const documentoIAPorMensagem = incluirDocumentos
+            ? new Map(documentosIAChat.filter(doc => doc?.messageId).map(doc => [String(doc.messageId), doc]))
+            : new Map();
 
         const limite = Math.min(CHAT_LIST_LIMIT_MAX, Math.max(10, Number(req.query.limit || CHAT_LIST_LIMIT_DEFAULT)));
         const filtro = { ticketNumber: { $in: ticketNumbers } };
@@ -9994,7 +10041,12 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
             if (!Number.isNaN(antes.getTime())) filtro.createdAt = { $lt: antes };
         }
 
-        const docsDesc = await ticketMessagesColl.find(filtro).sort({ createdAt: -1 }).limit(limite + 1).toArray();
+        const docsDesc = await ticketMessagesColl
+            .find(filtro)
+            .sort({ createdAt: -1 })
+            .limit(limite + 1)
+            .toArray();
+
         const hasMore = docsDesc.length > limite;
         const docs = docsDesc.slice(0, limite).reverse();
         const lidoEm = docs.length
@@ -10002,16 +10054,14 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
             : Date.now();
 
         const ativosRelacionados = ticketsRelacionados.filter(item => item.isActive === true && item.isArchived !== true);
-        await Promise.allSettled(
-            ativosRelacionados.map(item => marcarTicketChatComoLido(item.ticketNumber, req, lidoEm))
-        );
 
         const classificacao = atendimentoAtivo
-            ? classificarPendenciaTicket(ticketOperacional)
+            ? classificarPendenciaTicket(ticketDetalhado)
             : { statusLabel: 'Encerrado', tipo: 'encerrado', label: 'Encerrado' };
-        const triagemBase = dadosTriagemTicket(ticketOperacional, historicoOperacional || {});
+        const triagemBase = dadosTriagemTicket(ticketDetalhado, historicoOperacional || {});
         const triagem = progressoTriagemTicket(triagemBase.ticket, triagemBase.respostas);
 
+        // Responde primeiro; as escritas de "lido" não precisam bloquear o carregamento visual.
         res.json({
             readAt: lidoEm,
             conversation: {
@@ -10027,39 +10077,54 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
                 ticketNumber: ticketNumberOperacional,
                 isActive: atendimentoAtivo,
                 isArchived: !atendimentoAtivo,
-                archivedAt: !atendimentoAtivo ? Number(ticketOperacional.archivedAt || ticketOperacional.closedAt || 0) || null : null,
-                clienteNome: ticketOperacional.clienteNome || baseSolicitada.clienteNome || null,
-                clienteCadastrado: ticketOperacional.clienteCadastrado === true || !!ticketOperacional.clienteId,
-                whatsapp: whatsappDoTicket(ticketOperacional) || whatsappDoTicket(baseSolicitada),
-                area: ticketOperacional.area || ticketOperacional.menuOptionTitle || null,
-                status: ticketOperacional.status || null,
+                archivedAt: !atendimentoAtivo ? Number(ticketDetalhado.archivedAt || ticketDetalhado.closedAt || 0) || null : null,
+                clienteNome: ticketDetalhado.clienteNome || baseSolicitada.clienteNome || null,
+                clienteCadastrado: ticketDetalhado.clienteCadastrado === true || !!ticketDetalhado.clienteId,
+                whatsapp: whatsappDoTicket(ticketDetalhado) || whatsappDoTicket(baseSolicitada),
+                area: ticketDetalhado.area || ticketDetalhado.menuOptionTitle || null,
+                status: ticketDetalhado.status || null,
                 statusLabel: classificacao.statusLabel,
                 pendenciaTipo: classificacao.tipo,
                 pendenciaLabel: classificacao.label,
-                paused: ticketOperacional.paused === true,
-                createdAt: Number(ticketOperacional.createdAt || 0) || null,
-                lastActivity: Number(ticketOperacional.lastActivity || 0) || null,
+                paused: ticketDetalhado.paused === true,
+                createdAt: Number(ticketDetalhado.createdAt || 0) || null,
+                lastActivity: Number(ticketDetalhado.lastActivity || 0) || null,
                 triagem,
-                advogadoResponsavelId: ticketOperacional.advogadoResponsavelId || null,
-                advogadoResponsavelNome: ticketOperacional.advogadoResponsavelNome || null,
-                atendimentoAssumidoEm: ticketOperacional.atendimentoAssumidoEm || null,
-                internalStatusId: ticketOperacional.internalStatusId || null,
-                internalStatus: statusTicketPorId(ticketOperacional.internalStatusId)
+                advogadoResponsavelId: ticketDetalhado.advogadoResponsavelId || null,
+                advogadoResponsavelNome: ticketDetalhado.advogadoResponsavelNome || null,
+                atendimentoAssumidoEm: ticketDetalhado.atendimentoAssumidoEm || null,
+                internalStatusId: ticketDetalhado.internalStatusId || null,
+                internalStatus: statusTicketPorId(ticketDetalhado.internalStatusId)
             },
             messages: docs.map(item => {
                 const mensagem = serializarMensagemChat(item);
-                return { ...mensagem, documentAI: documentoIAPorMensagem.get(String(item.messageId || '')) || null };
+                return {
+                    ...mensagem,
+                    documentAI: incluirDocumentos
+                        ? (documentoIAPorMensagem.get(String(item.messageId || '')) || null)
+                        : null
+                };
             }),
             documents: documentosIAChat,
-            documentsSummary: resumoDocumentosIATicket(documentosIAChat),
+            documentsSummary: incluirDocumentos
+                ? resumoDocumentosIATicket(documentosIAChat)
+                : { total: 0, processando: 0, comErro: 0 },
+            documentsIncluded: incluirDocumentos,
             hasMore,
             retentionDays: CHAT_RETENTION_DAYS,
             maxMessagesPerTicket: CHAT_MAX_MESSAGES_PER_TICKET,
             unlimitedHistory: true
         });
+
+        // Não segura a resposta HTTP por atualizações de leitura.
+        setImmediate(() => {
+            Promise.allSettled(
+                ativosRelacionados.map(item => marcarTicketChatComoLido(item.ticketNumber, req, lidoEm))
+            ).catch(() => {});
+        });
     } catch (err) {
         console.error('[Chat] Erro ao carregar mensagens:', err);
-        res.status(500).json({ erro: 'Não foi possível carregar o chat.' });
+        if (!res.headersSent) res.status(500).json({ erro: 'Não foi possível carregar o chat.' });
     }
 });
 

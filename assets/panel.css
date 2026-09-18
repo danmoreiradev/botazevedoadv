@@ -5250,3 +5250,34 @@ html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.chat-swipe-ready .
         user-select:none;
     }
 }
+
+
+/* ===== V3.5.5 — usuários + primeira pintura do chat ===== */
+@media (min-width: 992px){
+    #tab-usuarios .users-management-card{
+        max-width:1320px!important;
+        padding:28px!important;
+    }
+    #tab-usuarios .users-table{
+        min-width:1180px;
+    }
+    #tab-usuarios .users-table thead th{
+        padding:13px 16px;
+    }
+    #tab-usuarios .users-table tbody td{
+        padding:15px 16px;
+    }
+    #user-form-dialog{
+        width:min(860px,calc(100vw - 32px));
+    }
+    #user-form-dialog .user-dialog-body{
+        padding:24px;
+    }
+}
+.chat-empty.chat-loading-fast{
+    min-height:120px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:9px;
+}

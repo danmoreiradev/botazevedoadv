@@ -11,7 +11,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     
-    <link rel="stylesheet" href="/assets/panel.css?v=3.5.4">
+    <link rel="stylesheet" href="/assets/panel.css?v=3.5.5">
 
 </head>
 <body class="session-loading">
@@ -880,7 +880,7 @@
                     <button type="button" class="btn text-white" style="background:var(--adv-blue)" onclick="abrirFormularioUsuario()"><i class="bi bi-person-plus me-1"></i> Novo usuário</button>
                 </div>
             </div>
-            <div class="card-custom text-start p-4" style="width:100%;max-width:1150px;">
+            <div class="card-custom text-start p-4 users-management-card" style="width:100%;max-width:1320px;">
                 <div class="users-summary"><span><strong>Advogado comum:</strong> por padrão acessa Atendimentos, Clientes e Chat.</span><span id="users-count">0 usuários</span></div>
                 <div id="users-status" class="menu-save-status text-muted mb-2"></div>
                 <div class="users-table-wrap">
@@ -5454,6 +5454,37 @@
         window.activeChatOldest = null;
         window.chatSendQueue = Promise.resolve();
 
+        // Primeira pintura rápida: traz menos mensagens na abertura e deixa o restante
+        // disponível na paginação. Documentos/IA são carregados depois da primeira pintura.
+        const CHAT_INITIAL_PAGE_SIZE = 36;
+        const CHAT_HISTORY_PAGE_SIZE = 60;
+        window.activeChatOpenAbortController = null;
+        window.activeChatOpenRequestId = 0;
+        window.activeChatDeferredDocumentsTimer = null;
+
+        function cancelarCarregamentoChatEmAndamento() {
+            try { window.activeChatOpenAbortController?.abort?.(); } catch (_) {}
+            window.activeChatOpenAbortController = null;
+            clearTimeout(window.activeChatDeferredDocumentsTimer);
+            window.activeChatDeferredDocumentsTimer = null;
+        }
+
+        function agendarDocumentosChatAposAbertura(ticketNumber) {
+            clearTimeout(window.activeChatDeferredDocumentsTimer);
+            const numero = String(ticketNumber || '');
+            const executar = () => {
+                if (!numero || String(window.activeChatTicketNumber || '') !== numero) return;
+                carregarDocumentosChatAtivo(true).catch?.(() => {});
+            };
+
+            // Primeiro deixa o navegador pintar as mensagens. Depois busca resumos/análises.
+            if (typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(executar, { timeout: 850 });
+            } else {
+                window.activeChatDeferredDocumentsTimer = setTimeout(executar, 120);
+            }
+        }
+
         function mapaDocumentosChat() {
             return new Map((window.activeChatDocuments || [])
                 .filter(doc => doc?.messageId)
@@ -5803,7 +5834,7 @@
             const ticket = String(window.activeChatTicketNumber || '').trim();
             if (!ticket) return;
             try {
-                const res = await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/documents`, { cache:'no-store' });
+                const res = await fetch(`/api/tickets/${encodeURIComponent(ticket)}/chat/documents`, { cache:'no-store', appSilent:true });
                 const data = await res.json().catch(()=>({}));
                 if (!res.ok) throw new Error(data.erro || 'Não foi possível carregar os documentos.');
                 window.activeChatDocuments = Array.isArray(data.documents) ? data.documents : [];
@@ -6824,6 +6855,12 @@
         async function abrirChatTicket(ticketNumber, triggerButton = null, conversationKey = null) {
             cancelarRespostaChat(); cancelarGravacaoChat(); fecharTriagemChat(); fecharHistoricoTicketsChat(); window.activeChatTriageDetails = null;
             if(!temPermissaoPainel('chat') || !ticketNumber) return;
+
+            cancelarCarregamentoChatEmAndamento();
+            const controller = new AbortController();
+            window.activeChatOpenAbortController = controller;
+            const requestId = ++window.activeChatOpenRequestId;
+
             const restaurarLoadingAbertura = triggerButton ? iniciarLoadingBotaoAcao(triggerButton, 'Abrindo...') : () => false;
             const dialog=document.getElementById('ticket-chat-dialog');
             const history=document.getElementById('ticket-chat-history');
@@ -6832,18 +6869,28 @@
             window.activeChatConversationTicketNumbers=[String(ticketNumber||'')];
             window.activeChatTicketHistory=[];
             window.activeChatMessages=[]; window.activeChatOldest=null;
+            window.activeChatDocuments=[];
             window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null;
             resetarBotaoEncerrarChat({ forcar: true });
             atualizarContadorHistoricoTicketsChat(1);
-            if(history) history.innerHTML='<div class="chat-empty">Carregando conversa...</div>';
+            atualizarContadorDocumentosChat({total:0,processando:0,comErro:0});
+            if(history) history.innerHTML='<div class="chat-empty chat-loading-fast"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Carregando mensagens…</span></div>';
             if(dialog && typeof dialog.showModal==='function' && !dialog.open) dialog.showModal();
             definirModoConversaMobile(true);
             window.chatConversationRenderKey='';
             renderizarListaConversasChat();
 
             try{
-                const res=await fetch(`/api/tickets/${encodeURIComponent(ticketNumber)}/chat?limit=60`,{cache:'no-store'});
-                const data=await res.json().catch(()=>({})); if(!res.ok)throw new Error(data.erro||'Não foi possível carregar o chat.');
+                const url=`/api/tickets/${encodeURIComponent(ticketNumber)}/chat?limit=${CHAT_INITIAL_PAGE_SIZE}&includeDocuments=0`;
+                const res=await fetch(url,{
+                    cache:'no-store',
+                    appSilent:true,
+                    signal:controller.signal
+                });
+                const data=await res.json().catch(()=>({}));
+                if(requestId!==window.activeChatOpenRequestId) return;
+                if(!res.ok)throw new Error(data.erro||'Não foi possível carregar o chat.');
+
                 const conversa=data.conversation||{};
                 window.activeChatConversationKey=String(conversa.key||window.activeChatConversationKey||ticketNumber);
                 window.activeChatConversationTicketNumbers=Array.isArray(conversa.ticketNumbers)?conversa.ticketNumbers.map(String):[String(ticketNumber)];
@@ -6862,13 +6909,10 @@
                 document.getElementById('ticket-chat-storage').textContent=data.unlimitedHistory
                     ? 'Conversa unificada do cliente · histórico paginado · anexos sob demanda.'
                     : 'Histórico conforme política configurada. Anexos sob demanda.';
+
                 window.activeChatMessages=Array.isArray(data.messages)?data.messages:[];
                 window.activeChatHasMore=data.hasMore===true;
                 window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
-                window.activeChatDocuments=Array.isArray(data.documents)?data.documents:[];
-                atualizarContadorDocumentosChat(data.documentsSummary||null);
-                sincronizarDocumentosMensagensChat();
-                renderizarDocumentosChat(window.activeChatDocuments);
                 window.activeChatTicketData=data.ticket||{};
 
                 const localGrupo=(window.atendimentosConversasData||[]).find(item=>String(item.conversationKey||'')===String(window.activeChatConversationKey||''));
@@ -6882,14 +6926,29 @@
                     ativos:(window.activeTicketsData||[]).reduce((n,t)=>n+Math.max(1,Number(t.activeTicketsCount||1)),0),
                     mensagensNaoLidas:(window.atendimentosConversasData||[]).filter(t=>t.temMensagemNaoLida).length
                 });
+
+                // Mensagens aparecem primeiro. Documentos e resumos da IA vêm depois,
+                // em uma requisição silenciosa, sem segurar a primeira pintura.
                 renderizarChat(window.activeChatMessages,window.activeChatHasMore);
                 atualizarEstadoAtendimentoChat(data.ticket||{});
                 window.chatConversationRenderKey='';
                 renderizarListaConversasChat();
+
+                requestAnimationFrame(() => {
+                    if(requestId!==window.activeChatOpenRequestId) return;
+                    const h=document.getElementById('ticket-chat-history');
+                    if(h) h.scrollTop=h.scrollHeight;
+                    agendarDocumentosChatAposAbertura(window.activeChatTicketNumber);
+                });
+
                 if(window.activeChatCanSend && window.innerWidth > 767.98) document.getElementById('ticket-chat-input')?.focus();
             }catch(err){
-                if(dialog?.open&&history)history.innerHTML=`<div class="chat-empty">${escapeHtmlChat(err.message||'Erro ao carregar chat.')}</div>`;else alert(err.message||'Não foi possível abrir o atendimento.');
+                if(err?.name==='AbortError') return;
+                if(requestId!==window.activeChatOpenRequestId) return;
+                if(dialog?.open&&history)history.innerHTML=`<div class="chat-empty">${escapeHtmlChat(err.message||'Erro ao carregar chat.')}</div>`;
+                else alert(err.message||'Não foi possível abrir o atendimento.');
             }finally{
+                if(window.activeChatOpenAbortController===controller) window.activeChatOpenAbortController=null;
                 restaurarLoadingAbertura();
             }
         }
@@ -6964,15 +7023,15 @@
             window.visualViewport?.addEventListener('resize', atualizarAlturaVisualChatMobile, { passive:true });
         }
 
-        function fecharChatTicket() { cancelarEdicaoChat(false); window.activeChatTicketNumber=null; window.activeChatConversationKey=null; window.activeChatConversationTicketNumbers=[]; window.activeChatTicketHistory=[]; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; window.activeChatTriageDetails=null; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); atualizarContadorHistoricoTicketsChat(1); fecharDocumentosChat(); fecharHistoricoTicketsChat(); fecharTriagemChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); definirModoConversaMobile(false); const h=document.getElementById('ticket-chat-history'); if(h)h.innerHTML='<div class="chat-empty">Selecione um atendimento na lista ao lado.</div>'; window.chatConversationRenderKey=''; renderizarListaConversasChat(); }
+        function fecharChatTicket() { cancelarCarregamentoChatEmAndamento(); window.activeChatOpenRequestId++; cancelarEdicaoChat(false); window.activeChatTicketNumber=null; window.activeChatConversationKey=null; window.activeChatConversationTicketNumbers=[]; window.activeChatTicketHistory=[]; window.activeChatCanSend=false; window.activeChatOwnerId=null; window.activeChatOwnerName=null; window.activeChatTicketData=null; window.activeChatDocuments=[]; window.activeChatTriageDetails=null; atualizarContadorDocumentosChat({total:0,processando:0,comErro:0}); atualizarContadorHistoricoTicketsChat(1); fecharDocumentosChat(); fecharHistoricoTicketsChat(); fecharTriagemChat(); fecharEmojiPickerChat(); esconderSugestoesTextosRapidos(); fecharTransferenciaChat(); definirModoConversaMobile(false); const h=document.getElementById('ticket-chat-history'); if(h)h.innerHTML='<div class="chat-empty">Selecione um atendimento na lista ao lado.</div>'; window.chatConversationRenderKey=''; renderizarListaConversasChat(); }
         async function carregarMensagensAnterioresChat() {
             if(!window.activeChatTicketNumber||!window.activeChatOldest) return;
             const history=document.getElementById('ticket-chat-history'); const beforeHeight=history?.scrollHeight||0;
             try {
-                const res=await fetch(`/api/tickets/${encodeURIComponent(window.activeChatTicketNumber)}/chat?limit=60&before=${encodeURIComponent(window.activeChatOldest)}`);
+                const res=await fetch(`/api/tickets/${encodeURIComponent(window.activeChatTicketNumber)}/chat?limit=${CHAT_HISTORY_PAGE_SIZE}&before=${encodeURIComponent(window.activeChatOldest)}&includeDocuments=0`, { appSilent:true });
                 const data=await res.json().catch(()=>({})); if(!res.ok) throw new Error(data.erro||'Erro ao carregar histórico.');
                 const older=Array.isArray(data.messages)?data.messages:[];
-                if(Array.isArray(data.documents)){window.activeChatDocuments=data.documents;atualizarContadorDocumentosChat(data.documentsSummary||null);}
+                if(data.documentsIncluded===true&&Array.isArray(data.documents)){window.activeChatDocuments=data.documents;atualizarContadorDocumentosChat(data.documentsSummary||null);}
                 window.activeChatMessages=[...older,...window.activeChatMessages]; window.activeChatHasMore=data.hasMore===true;
                 sincronizarDocumentosMensagensChat();
                 window.activeChatOldest=window.activeChatMessages[0]?.createdAt||null;
