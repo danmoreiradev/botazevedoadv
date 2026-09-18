@@ -955,6 +955,73 @@
         }
     </style>
 
+
+    <style id="login-password-recovery-v370">
+        .auth-view.hidden { display:none !important; }
+        .login-recovery-actions {
+            margin-top: 10px;
+            display:flex;
+            justify-content:flex-end;
+        }
+        .login-link-button {
+            padding: 5px 0;
+            color: var(--adv-blue);
+            background: transparent;
+            border: 0;
+            font-size: .78rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .login-link-button:hover,
+        .login-link-button:focus {
+            color: var(--adv-gold-dark);
+            text-decoration: underline;
+            outline: none;
+        }
+        .auth-back-button {
+            width:100%;
+            margin-top:12px;
+            text-align:center;
+        }
+        .auth-inline-links {
+            margin-top:10px;
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+        }
+        .auth-plain-input {
+            padding-left: 16px !important;
+        }
+        .auth-token-input {
+            text-align:center;
+            font-size:1.2rem !important;
+            font-weight:800;
+            letter-spacing:.28em;
+            font-variant-numeric: tabular-nums;
+        }
+        .auth-password-note,
+        .auth-first-access-note {
+            margin: -4px 0 14px;
+            color: var(--text-muted);
+            font-size:.76rem;
+            line-height:1.45;
+        }
+        .auth-first-access-note {
+            margin: 0 0 18px;
+            padding:12px 14px;
+            color:#624b15;
+            background:#fff8e7;
+            border:1px solid #f0deb2;
+            border-radius:10px;
+        }
+        @media (max-width:720px) {
+            .auth-inline-links { align-items:flex-start; }
+            .login-recovery-actions { margin-top:8px; }
+        }
+    </style>
+
 </head>
 
 <body>
@@ -991,15 +1058,15 @@
             <div class="login-content">
                 <div class="login-eyebrow">Acesso restrito</div>
 
-                <h2 class="login-title">Bem-vindo.</h2>
+                <h2 class="login-title" id="auth-title">Bem-vindo.</h2>
 
-                <p class="login-subtitle">
+                <p class="login-subtitle" id="auth-subtitle">
                     Entre com suas credenciais para acessar o painel administrativo.
                 </p>
 
                 <div id="login-feedback" class="login-feedback" role="alert" aria-live="polite"></div>
 
-                <form id="login-form" action="/login" method="POST" novalidate>
+                <form id="login-form" class="auth-view" data-auth-view="login" action="/login" method="POST" novalidate>
                     <div class="form-group">
                         <label class="form-label" for="user">Usuário</label>
 
@@ -1079,6 +1146,57 @@
                     </button>
                 </form>
 
+                <div class="login-recovery-actions auth-view" data-auth-view="login">
+                    <button type="button" id="forgot-password-btn" class="login-link-button">Esqueci minha senha</button>
+                </div>
+
+                <form id="reset-request-form" class="auth-view hidden" data-auth-view="reset-request" novalidate>
+                    <div class="form-group">
+                        <label class="form-label" for="reset-user">Usuário</label>
+                        <input id="reset-user" class="form-control auth-plain-input" autocomplete="username" placeholder="Digite seu usuário">
+                    </div>
+                    <button id="reset-request-submit" type="submit" class="btn btn-adv">Enviar código no WhatsApp</button>
+                    <button type="button" class="login-link-button auth-back-button" data-back-login>Voltar para o login</button>
+                </form>
+
+                <form id="reset-confirm-form" class="auth-view hidden" data-auth-view="reset-confirm" novalidate>
+                    <input type="hidden" id="reset-confirm-user">
+                    <div class="form-group">
+                        <label class="form-label" for="reset-token">Código recebido no WhatsApp</label>
+                        <input id="reset-token" class="form-control auth-plain-input auth-token-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="reset-new-password">Nova senha</label>
+                        <input id="reset-new-password" type="password" class="form-control auth-plain-input" autocomplete="new-password" minlength="8" placeholder="Mínimo de 8 caracteres">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="reset-confirm-password">Confirmar nova senha</label>
+                        <input id="reset-confirm-password" type="password" class="form-control auth-plain-input" autocomplete="new-password" minlength="8" placeholder="Digite novamente">
+                    </div>
+                    <div class="auth-password-note">O código expira em 10 minutos e só pode ser usado uma vez.</div>
+                    <button id="reset-confirm-submit" type="submit" class="btn btn-adv">Alterar senha</button>
+                    <div class="auth-inline-links">
+                        <button type="button" id="reset-request-again" class="login-link-button">Solicitar novo código</button>
+                        <button type="button" class="login-link-button" data-back-login>Voltar</button>
+                    </div>
+                </form>
+
+                <form id="first-access-form" class="auth-view hidden" data-auth-view="first-access" novalidate>
+                    <div class="auth-first-access-note">
+                        Primeiro acesso validado. Por segurança, a senha provisória não libera o painel até você cadastrar uma senha pessoal.
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="first-new-password">Nova senha</label>
+                        <input id="first-new-password" type="password" class="form-control auth-plain-input" autocomplete="new-password" minlength="8" placeholder="Mínimo de 8 caracteres">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="first-confirm-password">Confirmar nova senha</label>
+                        <input id="first-confirm-password" type="password" class="form-control auth-plain-input" autocomplete="new-password" minlength="8" placeholder="Digite novamente">
+                    </div>
+                    <button id="first-access-submit" type="submit" class="btn btn-adv">Cadastrar nova senha</button>
+                    <button type="button" class="login-link-button auth-back-button" data-back-login>Cancelar e voltar</button>
+                </form>
+
                 <div class="security-note">
                     <svg
                         class="security-icon"
@@ -1108,56 +1226,125 @@
         </section>
     </main>
 
-    <script id="login-controller-v34">
+    <script id="login-controller-v370">
     (() => {
-        const form=document.getElementById('login-form');
-        const btn=document.getElementById('login-submit');
         const feedback=document.getElementById('login-feedback');
         const loadingLine=document.getElementById('login-loading-line');
+        const title=document.getElementById('auth-title');
+        const subtitle=document.getElementById('auth-subtitle');
+
+        const loginForm=document.getElementById('login-form');
+        const loginBtn=document.getElementById('login-submit');
         const user=document.getElementById('user');
         const pass=document.getElementById('pass');
-        if(!form||!btn) return;
-        const originalButton=btn.innerHTML;
-        let authenticated=false;
 
-        function showFeedback(type,title,message){
+        const forgotBtn=document.getElementById('forgot-password-btn');
+        const resetRequestForm=document.getElementById('reset-request-form');
+        const resetUser=document.getElementById('reset-user');
+        const resetRequestBtn=document.getElementById('reset-request-submit');
+
+        const resetConfirmForm=document.getElementById('reset-confirm-form');
+        const resetConfirmUser=document.getElementById('reset-confirm-user');
+        const resetToken=document.getElementById('reset-token');
+        const resetNewPassword=document.getElementById('reset-new-password');
+        const resetConfirmPassword=document.getElementById('reset-confirm-password');
+        const resetConfirmBtn=document.getElementById('reset-confirm-submit');
+
+        const firstForm=document.getElementById('first-access-form');
+        const firstNewPassword=document.getElementById('first-new-password');
+        const firstConfirmPassword=document.getElementById('first-confirm-password');
+        const firstBtn=document.getElementById('first-access-submit');
+
+        if(!loginForm||!loginBtn) return;
+
+        let authenticated=false;
+        let currentView='login';
+        const originalLoginButton=loginBtn.innerHTML;
+
+        const viewCopy={
+            login:['Bem-vindo.','Entre com suas credenciais para acessar o painel administrativo.'],
+            'reset-request':['Redefinir senha','Informe seu usuário. Enviaremos um código de verificação para o WhatsApp cadastrado.'],
+            'reset-confirm':['Código de verificação','Digite o código recebido no WhatsApp e escolha sua nova senha.'],
+            'first-access':['Defina sua senha','Este é seu primeiro acesso. Cadastre uma senha pessoal para continuar.']
+        };
+
+        function showFeedback(type,titleText,message){
             feedback.className=`login-feedback show ${type}`;
             const icon=type==='success'?'✓':type==='warning'?'!':'×';
             feedback.innerHTML='<div class="login-feedback-icon"></div><div><div class="login-feedback-title"></div><div class="login-feedback-message"></div></div>';
             feedback.querySelector('.login-feedback-icon').textContent=icon;
-            feedback.querySelector('.login-feedback-title').textContent=title;
+            feedback.querySelector('.login-feedback-title').textContent=titleText;
             feedback.querySelector('.login-feedback-message').textContent=message;
         }
-        function hideFeedback(){ feedback.className='login-feedback'; feedback.replaceChildren(); }
-        function setLoading(on){
-            btn.disabled=on; user.disabled=on; pass.disabled=on;
+
+        function hideFeedback(){
+            feedback.className='login-feedback';
+            feedback.replaceChildren();
+        }
+
+        function setView(view,{keepFeedback=false}={}){
+            currentView=view;
+            document.querySelectorAll('[data-auth-view]').forEach(el=>{
+                el.classList.toggle('hidden',el.dataset.authView!==view);
+            });
+            const copy=viewCopy[view]||viewCopy.login;
+            if(title)title.textContent=copy[0];
+            if(subtitle)subtitle.textContent=copy[1];
+            loadingLine.classList.remove('show');
+            if(!keepFeedback)hideFeedback();
+        }
+
+        function setLoginLoading(on){
+            loginBtn.disabled=on;
+            user.disabled=on;
+            pass.disabled=on;
             loadingLine.classList.toggle('show',on);
             if(on){
-                btn.classList.remove('is-success');
-                btn.classList.add('is-loading');
-                btn.innerHTML='<span class="login-spinner" aria-hidden="true"></span> Validando acesso...';
-            } else {
-                btn.classList.remove('is-loading','is-success');
-                btn.innerHTML=originalButton;
+                loginBtn.classList.remove('is-success');
+                loginBtn.classList.add('is-loading');
+                loginBtn.innerHTML='<span class="login-spinner" aria-hidden="true"></span> Validando acesso...';
+            }else{
+                loginBtn.classList.remove('is-loading','is-success');
+                loginBtn.innerHTML=originalLoginButton;
             }
         }
-        function validate(){
-            user.removeAttribute('aria-invalid'); pass.removeAttribute('aria-invalid');
+
+        function setActionLoading(button,on,text='Processando...'){
+            if(!button)return;
+            if(!button.dataset.originalHtml)button.dataset.originalHtml=button.innerHTML;
+            button.disabled=on;
+            loadingLine.classList.toggle('show',on);
+            button.classList.toggle('is-loading',on);
+            button.innerHTML=on?`<span class="login-spinner" aria-hidden="true"></span> ${text}`:button.dataset.originalHtml;
+        }
+
+        function validarSenhaNova(nova,confirmacao){
+            if(String(nova||'').length<8)return 'A nova senha deve possuir ao menos 8 caracteres.';
+            if(nova==='AJ12345')return 'Escolha uma senha diferente da senha provisória.';
+            if(nova!==confirmacao)return 'A confirmação da nova senha não confere.';
+            return '';
+        }
+
+        function validateLogin(){
+            user.removeAttribute('aria-invalid');
+            pass.removeAttribute('aria-invalid');
             if(!user.value.trim()||!pass.value){
-                if(!user.value.trim()) user.setAttribute('aria-invalid','true');
-                if(!pass.value) pass.setAttribute('aria-invalid','true');
+                if(!user.value.trim())user.setAttribute('aria-invalid','true');
+                if(!pass.value)pass.setAttribute('aria-invalid','true');
                 showFeedback('warning','Preencha seus dados','Informe usuário e senha para continuar.');
-                (!user.value.trim()?user:pass).focus(); return false;
+                (!user.value.trim()?user:pass).focus();
+                return false;
             }
             return true;
         }
 
-        form.addEventListener('submit', async e => {
+        loginForm.addEventListener('submit',async e=>{
             e.preventDefault();
             authenticated=false;
             hideFeedback();
-            if(!validate()) return;
-            setLoading(true);
+            if(!validateLogin())return;
+            setLoginLoading(true);
+
             try{
                 const res=await fetch('/login',{
                     method:'POST',
@@ -1165,40 +1352,208 @@
                     body:JSON.stringify({user:user.value.trim(),pass:pass.value})
                 });
                 const data=await res.json().catch(()=>({}));
-                if(!res.ok || data.ok===false){
+
+                if(data?.codigo==='PASSWORD_CHANGE_REQUIRED'||data?.requiresPasswordChange===true){
+                    setLoginLoading(false);
+                    firstNewPassword.value='';
+                    firstConfirmPassword.value='';
+                    setView('first-access',{keepFeedback:true});
+                    showFeedback('warning','Troca obrigatória de senha','A senha provisória foi validada. Cadastre agora sua senha pessoal para liberar o painel.');
+                    setTimeout(()=>firstNewPassword.focus(),60);
+                    return;
+                }
+
+                if(!res.ok||data.ok===false){
                     if(res.status===401){
-                        user.setAttribute('aria-invalid','true'); pass.setAttribute('aria-invalid','true');
+                        user.setAttribute('aria-invalid','true');
+                        pass.setAttribute('aria-invalid','true');
                         showFeedback('error','Acesso não autorizado',data.erro||'Usuário ou senha inválidos. Confira os dados e tente novamente.');
-                        pass.value=''; pass.focus();
-                    } else {
+                        pass.value='';
+                        pass.focus();
+                    }else{
                         showFeedback('error','Não foi possível entrar',data.erro||'Houve uma falha ao iniciar sua sessão. Tente novamente.');
                     }
                     return;
                 }
+
                 authenticated=true;
                 hideFeedback();
                 loadingLine.classList.remove('show');
-                btn.classList.remove('is-loading');
-                btn.classList.add('is-success');
-                btn.disabled=true;
+                loginBtn.classList.remove('is-loading');
+                loginBtn.classList.add('is-success');
+                loginBtn.disabled=true;
                 user.disabled=true;
                 pass.disabled=true;
-                btn.innerHTML='<span class="login-success-check" aria-hidden="true">✓</span> Autenticado com sucesso';
+                loginBtn.innerHTML='<span class="login-success-check" aria-hidden="true">✓</span> Autenticado com sucesso';
                 setTimeout(()=>window.location.assign(data.redirect||'/'),360);
             }catch(err){
                 showFeedback('error','Falha de conexão','Não foi possível comunicar com o servidor. Verifique sua conexão e tente novamente.');
             }finally{
-                if(!authenticated) setLoading(false);
+                if(!authenticated&&currentView==='login')setLoginLoading(false);
             }
         });
 
-        [user,pass].forEach(el=>el.addEventListener('input',()=>{el.removeAttribute('aria-invalid');if(feedback.classList.contains('show'))hideFeedback();}));
+        forgotBtn?.addEventListener('click',()=>{
+            resetUser.value=user.value.trim();
+            resetToken.value='';
+            resetNewPassword.value='';
+            resetConfirmPassword.value='';
+            setView('reset-request');
+            setTimeout(()=>resetUser.focus(),40);
+        });
+
+        resetRequestForm?.addEventListener('submit',async e=>{
+            e.preventDefault();
+            hideFeedback();
+            const usuario=resetUser.value.trim();
+            if(!usuario){
+                showFeedback('warning','Informe seu usuário','Precisamos do usuário para localizar o WhatsApp cadastrado.');
+                resetUser.focus();
+                return;
+            }
+
+            setActionLoading(resetRequestBtn,true,'Enviando código...');
+            try{
+                const res=await fetch('/auth/password-reset/request',{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json','Accept':'application/json'},
+                    body:JSON.stringify({user:usuario})
+                });
+                const data=await res.json().catch(()=>({}));
+                if(!res.ok||data.ok===false)throw new Error(data.erro||'Não foi possível enviar o código.');
+
+                resetConfirmUser.value=usuario;
+                resetToken.value='';
+                setView('reset-confirm',{keepFeedback:true});
+                showFeedback('success','Código solicitado',data.message||'Verifique o WhatsApp cadastrado.');
+                setTimeout(()=>resetToken.focus(),60);
+            }catch(err){
+                showFeedback('error','Não foi possível enviar',err.message||'Tente novamente em instantes.');
+            }finally{
+                setActionLoading(resetRequestBtn,false);
+            }
+        });
+
+        resetConfirmForm?.addEventListener('submit',async e=>{
+            e.preventDefault();
+            hideFeedback();
+
+            const token=resetToken.value.replace(/\D/g,'').slice(0,6);
+            const nova=resetNewPassword.value;
+            const confirmacao=resetConfirmPassword.value;
+            if(token.length!==6){
+                showFeedback('warning','Código incompleto','Digite os 6 números recebidos no WhatsApp.');
+                resetToken.focus();
+                return;
+            }
+            const erroSenha=validarSenhaNova(nova,confirmacao);
+            if(erroSenha){
+                showFeedback('warning','Revise a nova senha',erroSenha);
+                (nova.length<8?resetNewPassword:resetConfirmPassword).focus();
+                return;
+            }
+
+            setActionLoading(resetConfirmBtn,true,'Alterando senha...');
+            try{
+                const res=await fetch('/auth/password-reset/confirm',{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json','Accept':'application/json'},
+                    body:JSON.stringify({
+                        user:resetConfirmUser.value,
+                        token,
+                        newPassword:nova,
+                        confirmPassword:confirmacao
+                    })
+                });
+                const data=await res.json().catch(()=>({}));
+                if(!res.ok||data.ok===false)throw new Error(data.erro||'Não foi possível alterar a senha.');
+
+                const usuario=resetConfirmUser.value;
+                setView('login',{keepFeedback:true});
+                user.value=usuario;
+                pass.value='';
+                showFeedback('success','Senha alterada',data.message||'Entre com a nova senha.');
+                setTimeout(()=>pass.focus(),60);
+            }catch(err){
+                showFeedback('error','Código não validado',err.message||'Solicite um novo código e tente novamente.');
+            }finally{
+                setActionLoading(resetConfirmBtn,false);
+            }
+        });
+
+        document.getElementById('reset-request-again')?.addEventListener('click',()=>{
+            resetUser.value=resetConfirmUser.value||resetUser.value;
+            setView('reset-request');
+            setTimeout(()=>resetUser.focus(),40);
+        });
+
+        firstForm?.addEventListener('submit',async e=>{
+            e.preventDefault();
+            hideFeedback();
+            const nova=firstNewPassword.value;
+            const confirmacao=firstConfirmPassword.value;
+            const erroSenha=validarSenhaNova(nova,confirmacao);
+            if(erroSenha){
+                showFeedback('warning','Revise a nova senha',erroSenha);
+                (nova.length<8?firstNewPassword:firstConfirmPassword).focus();
+                return;
+            }
+
+            setActionLoading(firstBtn,true,'Salvando nova senha...');
+            try{
+                const res=await fetch('/auth/first-access/change-password',{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json','Accept':'application/json'},
+                    body:JSON.stringify({newPassword:nova,confirmPassword:confirmacao})
+                });
+                const data=await res.json().catch(()=>({}));
+                if(!res.ok||data.ok===false)throw new Error(data.erro||'Não foi possível concluir o primeiro acesso.');
+
+                authenticated=true;
+                loadingLine.classList.remove('show');
+                firstBtn.classList.remove('is-loading');
+                firstBtn.classList.add('is-success');
+                firstBtn.disabled=true;
+                firstBtn.innerHTML='<span class="login-success-check" aria-hidden="true">✓</span> Senha cadastrada';
+                setTimeout(()=>window.location.assign(data.redirect||'/'),420);
+            }catch(err){
+                showFeedback('error','Não foi possível concluir',err.message||'Entre novamente com a senha provisória e tente de novo.');
+            }finally{
+                if(!authenticated)setActionLoading(firstBtn,false);
+            }
+        });
+
+        document.querySelectorAll('[data-back-login]').forEach(button=>{
+            button.addEventListener('click',()=>{
+                setView('login');
+                user.disabled=false;
+                pass.disabled=false;
+                pass.value='';
+                setTimeout(()=>user.focus(),40);
+            });
+        });
+
+        resetToken?.addEventListener('input',()=>{
+            resetToken.value=resetToken.value.replace(/\D/g,'').slice(0,6);
+        });
+
+        document.querySelectorAll('.form-control').forEach(el=>{
+            el.addEventListener('input',()=>{
+                el.removeAttribute('aria-invalid');
+                if(feedback.classList.contains('show'))hideFeedback();
+            });
+        });
+
         const params=new URLSearchParams(location.search);
         const error=params.get('error');
-        if(error==='credentials') showFeedback('error','Acesso não autorizado','Usuário ou senha inválidos. Confira os dados e tente novamente.');
-        else if(error==='required') showFeedback('warning','Preencha seus dados','Informe usuário e senha para continuar.');
-        else if(error==='session') showFeedback('error','Sessão não iniciada','Não foi possível iniciar sua sessão. Tente novamente.');
-        if(error) history.replaceState({},document.title,location.pathname);
+        if(error==='credentials')showFeedback('error','Acesso não autorizado','Usuário ou senha inválidos. Confira os dados e tente novamente.');
+        else if(error==='required')showFeedback('warning','Preencha seus dados','Informe usuário e senha para continuar.');
+        else if(error==='session')showFeedback('error','Sessão não iniciada','Não foi possível iniciar sua sessão. Tente novamente.');
+        else if(error==='first_access'){
+            setView('first-access');
+            showFeedback('warning','Troca obrigatória de senha','Cadastre uma senha pessoal para concluir o primeiro acesso.');
+        }
+        if(error)history.replaceState({},document.title,location.pathname);
     })();
     </script>
 

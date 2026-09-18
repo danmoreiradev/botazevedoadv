@@ -1478,6 +1478,104 @@ async function migrarSenhaLegadaSeNecessario(conta, senha) {
     );
 }
 
+const SENHA_PROVISORIA_PAINEL = 'AJ12345';
+const SENHA_NOVA_MIN_CARACTERES = 8;
+const RESET_SENHA_TOKEN_TTL_MS = 10 * 60 * 1000;
+const RESET_SENHA_MAX_TENTATIVAS = 5;
+const RESET_SENHA_INTERVALO_MIN_MS = 60 * 1000;
+const PRIMEIRO_ACESSO_TTL_MS = 20 * 60 * 1000;
+
+function filtroContaPainelPorId(id = '') {
+    const valor = String(id || '').trim();
+    if (!valor) return { _id: '__usuario_invalido__' };
+    return ObjectId.isValid(valor) ? { _id: new ObjectId(valor) } : { _id: valor };
+}
+
+function validarNovaSenhaSegura(senha = '') {
+    const valor = String(senha || '');
+    if (valor.length < SENHA_NOVA_MIN_CARACTERES) {
+        return `A nova senha deve possuir ao menos ${SENHA_NOVA_MIN_CARACTERES} caracteres.`;
+    }
+    if (valor === SENHA_PROVISORIA_PAINEL) {
+        return 'Escolha uma senha diferente da senha provisória.';
+    }
+    return null;
+}
+
+function gerarTokenRedefinicaoSenha() {
+    return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+}
+
+function hashTokenRedefinicaoSenha(token, contaId) {
+    return crypto
+        .createHmac('sha256', sessionSecret)
+        .update(`${String(contaId || '')}:${String(token || '')}`)
+        .digest('hex');
+}
+
+function tokenRedefinicaoConfere(token, conta = {}) {
+    const salvo = String(conta.passwordResetTokenHash || '');
+    if (!salvo) return false;
+    const atual = hashTokenRedefinicaoSenha(token, conta._id);
+    try {
+        const a = Buffer.from(atual, 'hex');
+        const b = Buffer.from(salvo, 'hex');
+        return a.length === b.length && crypto.timingSafeEqual(a, b);
+    } catch (_) {
+        return false;
+    }
+}
+
+async function resolverJidWhatsAppUsuario(celular = '', contexto = 'usuário') {
+    const numero = normalizarCelularUsuario(celular);
+    if (!numero) return null;
+
+    const pnJid = normalizarJid(`${numero}@s.whatsapp.net`) || `${numero}@s.whatsapp.net`;
+    let jidDestino = pnJid;
+
+    if (sock?.signalRepository?.lidMapping?.getLIDForPN) {
+        try {
+            const lid = normalizarJid(await sock.signalRepository.lidMapping.getLIDForPN(pnJid));
+            if (lid?.endsWith('@lid')) jidDestino = lid;
+        } catch (err) {
+            console.warn(`[Usuários] Não foi possível resolver LID para ${contexto} ${numero}:`, err?.message || err);
+        }
+    }
+
+    return jidDestino;
+}
+
+async function enviarTokenRedefinicaoSenhaWhatsApp(conta = {}, token = '') {
+    const celular = normalizarCelularUsuario(conta.celular || '');
+    if (!celular) return { enviado: false, motivo: 'sem_celular' };
+    if (!sock?.user) return { enviado: false, motivo: 'whatsapp_desconectado' };
+
+    const jidDestino = await resolverJidWhatsAppUsuario(celular, 'redefinição de senha');
+    if (!jidDestino) return { enviado: false, motivo: 'sem_celular' };
+
+    const nome = String(conta.nome || conta.user || 'usuário').trim();
+    const texto = `Olá, *${nome}*.
+
+Foi solicitada uma redefinição de senha do painel interno da *Azevedo & Juvêncio*.
+
+Seu código de verificação é:
+
+*${token}*
+
+O código é válido por *10 minutos* e pode ser utilizado uma única vez.
+
+Se você não solicitou a alteração, apenas ignore esta mensagem. Não compartilhe este código com terceiros.`;
+
+    try {
+        const sent = await sendBotMsg(jidDestino, { text: texto });
+        if (!sent?.key?.id) return { enviado: false, motivo: 'falha_envio' };
+        return { enviado: true, motivo: null };
+    } catch (err) {
+        console.warn(`[Senha] Falha ao enviar token para ${celular}:`, err?.message || err);
+        return { enviado: false, motivo: 'falha_envio' };
+    }
+}
+
 function limitarTextoChat(valor, max = CHAT_MAX_TEXT_CHARS) {
     return String(valor ?? '').trim().slice(0, max);
 }
@@ -8048,6 +8146,35 @@ app.post('/login', async (req, res) => {
         }
 
         await migrarSenhaLegadaSeNecessario(conta, pass);
+
+        if (conta.mustChangePassword === true) {
+            req.session.loggedIn = false;
+            delete req.session.panelUser;
+            delete req.session.userId;
+            req.session.passwordChangePending = {
+                userId: String(conta._id),
+                issuedAt: Date.now()
+            };
+
+            return req.session.save(err => {
+                if (err) {
+                    console.error('[Login] Falha ao preparar primeiro acesso:', err);
+                    return responderErro(500, 'Não foi possível iniciar a troca de senha. Tente novamente.', 'LOGIN_SESSION');
+                }
+
+                if (querJson) {
+                    return res.status(409).json({
+                        ok: false,
+                        codigo: 'PASSWORD_CHANGE_REQUIRED',
+                        requiresPasswordChange: true,
+                        user: String(conta.user || userInput)
+                    });
+                }
+
+                return res.redirect('/login?error=first_access');
+            });
+        }
+
         const ultimoAcessoEm = Date.now();
         await userLoginColl.updateOne(
             { _id: conta._id },
@@ -8059,6 +8186,7 @@ app.post('/login', async (req, res) => {
         req.session.loggedIn = true;
         req.session.panelUser = painelUser;
         req.session.userId = painelUser.id;
+        delete req.session.passwordChangePending;
 
         req.session.save(err => {
             if (err) {
@@ -8071,6 +8199,239 @@ app.post('/login', async (req, res) => {
     } catch (e) {
         console.error('[Login] Erro:', e);
         return responderErro(500, 'Não foi possível processar o acesso neste momento. Tente novamente.', 'LOGIN_SESSION');
+    }
+});
+
+// Primeiro acesso: a senha provisória valida a identidade, mas o painel só é liberado
+// depois que o usuário cadastra uma senha própria nesta mesma tela de login.
+app.post('/auth/first-access/change-password', async (req, res) => {
+    try {
+        const pending = req.session?.passwordChangePending;
+        if (!pending?.userId || !pending?.issuedAt || (Date.now() - Number(pending.issuedAt)) > PRIMEIRO_ACESSO_TTL_MS) {
+            delete req.session.passwordChangePending;
+            return res.status(401).json({ ok: false, erro: 'A validação do primeiro acesso expirou. Entre novamente com a senha provisória.' });
+        }
+
+        const novaSenha = String(req.body?.newPassword || '');
+        const confirmacao = String(req.body?.confirmPassword || '');
+        const erroSenha = validarNovaSenhaSegura(novaSenha);
+        if (erroSenha) return res.status(400).json({ ok: false, erro: erroSenha });
+        if (novaSenha !== confirmacao) return res.status(400).json({ ok: false, erro: 'A confirmação da nova senha não confere.' });
+
+        const filtro = filtroContaPainelPorId(pending.userId);
+        const conta = await userLoginColl.findOne(filtro);
+        if (!conta || conta.ativo === false || conta.mustChangePassword !== true) {
+            delete req.session.passwordChangePending;
+            return res.status(401).json({ ok: false, erro: 'Este primeiro acesso não está mais disponível. Faça login novamente.' });
+        }
+
+        const cred = hashSenhaPainel(novaSenha);
+        const agora = Date.now();
+        await userLoginColl.updateOne(
+            { _id: conta._id },
+            {
+                $set: {
+                    passwordHash: cred.hash,
+                    passwordSalt: cred.salt,
+                    mustChangePassword: false,
+                    firstPasswordChangedAt: agora,
+                    updatedAt: agora,
+                    lastAccessAt: agora
+                },
+                $unset: {
+                    pass: '',
+                    passwordResetTokenHash: '',
+                    passwordResetExpiresAt: '',
+                    passwordResetAttempts: '',
+                    passwordResetRequestedAt: ''
+                }
+            }
+        );
+
+        const atualizada = { ...conta, passwordHash: cred.hash, passwordSalt: cred.salt, mustChangePassword: false, lastAccessAt: agora };
+        const painelUser = sessaoPublicaDaConta(atualizada);
+        req.session.loggedIn = true;
+        req.session.panelUser = painelUser;
+        req.session.userId = painelUser.id;
+        delete req.session.passwordChangePending;
+
+        req.session.save(err => {
+            if (err) {
+                console.error('[Login] Falha ao concluir primeiro acesso:', err);
+                return res.status(500).json({ ok: false, erro: 'A senha foi alterada, mas não foi possível iniciar a sessão. Faça login novamente.' });
+            }
+            return res.json({ ok: true, redirect: '/', user: painelUser });
+        });
+    } catch (err) {
+        console.error('[Login] Erro no primeiro acesso:', err);
+        return res.status(500).json({ ok: false, erro: 'Não foi possível alterar a senha neste momento.' });
+    }
+});
+
+// Solicitação pública controlada de redefinição. O token nunca é retornado pela API:
+// ele é enviado somente ao WhatsApp previamente cadastrado na conta.
+app.post('/auth/password-reset/request', async (req, res) => {
+    try {
+        if (!sock?.user) {
+            return res.status(503).json({
+                ok: false,
+                erro: 'O WhatsApp do escritório está desconectado. Tente novamente mais tarde ou contate o administrador.'
+            });
+        }
+
+        const userInput = String(req.body?.user || '').trim();
+        const userLower = normalizarUsuarioLogin(userInput);
+        if (!userLower) return res.status(400).json({ ok: false, erro: 'Informe seu usuário de acesso.' });
+
+        const conta = await userLoginColl.findOne({
+            $or: [{ user: userInput }, { userLower }]
+        });
+
+        // Resposta neutra para contas inexistentes/inativas, evitando enumeração de usuários.
+        if (!conta || conta.ativo === false) {
+            return res.json({
+                ok: true,
+                message: 'Se o usuário estiver ativo e possuir WhatsApp cadastrado, o código será enviado em instantes.'
+            });
+        }
+
+        const celular = normalizarCelularUsuario(conta.celular || '');
+        if (!celular) {
+            return res.status(400).json({
+                ok: false,
+                erro: 'Este usuário não possui celular válido cadastrado. Solicite ao administrador a atualização do cadastro.'
+            });
+        }
+
+        const agora = Date.now();
+        const ultimaSolicitacao = Number(conta.passwordResetRequestedAt || 0);
+        if (ultimaSolicitacao && agora - ultimaSolicitacao < RESET_SENHA_INTERVALO_MIN_MS) {
+            return res.json({
+                ok: true,
+                message: 'Um código já foi solicitado recentemente. Verifique seu WhatsApp e aguarde antes de pedir outro.'
+            });
+        }
+
+        const token = gerarTokenRedefinicaoSenha();
+        const tokenHash = hashTokenRedefinicaoSenha(token, conta._id);
+        const expiraEm = agora + RESET_SENHA_TOKEN_TTL_MS;
+
+        await userLoginColl.updateOne(
+            { _id: conta._id },
+            {
+                $set: {
+                    passwordResetTokenHash: tokenHash,
+                    passwordResetExpiresAt: expiraEm,
+                    passwordResetAttempts: 0,
+                    passwordResetRequestedAt: agora,
+                    updatedAt: agora
+                }
+            }
+        );
+
+        const envio = await enviarTokenRedefinicaoSenhaWhatsApp(conta, token);
+        if (!envio.enviado) {
+            await userLoginColl.updateOne(
+                { _id: conta._id },
+                {
+                    $unset: {
+                        passwordResetTokenHash: '',
+                        passwordResetExpiresAt: '',
+                        passwordResetAttempts: ''
+                    }
+                }
+            );
+
+            const erro = envio.motivo === 'whatsapp_desconectado'
+                ? 'O WhatsApp do escritório está desconectado.'
+                : 'Não foi possível enviar o código para o WhatsApp cadastrado.';
+            return res.status(503).json({ ok: false, erro: `${erro} Tente novamente mais tarde.` });
+        }
+
+        return res.json({
+            ok: true,
+            message: 'Código enviado para o WhatsApp cadastrado. Ele é válido por 10 minutos.'
+        });
+    } catch (err) {
+        console.error('[Senha] Erro ao solicitar redefinição:', err);
+        return res.status(500).json({ ok: false, erro: 'Não foi possível solicitar a redefinição de senha.' });
+    }
+});
+
+app.post('/auth/password-reset/confirm', async (req, res) => {
+    try {
+        const userInput = String(req.body?.user || '').trim();
+        const userLower = normalizarUsuarioLogin(userInput);
+        const token = String(req.body?.token || '').replace(/\D/g, '').slice(0, 6);
+        const novaSenha = String(req.body?.newPassword || '');
+        const confirmacao = String(req.body?.confirmPassword || '');
+
+        if (!userLower || token.length !== 6) {
+            return res.status(400).json({ ok: false, erro: 'Informe o usuário e o código de 6 dígitos recebido no WhatsApp.' });
+        }
+
+        const erroSenha = validarNovaSenhaSegura(novaSenha);
+        if (erroSenha) return res.status(400).json({ ok: false, erro: erroSenha });
+        if (novaSenha !== confirmacao) return res.status(400).json({ ok: false, erro: 'A confirmação da nova senha não confere.' });
+
+        const conta = await userLoginColl.findOne({
+            $or: [{ user: userInput }, { userLower }]
+        });
+
+        const agora = Date.now();
+        const invalido = !conta
+            || conta.ativo === false
+            || !conta.passwordResetTokenHash
+            || Number(conta.passwordResetExpiresAt || 0) < agora
+            || Number(conta.passwordResetAttempts || 0) >= RESET_SENHA_MAX_TENTATIVAS
+            || !tokenRedefinicaoConfere(token, conta);
+
+        if (invalido) {
+            if (conta?._id && conta.passwordResetTokenHash) {
+                const tentativas = Number(conta.passwordResetAttempts || 0) + 1;
+                const update = tentativas >= RESET_SENHA_MAX_TENTATIVAS
+                    ? {
+                        $set: { passwordResetAttempts: tentativas, updatedAt: agora },
+                        $unset: { passwordResetTokenHash: '', passwordResetExpiresAt: '' }
+                    }
+                    : { $set: { passwordResetAttempts: tentativas, updatedAt: agora } };
+                await userLoginColl.updateOne({ _id: conta._id }, update);
+            }
+
+            return res.status(400).json({
+                ok: false,
+                erro: 'Código inválido ou expirado. Solicite um novo código e tente novamente.'
+            });
+        }
+
+        const cred = hashSenhaPainel(novaSenha);
+        await userLoginColl.updateOne(
+            { _id: conta._id },
+            {
+                $set: {
+                    passwordHash: cred.hash,
+                    passwordSalt: cred.salt,
+                    mustChangePassword: false,
+                    passwordResetAt: agora,
+                    updatedAt: agora
+                },
+                $unset: {
+                    pass: '',
+                    passwordResetTokenHash: '',
+                    passwordResetExpiresAt: '',
+                    passwordResetAttempts: '',
+                    passwordResetRequestedAt: ''
+                }
+            }
+        );
+
+        return res.json({
+            ok: true,
+            message: 'Senha alterada com sucesso. Você já pode entrar com a nova senha.'
+        });
+    } catch (err) {
+        console.error('[Senha] Erro ao confirmar redefinição:', err);
+        return res.status(500).json({ ok: false, erro: 'Não foi possível concluir a redefinição da senha.' });
     }
 });
 
@@ -8379,36 +8740,25 @@ app.get('/logout-whatsapp', exigirPermissao('whatsapp'), async (req, res) => {
 
 async function enviarBoasVindasNovoAdvogado(conta = {}) {
     const celular = normalizarCelularUsuario(conta.celular || '');
-    if (normalizarPapelUsuario(conta.role) !== 'advogado') {
-        return { enviado: false, motivo: 'perfil_nao_advogado' };
-    }
     if (conta.ativo === false) return { enviado: false, motivo: 'usuario_inativo' };
     if (!celular) return { enviado: false, motivo: 'sem_celular' };
     if (!sock?.user) return { enviado: false, motivo: 'whatsapp_desconectado' };
 
-    const pnJid = normalizarJid(`${celular}@s.whatsapp.net`) || `${celular}@s.whatsapp.net`;
-    let jidDestino = pnJid;
-
-    // Se a sessão já conhecer o LID deste número, preferimos o mesmo addressing mode
-    // usado pelo WhatsApp Multi-Device. Caso contrário, o PN é um fallback válido.
-    if (sock?.signalRepository?.lidMapping?.getLIDForPN) {
-        try {
-            const lid = normalizarJid(await sock.signalRepository.lidMapping.getLIDForPN(pnJid));
-            if (lid?.endsWith('@lid')) jidDestino = lid;
-        } catch (err) {
-            console.warn(`[Usuários] Não foi possível resolver LID para boas-vindas de ${celular}:`, err?.message || err);
-        }
-    }
+    const jidDestino = await resolverJidWhatsAppUsuario(celular, 'boas-vindas');
+    if (!jidDestino) return { enviado: false, motivo: 'sem_celular' };
 
     const nomeExibicao = String(conta.assinatura || conta.nome || conta.user || 'novo usuário').trim();
     const login = String(conta.user || '').trim();
     const texto = `Olá, *${nomeExibicao}*! 👋
 
-Seu acesso ao painel interno da *Azevedo & Juvêncio* foi criado com sucesso.${login ? `
+Seu acesso ao painel interno da *Azevedo & Juvêncio* foi criado com sucesso.
 
-Usuário: *${login}*` : ''}
+Usuário: *${login}*
+Senha provisória: *${SENHA_PROVISORIA_PAINEL}*
 
-Por segurança, sua senha não é enviada pelo WhatsApp. Utilize os dados fornecidos pelo administrador para realizar o acesso.
+No primeiro acesso, informe essa senha provisória. Antes de liberar o painel, o sistema solicitará que você cadastre uma nova senha pessoal.
+
+Por segurança, não compartilhe sua senha após a troca.
 
 Seja bem-vindo(a) à equipe.`;
 
@@ -8467,21 +8817,24 @@ app.get('/api/users', async (req, res) => {
 app.post('/api/users', async (req, res) => {
     try {
         const dados = normalizarDadosUsuarioPainel(req.body || {});
-        const senha = String(req.body?.password || '');
         const celularInformado = String(req.body?.celular || '').trim();
-        if (celularInformado && !dados.celular) return res.status(400).json({ erro: 'Informe um celular válido com DDD.' });
+        if (!celularInformado || !dados.celular) {
+            return res.status(400).json({ erro: 'Informe um celular válido com DDD. Ele será usado para enviar a senha provisória e recuperar o acesso.' });
+        }
         if (!dados.user || dados.user.length < 3) return res.status(400).json({ erro: 'O usuário deve possuir ao menos 3 caracteres.' });
         if (!dados.nome || dados.nome.length < 3) return res.status(400).json({ erro: 'Informe o nome do usuário.' });
-        if (senha.length < 6) return res.status(400).json({ erro: 'A senha deve possuir ao menos 6 caracteres.' });
+
         const duplicado = await userLoginColl.findOne({ $or: [{ userLower: dados.userLower }, { user: dados.user }] });
         if (duplicado) return res.status(409).json({ erro: 'Este nome de usuário já está em uso.' });
 
-        const cred = hashSenhaPainel(senha);
+        const cred = hashSenhaPainel(SENHA_PROVISORIA_PAINEL);
         const agora = Date.now();
         const documento = {
             ...dados,
             passwordHash: cred.hash,
             passwordSalt: cred.salt,
+            mustChangePassword: true,
+            temporaryPasswordIssuedAt: agora,
             createdAt: agora,
             updatedAt: agora,
             createdBy: usuarioDaSessao(req)?.id || null
@@ -8492,12 +8845,12 @@ app.post('/api/users', async (req, res) => {
         delete salvo.passwordSalt;
         io.emit('panel_users_updated', { action: 'created', id: String(result.insertedId) });
 
-        // O cadastro não depende do WhatsApp. A mensagem é uma cortesia pós-cadastro:
-        // somente advogado ativo + celular válido + conexão disponível recebem boas-vindas.
         const boasVindas = await enviarBoasVindasNovoAdvogado(salvo);
         res.status(201).json({
             ok: true,
             user: { ...sessaoPublicaDaConta(salvo), ativo: salvo.ativo !== false },
+            temporaryPassword: SENHA_PROVISORIA_PAINEL,
+            requiresPasswordChange: true,
             boasVindas
         });
     } catch (err) {
@@ -9897,6 +10250,82 @@ function resumoDocumentosIATicket(documentosIA = []) {
 }
 
 
+async function obterDocumentosIAConversa(ticketsRelacionados = [], { detalhado = true } = {}) {
+    const relacionados = Array.isArray(ticketsRelacionados) ? ticketsRelacionados : [];
+    const ticketNumbers = [...new Set(
+        relacionados
+            .map(item => String(item?.ticketNumber || item?._id || '').trim())
+            .filter(Boolean)
+    )];
+
+    if (!ticketNumbers.length) return [];
+
+    const [ativos, historicos] = await Promise.all([
+        ticketsColl
+            ? ticketsColl.find(
+                { ticketNumber: { $in: ticketNumbers } },
+                { projection: { ticketNumber: 1, documentosIA: 1 } }
+            ).toArray()
+            : Promise.resolve([]),
+        ticketHistoryColl
+            ? ticketHistoryColl.find(
+                {
+                    $or: [
+                        { ticketNumber: { $in: ticketNumbers } },
+                        { _id: { $in: ticketNumbers } }
+                    ]
+                },
+                { projection: { ticketNumber: 1, documentosIA: 1 } }
+            ).toArray()
+            : Promise.resolve([])
+    ]);
+
+    const ativosPorNumero = new Map(
+        ativos.map(item => [String(item.ticketNumber || item._id || ''), item])
+    );
+    const historicosPorNumero = new Map(
+        historicos.map(item => [String(item.ticketNumber || item._id || ''), item])
+    );
+    const relPorNumero = new Map(
+        relacionados.map(item => [String(item.ticketNumber || item._id || ''), item])
+    );
+
+    const porChave = new Map();
+
+    for (const ticketNumber of ticketNumbers) {
+        const ticketAtivo = ativosPorNumero.get(ticketNumber) || {};
+        const ticketHistorico = historicosPorNumero.get(ticketNumber) || {};
+        const metaTicket = relPorNumero.get(ticketNumber) || {};
+
+        const docsTicket = mesclarDocumentosIATicket(ticketAtivo, ticketHistorico, { detalhado });
+        for (const doc of docsTicket) {
+            const messageId = String(doc?.messageId || doc?.id || '').trim();
+            if (!messageId) continue;
+
+            const enriquecido = {
+                ...doc,
+                ticketNumber,
+                ticketArea: metaTicket.area || metaTicket.menuOptionTitle || null,
+                ticketCreatedAt: Number(metaTicket.createdAt || 0) || null,
+                ticketIsActive: metaTicket.isActive === true && metaTicket.isArchived !== true
+            };
+
+            const chave = `${ticketNumber}:${messageId}`;
+            const anterior = porChave.get(chave);
+            if (!anterior || pesoStatusDocumentoIA(enriquecido.statusAnalise) >= pesoStatusDocumentoIA(anterior.statusAnalise)) {
+                porChave.set(chave, enriquecido);
+            }
+        }
+    }
+
+    return [...porChave.values()].sort((a, b) => {
+        const dataB = Number(b?.recebidoEm || b?.analisadoEm || b?.ticketCreatedAt || 0);
+        const dataA = Number(a?.recebidoEm || a?.analisadoEm || a?.ticketCreatedAt || 0);
+        return dataB - dataA;
+    });
+}
+
+
 async function atualizarEstadoPosEnvioChat({ ticket, ticketNumber, advogado, acessoTicket, agora = Date.now() }) {
     try {
         const tresDiasEmMs = 3 * 24 * 60 * 60 * 1000;
@@ -10024,14 +10453,14 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
         };
 
         const documentosIAChat = incluirDocumentos
-            ? mesclarDocumentosIATicket(
-                atendimentoAtivo ? ticketDetalhado : {},
-                historicoOperacional || (!atendimentoAtivo ? ticketDetalhado : {}),
-                { detalhado: true }
-            )
+            ? await obterDocumentosIAConversa(ticketsRelacionados, { detalhado: true })
             : [];
         const documentoIAPorMensagem = incluirDocumentos
-            ? new Map(documentosIAChat.filter(doc => doc?.messageId).map(doc => [String(doc.messageId), doc]))
+            ? new Map(
+                documentosIAChat
+                    .filter(doc => doc?.messageId)
+                    .map(doc => [`${String(doc.ticketNumber || '')}:${String(doc.messageId)}`, doc])
+            )
             : new Map();
 
         const limite = Math.min(CHAT_LIST_LIMIT_MAX, Math.max(10, Number(req.query.limit || CHAT_LIST_LIMIT_DEFAULT)));
@@ -10101,7 +10530,7 @@ app.get('/api/tickets/:ticketNumber/chat', async (req, res) => {
                 return {
                     ...mensagem,
                     documentAI: incluirDocumentos
-                        ? (documentoIAPorMensagem.get(String(item.messageId || '')) || null)
+                        ? (documentoIAPorMensagem.get(`${String(item.ticketNumber || '')}:${String(item.messageId || '')}`) || null)
                         : null
                 };
             }),
@@ -10182,30 +10611,35 @@ app.get('/api/tickets/:ticketNumber/chat/documents', async (req, res) => {
 
     try {
         const ticketNumber = String(req.params.ticketNumber || '').trim();
-        const [ticket, historico] = await Promise.all([
+        const [ticketAtivo, ticketHistorico] = await Promise.all([
             ticketsColl.findOne(
                 { ticketNumber },
-                { projection: { ticketNumber: 1, documentosIA: 1 } }
+                { projection: PROJECAO_TICKET_CONVERSA_CLIENTE }
             ),
             ticketHistoryColl
                 ? ticketHistoryColl.findOne(
                     { _id: ticketNumber },
-                    { projection: { documentosIA: 1 } }
+                    { projection: PROJECAO_TICKET_CONVERSA_CLIENTE }
                 )
                 : Promise.resolve(null)
         ]);
 
-        if (!ticket && !historico) return res.status(404).json({ erro: 'Atendimento não encontrado.' });
+        const base = ticketAtivo || ticketHistorico;
+        if (!base) return res.status(404).json({ erro: 'Atendimento não encontrado.' });
 
-        const documents = mesclarDocumentosIATicket(ticket || {}, historico || {}, { detalhado: true });
+        const ticketsRelacionados = await obterTicketsRelacionadosConversa(base);
+        const documents = await obterDocumentosIAConversa(ticketsRelacionados, { detalhado: true });
+
         return res.json({
             ticketNumber,
+            conversationKey: chaveConversaCliente(base),
+            ticketNumbers: ticketsRelacionados.map(item => String(item.ticketNumber || '')).filter(Boolean),
             documents,
             summary: resumoDocumentosIATicket(documents)
         });
     } catch (err) {
-        console.error('[Chat] Erro ao carregar documentos analisados:', err);
-        return res.status(500).json({ erro: 'Não foi possível carregar os documentos deste chat.' });
+        console.error('[Chat] Erro ao carregar documentos analisados da conversa:', err);
+        return res.status(500).json({ erro: 'Não foi possível carregar os documentos deste histórico.' });
     }
 });
 

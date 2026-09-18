@@ -1117,8 +1117,9 @@
                     <div class="col-md-3"><label class="form-label small fw-bold">Perfil</label><select id="user-role" class="form-select" onchange="atualizarPermissoesFormularioUsuario()"><option value="advogado">Advogado</option><option value="admin">Administrador</option></select></div>
                     <div class="col-md-3"><label class="form-label small fw-bold">OAB</label><input id="user-oab" class="form-control" maxlength="80" placeholder="OAB/SP ..."></div>
                     <div class="col-md-6"><label class="form-label small fw-bold">E-mail</label><input id="user-email" type="email" class="form-control" maxlength="240"></div>
-                    <div class="col-md-6"><label class="form-label small fw-bold">Celular</label><input id="user-celular" type="tel" inputmode="tel" class="form-control" maxlength="24" placeholder="Ex.: (19) 99999-9999"></div>
-                    <div class="col-md-6"><label class="form-label small fw-bold">Senha <span class="text-muted" id="user-password-help">*</span></label><input id="user-password" type="password" class="form-control" minlength="6" autocomplete="new-password"><div class="form-text">Ao editar, deixe em branco para manter a senha atual.</div></div>
+                    <div class="col-md-6"><label class="form-label small fw-bold">Celular <span id="user-celular-required" class="text-danger">*</span></label><input id="user-celular" type="tel" inputmode="tel" class="form-control" maxlength="24" placeholder="Ex.: (19) 99999-9999"><div class="form-text">Usado para senha provisória e recuperação de acesso.</div></div>
+                    <div class="col-md-6 hidden" id="user-password-group"><label class="form-label small fw-bold">Nova senha <span class="text-muted">(opcional)</span></label><input id="user-password" type="password" class="form-control" minlength="6" autocomplete="new-password"><div class="form-text">Ao editar, deixe em branco para manter a senha atual.</div></div>
+                    <div class="col-md-6" id="user-temp-password-note"><div class="alert alert-light border mb-0 h-100 d-flex align-items-center"><div><strong>Primeiro acesso</strong><br><span class="small">Será criada a senha provisória <strong>AJ12345</strong> e enviada ao WhatsApp. O usuário deverá alterá-la antes de acessar o painel.</span></div></div></div>
                     <div class="col-12"><label class="form-label small fw-bold">Permissões</label><div class="permission-grid" id="user-permissions-grid"></div><div class="permission-note">Administradores possuem acesso completo. O perfil Advogado inicia com Atendimentos, Clientes e Chat.</div></div>
                     <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="user-active" checked><label class="form-check-label fw-bold" for="user-active">Usuário ativo</label></div></div>
                 </div>
@@ -2265,7 +2266,7 @@ window.location.reload();
 
         socket.on('ticket_document_ai_updated', ({ ticketNumber, status } = {}) => {
             const numero = String(ticketNumber || '');
-            if (numero && String(window.activeChatTicketNumber || '') === numero) {
+            if (numero && chatAtualContemTicket(numero)) {
                 clearTimeout(window.activeChatDocumentRefreshTimer);
                 window.activeChatDocumentRefreshTimer = setTimeout(() => carregarDocumentosChatAtivo(true), 220);
             }
@@ -5504,17 +5505,21 @@ window.location.reload();
             }
         }
 
+        function chaveDocumentoChat(ticketNumber='', messageId='') {
+            return `${String(ticketNumber||'')}:${String(messageId||'')}`;
+        }
+
         function mapaDocumentosChat() {
             return new Map((window.activeChatDocuments || [])
                 .filter(doc => doc?.messageId)
-                .map(doc => [String(doc.messageId), doc]));
+                .map(doc => [chaveDocumentoChat(doc.ticketNumber, doc.messageId), doc]));
         }
 
         function sincronizarDocumentosMensagensChat() {
             const mapa = mapaDocumentosChat();
             window.activeChatMessages = (window.activeChatMessages || []).map(msg => ({
                 ...msg,
-                documentAI: mapa.get(String(msg.messageId || '')) || msg.documentAI || null
+                documentAI: mapa.get(chaveDocumentoChat(msg.ticketNumber, msg.messageId)) || msg.documentAI || null
             }));
         }
 
@@ -5531,11 +5536,11 @@ window.location.reload();
                 button.classList.toggle('has-error', comErro > 0);
                 button.title = total
                     ? `${total} arquivo${total === 1 ? '' : 's'} recebido${total === 1 ? '' : 's'} · ${processando} em análise · ${comErro} com erro`
-                    : 'Nenhum documento analisável recebido neste ticket.';
+                    : 'Nenhum documento analisável recebido nesta conversa.';
             }
             const subtitle = document.getElementById('chat-documents-subtitle');
             if (subtitle) subtitle.textContent = total
-                ? `${total} arquivo${total === 1 ? '' : 's'} · os resumos ficam gravados no atendimento`
+                ? `${total} arquivo${total === 1 ? '' : 's'} · histórico unificado de todos os tickets deste cliente`
                 : 'Nenhum arquivo analisável recebido pelo cliente';
         }
 
@@ -5596,7 +5601,7 @@ window.location.reload();
                 const bubble = row.querySelector('.chat-bubble');
                 if (!bubble) return;
                 bubble.querySelector('.chat-ai-summary')?.remove();
-                const doc = mapa.get(id) || null;
+                const doc = mapa.get(chaveDocumentoChat(msg.ticketNumber, id)) || null;
                 msg.documentAI = doc;
                 if (!doc) return;
                 const anchor = bubble.querySelector('.chat-text') || bubble.querySelector('.chat-time');
@@ -5642,7 +5647,7 @@ window.location.reload();
             if (!body) return;
             body.innerHTML = '';
             if (!documentos.length) {
-                body.innerHTML = '<div class="chat-documents-empty"><i class="bi bi-files"></i>Nenhuma imagem, áudio, vídeo ou documento analisável foi recebido neste atendimento.</div>';
+                body.innerHTML = '<div class="chat-documents-empty"><i class="bi bi-files"></i>Nenhuma imagem, áudio, vídeo ou documento analisável foi recebido no histórico deste cliente.</div>';
                 return;
             }
 
@@ -5662,7 +5667,13 @@ window.location.reload();
                 name.append(icon, span);
                 const meta = document.createElement('div');
                 meta.className = 'chat-doc-card-meta';
-                meta.textContent = [doc.mimeType, formatarTamanhoArquivoTicket(doc.tamanhoBytes), doc.recebidoEm ? formatarHoraChat(doc.recebidoEm) : null].filter(Boolean).join(' • ');
+                meta.textContent = [
+                    doc.ticketNumber ? `Ticket ${doc.ticketNumber}` : null,
+                    doc.ticketArea || null,
+                    doc.mimeType,
+                    formatarTamanhoArquivoTicket(doc.tamanhoBytes),
+                    doc.recebidoEm ? formatarHoraChat(doc.recebidoEm) : null
+                ].filter(Boolean).join(' • ');
                 left.append(name, meta);
                 const st = document.createElement('span');
                 st.className = `ticket-doc-status ${classeStatusDocumentoIA(doc.statusAnalise)}`;
@@ -5731,16 +5742,17 @@ window.location.reload();
                 if (doc.messageId) {
                     const open = document.createElement('a');
                     open.className = 'chat-doc-action';
-                    open.href = `/api/tickets/${encodeURIComponent(window.activeChatTicketNumber || '')}/chat/media/${encodeURIComponent(doc.messageId)}`;
+                    const ticketOrigem=String(doc.ticketNumber||window.activeChatTicketNumber||'');
+                    open.href = `/api/tickets/${encodeURIComponent(ticketOrigem)}/chat/media/${encodeURIComponent(doc.messageId)}`;
                     open.target = '_blank'; open.rel = 'noopener';
                     open.innerHTML = '<i class="bi bi-box-arrow-up-right"></i> Abrir arquivo';
                     actions.appendChild(open);
                 }
-                if (doc.statusAnalise === 'erro' && doc.podeReprocessar && doc.messageId) {
+                if (doc.statusAnalise === 'erro' && doc.podeReprocessar && doc.ticketIsActive !== false && doc.messageId) {
                     const retry = document.createElement('button');
                     retry.type = 'button'; retry.className = 'chat-doc-action';
                     retry.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Gerar resumo novamente';
-                    retry.onclick = () => reprocessarDocumentoIAChat(window.activeChatTicketNumber, doc.messageId, retry);
+                    retry.onclick = () => reprocessarDocumentoIAChat(doc.ticketNumber||window.activeChatTicketNumber, doc.messageId, retry);
                     actions.appendChild(retry);
                 }
                 if (actions.childNodes.length) content.appendChild(actions);
@@ -7516,11 +7528,11 @@ window.location.reload();
         }
         function filtrarUsuarios(){const dados=aplicarEstadoExcel('users',window.panelUsersData||[]);renderizarUsuarios(dados);atualizarIndicadoresFiltrosExcel();}
         async function carregarUsuarios(forcar=false){if(!temPermissaoPainel('users'))return;if(window.panelUsersLoaded&&!forcar){filtrarUsuarios();return;}const status=document.getElementById('users-status');try{if(status)status.textContent='Carregando usuários...';const res=await fetch('/api/users');const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível carregar usuários.');window.panelUsersData=Array.isArray(data.usuarios)?data.usuarios:[];window.panelUsersLoaded=true;filtrarUsuarios();if(status)status.textContent='';}catch(err){if(status){status.className='menu-save-status text-danger mb-2';status.textContent=err.message;}}}
-        function abrirFormularioUsuario(id=null){const d=document.getElementById('user-form-dialog');const u=id?(window.panelUsersData||[]).find(x=>String(x.id)===String(id)):null;document.getElementById('user-form').reset();document.getElementById('user-form-id').value=u?.id||'';document.getElementById('user-login').value=u?.user||'';document.getElementById('user-nome').value=u?.nome||'';const ass=document.getElementById('user-assinatura');ass.value=u?.assinatura||'';ass.dataset.touched=u?'1':'';document.getElementById('user-email').value=u?.email||'';document.getElementById('user-celular').value=formatarCelularUsuarioPainel(u?.celular||'');document.getElementById('user-oab').value=u?.oab||'';document.getElementById('user-role').value=u?.role||'advogado';document.getElementById('user-active').checked=u?.ativo!==false;document.getElementById('user-password').value='';document.getElementById('user-password').required=!u;document.getElementById('user-password-help').textContent=u?'(opcional)':'*';document.getElementById('user-form-title').textContent=u?'Editar usuário':'Novo usuário';document.getElementById('user-delete-btn').classList.toggle('hidden',!u||String(u.id)===String(window.panelSessionUser?.id));document.getElementById('user-form-status').textContent='';renderizarPermissoesFormularioUsuario(u?.permissions||['tickets','clients','chat']);if(!d.open){if(typeof d.showModal==='function')d.showModal();else d.setAttribute('open','');}}
+        function abrirFormularioUsuario(id=null){const d=document.getElementById('user-form-dialog');const u=id?(window.panelUsersData||[]).find(x=>String(x.id)===String(id)):null;document.getElementById('user-form').reset();document.getElementById('user-form-id').value=u?.id||'';document.getElementById('user-login').value=u?.user||'';document.getElementById('user-nome').value=u?.nome||'';const ass=document.getElementById('user-assinatura');ass.value=u?.assinatura||'';ass.dataset.touched=u?'1':'';document.getElementById('user-email').value=u?.email||'';const celular=document.getElementById('user-celular');celular.value=formatarCelularUsuarioPainel(u?.celular||'');celular.required=!u;document.getElementById('user-celular-required')?.classList.toggle('hidden',!!u);document.getElementById('user-oab').value=u?.oab||'';document.getElementById('user-role').value=u?.role||'advogado';document.getElementById('user-active').checked=u?.ativo!==false;const senha=document.getElementById('user-password');senha.value='';senha.required=false;document.getElementById('user-password-group')?.classList.toggle('hidden',!u);document.getElementById('user-temp-password-note')?.classList.toggle('hidden',!!u);document.getElementById('user-form-title').textContent=u?'Editar usuário':'Novo usuário';document.getElementById('user-delete-btn').classList.toggle('hidden',!u||String(u.id)===String(window.panelSessionUser?.id));document.getElementById('user-form-status').textContent='';renderizarPermissoesFormularioUsuario(u?.permissions||['tickets','clients','chat']);if(!d.open){if(typeof d.showModal==='function')d.showModal();else d.setAttribute('open','');}}
         function fecharFormularioUsuario(){const d=document.getElementById('user-form-dialog');if(!d)return;if(typeof d.close==='function')d.close();else d.removeAttribute('open');}
-        async function salvarUsuario(event){event.preventDefault();const id=document.getElementById('user-form-id').value;const payload={user:document.getElementById('user-login').value.trim(),nome:document.getElementById('user-nome').value.trim(),assinatura:document.getElementById('user-assinatura').value.trim(),email:document.getElementById('user-email').value.trim(),celular:document.getElementById('user-celular').value.trim(),oab:document.getElementById('user-oab').value.trim(),role:document.getElementById('user-role').value,permissions:permissoesUsuarioSelecionadas(),ativo:document.getElementById('user-active').checked,password:document.getElementById('user-password').value};const status=document.getElementById('user-form-status');const btn=document.getElementById('user-save-btn');btn.disabled=true;status.textContent='Salvando...';try{const res=await fetch(id?`/api/users/${encodeURIComponent(id)}`:'/api/users',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível salvar.');if(data.user&&String(data.user.id||'')===String(window.panelSessionUser?.id||'')){window.panelSessionUser=data.user;aplicarPermissoesPainel();}window.panelUsersLoaded=false;await carregarUsuarios(true);carregarProfissionaisPainel();
-                if(!id&&data.boasVindas?.enviado){status.textContent='✓ Usuário salvo. Mensagem de boas-vindas enviada no WhatsApp.';setTimeout(fecharFormularioUsuario,900);}
-                else if(!id&&document.getElementById('user-celular').value.trim()&&data.boasVindas?.motivo==='whatsapp_desconectado'){status.textContent='✓ Usuário salvo. Boas-vindas não enviada porque o WhatsApp está desconectado.';setTimeout(fecharFormularioUsuario,1400);}
+        async function salvarUsuario(event){event.preventDefault();const id=document.getElementById('user-form-id').value;const payload={user:document.getElementById('user-login').value.trim(),nome:document.getElementById('user-nome').value.trim(),assinatura:document.getElementById('user-assinatura').value.trim(),email:document.getElementById('user-email').value.trim(),celular:document.getElementById('user-celular').value.trim(),oab:document.getElementById('user-oab').value.trim(),role:document.getElementById('user-role').value,permissions:permissoesUsuarioSelecionadas(),ativo:document.getElementById('user-active').checked};if(id)payload.password=document.getElementById('user-password').value;const status=document.getElementById('user-form-status');const btn=document.getElementById('user-save-btn');btn.disabled=true;status.textContent='Salvando...';try{const res=await fetch(id?`/api/users/${encodeURIComponent(id)}`:'/api/users',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível salvar.');if(data.user&&String(data.user.id||'')===String(window.panelSessionUser?.id||'')){window.panelSessionUser=data.user;aplicarPermissoesPainel();}window.panelUsersLoaded=false;await carregarUsuarios(true);carregarProfissionaisPainel();
+                if(!id&&data.boasVindas?.enviado){status.textContent='✓ Usuário salvo. Usuário e senha provisória enviados no WhatsApp.';setTimeout(fecharFormularioUsuario,1200);}
+                else if(!id&&data.boasVindas?.motivo==='whatsapp_desconectado'){status.textContent='✓ Usuário salvo com senha provisória AJ12345. O WhatsApp está desconectado e a credencial não pôde ser enviada.';setTimeout(fecharFormularioUsuario,2200);}
                 else {status.textContent='✓ Usuário salvo.';setTimeout(fecharFormularioUsuario,500);}}catch(err){status.textContent=err.message;status.className='client-form-status text-danger mt-2';}finally{btn.disabled=false;}}
         async function excluirUsuarioAtual(){const id=document.getElementById('user-form-id').value;if(!id||!(await AppUI.confirm('O usuário perderá o acesso ao painel.',{title:'Excluir este usuário?',type:'danger',confirmText:'Excluir usuário'})))return;const status=document.getElementById('user-form-status');try{const res=await fetch(`/api/users/${encodeURIComponent(id)}`,{method:'DELETE'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.erro||'Não foi possível excluir.');fecharFormularioUsuario();window.panelUsersLoaded=false;await carregarUsuarios(true);}catch(err){status.textContent=err.message;status.className='client-form-status text-danger mt-2';}}
 
