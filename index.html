@@ -11,7 +11,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     
-    <link rel="stylesheet" href="/assets/panel.css?v=3.5.7">
+    <link rel="stylesheet" href="/assets/panel.css?v=3.5.8">
 
 </head>
 <body class="session-loading">
@@ -6720,12 +6720,11 @@
         function nomeExibicaoAtendimento(item={}){
             const numero=formatarNumeroIdentificacaoChat(item.whatsapp||'');
             const nome=String(item.clienteNome||'').trim();
-            const nomePlaceholder=/^cliente\s+n[aã]o\s+cadastrado$/i.test(nome);
 
-            // Mantém a identificação visual clara no chat sem perder o número:
-            // Cliente não cadastrado (+55 19 99999-9999)
-            if(numero && (item.clienteCadastrado!==true || nomePlaceholder)){
-                return `Cliente não cadastrado (${numero})`;
+            // Cliente sem cadastro volta a usar o rótulo simples na lista/cabeçalho.
+            // O número continua disponível nos campos próprios do atendimento.
+            if(item.clienteCadastrado!==true){
+                return 'Cliente não cadastrado';
             }
 
             return String(nome||numero||'Cliente não cadastrado').trim();
@@ -6829,9 +6828,12 @@
                 const nome=escapeHtmlChat(nomeExibicao);
                 const fotoUrl=urlFotoAtendimento(numero);
                 const area=escapeHtmlChat(item.area||item.menuOptionTitle||'Sem área');
+                const status=item.isArchived||item.isActive===false
+                    ? 'Encerrado'
+                    : escapeHtmlChat(item.statusLabel||item.status||'Em atendimento');
                 const statusInterno=(item.isArchived||item.isActive===false)?null:(item.internalStatus||null);
                 const statusDot=statusInterno?.nome
-                    ? `<span class="chat-conversation-status-dot" style="--chat-status-color:${corStatusConversaChat(statusInterno)}" title="${escapeHtmlChat(statusInterno.nome)}" aria-label="Status: ${escapeHtmlChat(statusInterno.nome)}"></span>`
+                    ? `<span class="chat-conversation-status-dot" style="--chat-status-color:${corStatusConversaChat(statusInterno)}" title="${escapeHtmlChat(statusInterno.nome)}" aria-label="Status interno: ${escapeHtmlChat(statusInterno.nome)}"></span>`
                     : '';
                 const dataRef=Number(item.lastActivity||item.archivedAt||0);
                 const hora=dataRef?new Date(dataRef).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}):'';
@@ -6842,7 +6844,7 @@
                 const ticketLine=totalTickets>1
                     ? `${escapeHtmlChat(numero)} <span class="chat-conversation-ticket-count">· ${totalTickets} tickets</span>`
                     : escapeHtmlChat(numero);
-                btn.innerHTML=`<span class="chat-conversation-avatar"><span class="chat-avatar-fallback">${fallbackAvatar}</span>${fotoHtml}</span><span class="chat-conversation-copy"><span class="chat-conversation-line"><strong>${nome}${encerrado}</strong><time>${hora}</time></span><span class="chat-conversation-preview"><span class="chat-conversation-preview-text">${area}</span>${statusDot}</span><span class="chat-conversation-ticket">${ticketLine}</span></span>${item.temMensagemNaoLida?'<span class="chat-conversation-unread"></span>':''}`;
+                btn.innerHTML=`<span class="chat-conversation-avatar"><span class="chat-avatar-fallback">${fallbackAvatar}</span>${fotoHtml}</span><span class="chat-conversation-copy"><span class="chat-conversation-line"><strong>${nome}${encerrado}</strong><time>${hora}</time></span><span class="chat-conversation-preview"><span class="chat-conversation-preview-text">${area} · ${status}</span>${statusDot}</span><span class="chat-conversation-ticket">${ticketLine}</span></span>${item.temMensagemNaoLida?'<span class="chat-conversation-unread"></span>':''}`;
                 btn.onclick=()=>abrirChatTicket(numero,btn,chave);
                 frag.appendChild(btn);
             });

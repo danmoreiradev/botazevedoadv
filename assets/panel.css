@@ -5283,11 +5283,13 @@ html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.chat-swipe-ready .
 }
 
 
-/* ===== V3.5.7 — status compacto na lista de conversas ===== */
+
+
+/* ===== V3.5.8 — status textual restaurado + bolinha interna complementar ===== */
 .chat-conversation-preview{
     display:flex;
     align-items:center;
-    gap:6px;
+    gap:5px;
     min-width:0;
 }
 .chat-conversation-preview-text{
@@ -5300,12 +5302,10 @@ html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.chat-swipe-ready .
     flex:0 0 auto;
     width:7px;
     height:7px;
+    margin-left:1px;
     border-radius:50%;
     background:var(--chat-status-color,#8696a0);
     box-shadow:0 0 0 1px rgba(17,27,33,.08);
-}
-html[data-theme="dark"] #ticket-chat-dialog .chat-conversation-status-dot{
-    box-shadow:0 0 0 1px rgba(255,255,255,.10);
 }
 @media (max-width:767.98px){
     .chat-conversation-status-dot{
