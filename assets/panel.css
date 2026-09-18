@@ -5047,91 +5047,117 @@ body.session-loading .content-container { visibility: hidden; }
 html[data-theme="dark"] .chat-audio-error{color:#ffb9b3;background:#3a2526;border-color:#684144}
 html[data-theme="dark"] .chat-audio-error button{color:#eef2f5;background:#252d35;border-color:#46515d}
 
+
+
 /* =========================================================
-   CHAT WHATSAPP V3.5.2 — ÁUDIO, RECIBOS E EXCLUSÃO
+   CHAT WHATSAPP V3.5.3 — VOICE NOTE + MENU DE MENSAGEM
    ========================================================= */
-/* V3.5.2 — áudio, exclusão e confirmações de mensagem */
-        .chat-wa-audio {
-            width:min(340px,72vw); min-width:250px; display:flex; align-items:center; gap:9px;
-            padding:4px 1px 3px; user-select:none; -webkit-user-select:none;
-        }
-        .chat-wa-audio-play {
-            width:38px; height:38px; flex:0 0 38px; display:inline-flex; align-items:center; justify-content:center;
-            border:0; border-radius:50%; background:transparent; color:#54656f; font-size:1.28rem; padding:0;
-        }
-        .chat-wa-audio-play:hover { background:rgba(17,27,33,.06); color:#008069; }
-        .chat-message-row.out .chat-wa-audio-play { color:#54656f; }
-        .chat-wa-audio-main { min-width:0; flex:1; display:flex; flex-direction:column; justify-content:center; gap:3px; }
-        .chat-wa-audio-wave {
-            height:25px; display:flex; align-items:center; gap:2px; cursor:pointer; touch-action:pan-y;
-            outline:none; border-radius:5px;
-        }
-        .chat-wa-audio-wave:focus-visible { box-shadow:0 0 0 2px rgba(0,168,132,.28); }
-        .chat-wa-audio-bar { width:2px; min-width:2px; border-radius:999px; background:#9aa6ac; transition:background .08s linear; }
-        .chat-wa-audio-bar.is-played { background:#00a884; }
-        .chat-wa-audio-meta { min-height:17px; display:flex; align-items:center; gap:7px; color:#667781; font-size:.61rem; line-height:1; }
-        .chat-wa-audio-duration { min-width:31px; font-variant-numeric:tabular-nums; }
-        .chat-wa-audio-speed {
-            display:none; min-width:29px; height:17px; padding:0 4px; border:0; border-radius:4px;
-            background:rgba(84,101,111,.13); color:#53636c; font-size:.56rem; font-weight:800; line-height:17px;
-        }
-        .chat-wa-audio.is-active .chat-wa-audio-speed { display:inline-block; }
-        .chat-wa-audio-avatar {
-            position:relative; width:39px; height:39px; flex:0 0 39px; display:flex; align-items:center; justify-content:center;
-            border-radius:50%; background:#d7dedf; color:#7d8a91; font-size:1.05rem; overflow:visible;
-        }
-        .chat-message-row.out .chat-wa-audio-avatar { background:#b7dfc5; color:#4c7860; }
-        .chat-wa-audio-mic {
-            position:absolute; right:-2px; bottom:-1px; width:16px; height:16px; display:flex; align-items:center; justify-content:center;
-            border-radius:50%; background:#00a884; color:#fff; border:2px solid currentColor; font-size:.56rem;
-            box-shadow:0 0 0 1px rgba(255,255,255,.85);
-        }
-        .chat-wa-audio-element { position:absolute!important; width:1px!important; height:1px!important; opacity:.001!important; pointer-events:none!important; }
-        .chat-audio-error { width:100%; }
+.chat-hidden-local{display:none!important}
+#ticket-chat-dialog .chat-bubble{position:relative}
+#ticket-chat-dialog .chat-bubble.has-audio{padding:6px 8px 5px!important;min-width:min(360px,78vw)}
+#ticket-chat-dialog .chat-bubble.has-audio .chat-sender{padding-right:24px;margin-bottom:1px}
 
-        .chat-delivery-status { margin-left:4px; display:inline-flex; align-items:center; color:#8696a0; font-size:.72rem; font-weight:700; letter-spacing:-2px; vertical-align:-1px; }
-        .chat-delivery-status.read,.chat-delivery-status.played { color:#53bdeb; }
-        .chat-delivery-status.pending { opacity:.65; letter-spacing:0; }
-        .chat-delivery-status.error { color:#d9534f; letter-spacing:0; }
+.chat-wa-audio{width:min(340px,72vw);min-width:270px;display:flex;align-items:center;gap:8px;padding:2px 0 1px;user-select:none;-webkit-user-select:none}
+.chat-wa-audio-play{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border:0!important;border-radius:50%!important;background:transparent!important;color:#54656f!important;font-size:1.56rem!important;line-height:1;padding:0!important;box-shadow:none!important;appearance:none}
+.chat-wa-audio-play:hover,.chat-wa-audio-play:focus-visible{background:rgba(17,27,33,.055)!important;color:#00a884!important;outline:none}
+.chat-wa-audio-play i{transform:translateX(1px)}
+.chat-wa-audio-center{min-width:0;flex:1;display:flex;flex-direction:column;justify-content:center;gap:1px}
+.chat-wa-audio-wave{height:29px;width:100%;display:flex;align-items:center;gap:2px;cursor:pointer;touch-action:pan-y;outline:none;overflow:hidden}
+.chat-wa-audio-wave:focus-visible{box-shadow:0 0 0 2px rgba(0,168,132,.24);border-radius:5px}
+.chat-wa-audio-bar{display:block;flex:1 1 2px;max-width:3px;min-width:1.5px;border-radius:999px;background:#9aa6ac;transition:background .07s linear}
+.chat-wa-audio-bar.is-played{background:#00a884}
+.chat-wa-audio-foot{height:16px;display:flex;align-items:center;gap:7px;color:#667781;font-size:.67rem;line-height:1;font-variant-numeric:tabular-nums}
+.chat-wa-audio-duration{min-width:30px}
+.chat-wa-audio-speed{display:none;height:18px;min-width:30px;padding:0 5px;border:0;border-radius:9px;background:rgba(84,101,111,.12);color:#53636c;font-size:.58rem;font-weight:800;line-height:18px}
+.chat-wa-audio.is-active .chat-wa-audio-speed{display:inline-flex;align-items:center;justify-content:center}
+.chat-wa-audio-avatar{position:relative;width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:50%;background:#dfe5e7;color:#60717a;font-size:.72rem;font-weight:800;letter-spacing:-.02em;overflow:visible}
+.chat-message-row.out .chat-wa-audio-avatar{background:#acd8c1;color:#315e4d}
+.chat-wa-audio-initials{transform:translateY(-1px)}
+.chat-wa-audio-mic{position:absolute;right:-2px;bottom:-2px;width:17px;height:17px;display:grid;place-items:center;border-radius:50%;background:#00a884;color:#fff;border:2px solid #fff;font-size:.55rem;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.chat-message-row.out .chat-wa-audio-mic{border-color:#d9fdd3}
+.chat-wa-audio-element{position:absolute!important;width:1px!important;height:1px!important;opacity:.001!important;pointer-events:none!important}
+.chat-audio-error{width:100%;margin-top:4px;padding:5px 7px;display:flex;align-items:center;justify-content:space-between;gap:6px;color:#8b3e38;background:rgba(255,255,255,.55);border-radius:6px;font-size:.65rem}
+.chat-audio-error button{border:0;background:transparent;color:#008069;font-size:.64rem;font-weight:750;padding:2px 3px}
 
-        .chat-delete-action {
-            position:absolute; top:4px; left:-110px; width:30px; height:30px; z-index:4;
-            display:inline-flex; align-items:center; justify-content:center; color:#687780; background:rgba(255,255,255,.92);
-            border:1px solid rgba(120,135,145,.20); border-radius:50%; box-shadow:0 2px 8px rgba(20,27,38,.08);
-            opacity:0; transform:scale(.92); transition:opacity .12s ease,transform .12s ease,background .12s ease,color .12s ease;
-        }
-        .chat-message-row:hover .chat-delete-action,.chat-delete-action:focus-visible { opacity:1; transform:scale(1); }
-        .chat-delete-action:hover { color:#c84747; background:#fff; }
-        .chat-message-row.deleted .chat-bubble { opacity:.86; }
-        .chat-deleted-message { display:flex; align-items:center; gap:7px; min-height:26px; color:#667781; font-size:.76rem; font-style:italic; }
-        .chat-deleted-message i { font-size:.88rem; }
+.chat-delivery-status{margin-left:4px;display:inline-flex;align-items:center;color:#8696a0;font-size:.72rem;font-weight:750;letter-spacing:-2px;vertical-align:-1px;line-height:1}
+.chat-delivery-status.read,.chat-delivery-status.played{color:#53bdeb}
+.chat-delivery-status.pending{width:8px;height:8px;border:1.5px solid #8696a0;border-radius:50%;font-size:0;letter-spacing:0;opacity:.8}
+.chat-delivery-status.error{color:#d9534f;letter-spacing:0}
 
-        html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-play { color:#c7d1d6; }
-        html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-play:hover { background:rgba(255,255,255,.07); color:#6fd8bf; }
-        html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-bar { background:#718088; }
-        html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-bar.is-played { background:#00a884; }
-        html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-meta { color:#aeb9bf; }
-        html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-speed { color:#d7dfe2; background:rgba(255,255,255,.12); }
-        html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-avatar { background:#36464e; color:#aab6bc; }
-        html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.out .chat-wa-audio-avatar { background:#28745f; color:#d0eee4; }
-        html[data-theme="dark"] #ticket-chat-dialog .chat-delete-action { color:#b7c2c8; background:#26343b; border-color:#405058; }
-        html[data-theme="dark"] #ticket-chat-dialog .chat-delete-action:hover { color:#ff8c8c; background:#303f46; }
-        html[data-theme="dark"] #ticket-chat-dialog .chat-deleted-message { color:#aeb9bf; }
+/* Menu da mensagem: a lixeira não fica mais solta na bolha. */
+.chat-message-menu-wrap{position:absolute;right:3px;top:2px;z-index:8}
+.chat-message-row.out .chat-message-menu-wrap{right:3px}
+.chat-message-menu-toggle{width:25px;height:24px;display:grid;place-items:center;padding:0;border:0;border-radius:5px;background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.88) 45%);color:#667781;font-size:.76rem;opacity:0;transform:translateY(-2px);transition:opacity .12s ease,transform .12s ease}
+.chat-message-row.out .chat-message-menu-toggle{background:linear-gradient(90deg,rgba(217,253,211,0),rgba(217,253,211,.96) 45%)}
+.chat-message-row.bot .chat-message-menu-toggle{background:linear-gradient(90deg,rgba(231,246,255,0),rgba(231,246,255,.96) 45%)}
+.chat-message-row:hover .chat-message-menu-toggle,.chat-message-menu-toggle:focus-visible,.chat-message-menu.open~*{opacity:1;transform:none}
+.chat-message-menu-wrap:has(.chat-message-menu.open) .chat-message-menu-toggle{opacity:1;transform:none}
+.chat-message-menu{position:absolute;top:25px;right:0;min-width:178px;padding:5px;background:#fff;border:1px solid #e7eaec;border-radius:8px;box-shadow:0 7px 22px rgba(11,20,26,.18);opacity:0;visibility:hidden;transform:translateY(-4px) scale(.98);transform-origin:top right;transition:opacity .1s ease,transform .1s ease,visibility .1s;z-index:30}
+.chat-message-menu.open{opacity:1;visibility:visible;transform:none}
+.chat-message-menu-item{width:100%;min-height:38px;display:flex;align-items:center;gap:10px;padding:7px 10px;border:0;border-radius:6px;background:transparent;color:#263238;text-align:left;font-size:.76rem}
+.chat-message-menu-item i{width:17px;color:#667781;font-size:.88rem}
+.chat-message-menu-item:hover,.chat-message-menu-item:focus-visible{background:#f5f6f6;outline:none}
+.chat-message-menu-item.danger{color:#b63737}
+.chat-message-menu-item.danger i{color:#b63737}
 
-        @media (hover:none) {
-            .chat-delete-action { opacity:.72; transform:scale(.94); }
-            .chat-message-row.out .chat-delete-action { left:-92px; }
-        }
-        @media (max-width:767.98px) {
-            .chat-wa-audio { min-width:220px; width:min(300px,76vw); gap:7px; }
-            .chat-wa-audio-play { width:35px; height:35px; flex-basis:35px; font-size:1.18rem; }
-            .chat-wa-audio-avatar { width:36px; height:36px; flex-basis:36px; }
-            .chat-wa-audio-wave { gap:1.5px; }
-            .chat-wa-audio-bar { width:2px; min-width:2px; }
-            .chat-delete-action { width:27px; height:27px; font-size:.82rem; }
-            .chat-message-row.out .chat-delete-action { left:-86px; }
-        }
-        @media (max-width:390px) {
-            .chat-wa-audio { min-width:205px; width:min(278px,78vw); }
-            .chat-message-row.out .chat-delete-action { left:-82px; }
-        }
+.chat-deleted-message{display:flex;align-items:center;gap:7px;min-height:25px;color:#667781;font-size:.76rem;font-style:italic;padding-right:4px}
+.chat-deleted-message i{font-size:.86rem}
+.chat-message-row.deleted .chat-bubble{opacity:.9}
+
+/* Seletor de exclusão próximo ao WhatsApp: modal compacto no desktop e bottom sheet no mobile. */
+.chat-delete-choice-backdrop{position:fixed;inset:0;z-index:2200;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(11,20,26,.32);backdrop-filter:blur(1px);opacity:0;transition:opacity .14s ease}
+.chat-delete-choice-backdrop.show{opacity:1}
+.chat-delete-choice{width:min(410px,calc(100vw - 32px));overflow:hidden;background:#fff;border-radius:11px;box-shadow:0 18px 50px rgba(11,20,26,.26);transform:translateY(6px);transition:transform .14s ease}
+.chat-delete-choice-backdrop.show .chat-delete-choice{transform:none}
+.chat-delete-choice-title{padding:20px 22px 13px;color:#111b21;font-size:1rem;font-weight:650}
+.chat-delete-choice-actions{display:flex;flex-direction:column;padding:0 8px}
+.chat-delete-choice-btn{min-height:49px;display:flex;align-items:center;gap:12px;padding:9px 14px;border:0;border-radius:8px;background:transparent;color:#111b21;text-align:left;font-size:.84rem;font-weight:500}
+.chat-delete-choice-btn i{width:20px;color:#54656f;font-size:1rem}
+.chat-delete-choice-btn:hover,.chat-delete-choice-btn:focus-visible{background:#f5f6f6;outline:none}
+.chat-delete-choice-btn.danger,.chat-delete-choice-btn.danger i{color:#d33b3b}
+.chat-delete-choice-cancel{width:100%;min-height:48px;margin-top:4px;border:0;border-top:1px solid #eef0f1;background:#fff;color:#008069;font-size:.81rem;font-weight:700}
+
+html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-play{color:#c7d1d6!important}
+html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-play:hover{background:rgba(255,255,255,.06)!important;color:#00a884!important}
+html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-bar{background:#718088}
+html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-bar.is-played{background:#00a884}
+html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-foot{color:#aeb9bf}
+html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-speed{background:rgba(255,255,255,.11);color:#d7dfe2}
+html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-avatar{background:#36464e;color:#d5dde0}
+html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.out .chat-wa-audio-avatar{background:#28745f;color:#e2f3ed}
+html[data-theme="dark"] #ticket-chat-dialog .chat-wa-audio-mic{border-color:#202c33}
+html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.out .chat-wa-audio-mic{border-color:#005c4b}
+html[data-theme="dark"] #ticket-chat-dialog .chat-message-menu-toggle{color:#aeb9bf;background:linear-gradient(90deg,rgba(32,44,51,0),rgba(32,44,51,.96) 45%)}
+html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.out .chat-message-menu-toggle{background:linear-gradient(90deg,rgba(0,92,75,0),rgba(0,92,75,.96) 45%)}
+html[data-theme="dark"] #ticket-chat-dialog .chat-message-menu{background:#233138;border-color:#34434b;box-shadow:0 8px 25px rgba(0,0,0,.34)}
+html[data-theme="dark"] #ticket-chat-dialog .chat-message-menu-item{color:#e9edef}
+html[data-theme="dark"] #ticket-chat-dialog .chat-message-menu-item i{color:#aeb9bf}
+html[data-theme="dark"] #ticket-chat-dialog .chat-message-menu-item:hover{background:#2d3b42}
+html[data-theme="dark"] .chat-delete-choice{background:#233138}
+html[data-theme="dark"] .chat-delete-choice-title,html[data-theme="dark"] .chat-delete-choice-btn{color:#e9edef}
+html[data-theme="dark"] .chat-delete-choice-btn:hover{background:#2d3b42}
+html[data-theme="dark"] .chat-delete-choice-cancel{background:#233138;border-top-color:#34434b;color:#00a884}
+
+@media (hover:none){.chat-message-menu-toggle{opacity:.78;transform:none}}
+@media (max-width:767.98px){
+  #ticket-chat-dialog .chat-bubble.has-audio{min-width:min(315px,84vw);max-width:88vw!important}
+  .chat-wa-audio{min-width:235px;width:min(300px,78vw);gap:6px}
+  .chat-wa-audio-play{width:39px;height:39px;flex-basis:39px;font-size:1.45rem!important}
+  .chat-wa-audio-avatar{width:39px;height:39px;flex-basis:39px}
+  .chat-wa-audio-wave{gap:1.5px}
+  .chat-message-menu-toggle{width:27px;height:26px;opacity:.72}
+  .chat-message-menu{position:fixed;top:auto;right:10px;bottom:72px;left:10px;min-width:0;border-radius:11px;transform:translateY(8px);transform-origin:bottom center}
+  .chat-message-menu.open{transform:none}
+  .chat-message-menu-item{min-height:48px;font-size:.82rem;padding:10px 13px}
+  .chat-delete-choice-backdrop{align-items:flex-end;padding:0}
+  .chat-delete-choice{width:100%;max-width:none;border-radius:16px 16px 0 0;padding-bottom:max(6px,env(safe-area-inset-bottom));transform:translateY(20px)}
+  .chat-delete-choice-title{padding:19px 20px 13px}
+  .chat-delete-choice-btn{min-height:52px;font-size:.86rem}
+  .chat-delete-choice-cancel{min-height:53px}
+}
+@media (max-width:390px){
+  #ticket-chat-dialog .chat-bubble.has-audio{min-width:min(290px,86vw)}
+  .chat-wa-audio{min-width:218px;width:min(274px,80vw)}
+  .chat-wa-audio-avatar{width:37px;height:37px;flex-basis:37px}
+  .chat-wa-audio-play{width:37px;height:37px;flex-basis:37px}
+}
