@@ -5161,3 +5161,92 @@ html[data-theme="dark"] .chat-delete-choice-cancel{background:#233138;border-top
   .chat-wa-audio-avatar{width:37px;height:37px;flex-basis:37px}
   .chat-wa-audio-play{width:37px;height:37px;flex-basis:37px}
 }
+
+
+/* ===== chat-message-menu-swipe-reply-v354 ===== */
+/* O menu é portado para <body> enquanto está aberto. Isso evita clipping causado
+   por content-visibility/contain/overflow no histórico de mensagens. */
+.chat-message-menu.chat-message-menu-portal{
+    position:fixed!important;
+    z-index:5000!important;
+    margin:0!important;
+    max-height:min(320px,calc(100dvh - 24px));
+    overflow-y:auto;
+    overscroll-behavior:contain;
+}
+.chat-message-menu.chat-message-menu-portal.open{
+    opacity:1!important;
+    visibility:visible;
+}
+
+/* Swipe-to-reply, inspirado no comportamento atual do WhatsApp mobile. */
+.chat-swipe-reply-indicator{
+    display:none;
+    position:absolute;
+    left:-37px;
+    top:50%;
+    width:30px;
+    height:30px;
+    place-items:center;
+    pointer-events:none;
+    border-radius:50%;
+    color:#667781;
+    background:rgba(255,255,255,.92);
+    box-shadow:0 1px 5px rgba(11,20,26,.12);
+    opacity:var(--chat-swipe-opacity,0);
+    transform:translateY(-50%) scale(calc(.78 + (var(--chat-swipe-opacity,0) * .22)));
+    transition:opacity .08s linear,background .08s linear,color .08s linear;
+}
+.chat-message-row.chat-swipe-ready .chat-swipe-reply-indicator{
+    color:#fff;
+    background:#00a884;
+}
+html[data-theme="dark"] #ticket-chat-dialog .chat-swipe-reply-indicator{
+    color:#c7d1d6;
+    background:#2a3942;
+}
+html[data-theme="dark"] #ticket-chat-dialog .chat-message-row.chat-swipe-ready .chat-swipe-reply-indicator{
+    color:#fff;
+    background:#00a884;
+}
+
+@media (max-width:767.98px){
+    /* O menu fica acima do composer e fora de qualquer container que possa cortá-lo. */
+    .chat-message-menu.chat-message-menu-portal{
+        top:auto!important;
+        left:10px!important;
+        right:10px!important;
+        bottom:calc(76px + env(safe-area-inset-bottom))!important;
+        width:auto!important;
+        max-height:min(60dvh,360px)!important;
+        border-radius:12px!important;
+        transform:translateY(8px)!important;
+        transform-origin:bottom center!important;
+        box-shadow:0 10px 32px rgba(11,20,26,.25)!important;
+    }
+    .chat-message-menu.chat-message-menu-portal.open{
+        transform:none!important;
+    }
+
+    .chat-message-row.chat-swipe-enabled>.chat-bubble{
+        touch-action:pan-y;
+        will-change:transform;
+        transform:translate3d(var(--chat-swipe-x,0px),0,0);
+    }
+    .chat-message-row.chat-swipe-active>.chat-bubble{
+        transition:none!important;
+    }
+    .chat-message-row.chat-swipe-enabled>.chat-bubble.chat-swipe-returning{
+        transition:transform .18s cubic-bezier(.2,.8,.2,1)!important;
+    }
+    .chat-swipe-reply-indicator{
+        display:grid;
+    }
+
+    /* No touch, o swipe é a ação primária de resposta; a seta do menu continua
+       disponível para editar/apagar sem ocupar espaço adicional. */
+    .chat-message-row.chat-swipe-enabled{
+        -webkit-user-select:none;
+        user-select:none;
+    }
+}
