@@ -5384,3 +5384,66 @@ html[data-theme="dark"] #ticket-chat-dialog .chat-conversation-phone-mini{
 .chat-wa-audio-mic{
     z-index:2;
 }
+
+
+/* ===== V3.6.2 — transferência mobile fora do container do chat ===== */
+@media (max-width:767.98px){
+    body>.ticket-transfer-panel.chat-transfer-mobile-portal{
+        position:fixed!important;
+        z-index:5200!important;
+        top:auto!important;
+        left:10px!important;
+        right:10px!important;
+        bottom:calc(12px + env(safe-area-inset-bottom))!important;
+        width:auto!important;
+        max-height:min(72dvh,520px)!important;
+        margin:0!important;
+        padding:16px!important;
+        overflow:visible!important;
+        color:#34423c;
+        background:#fff;
+        border:1px solid #dce3df;
+        border-radius:16px!important;
+        box-shadow:0 22px 70px rgba(11,20,26,.30)!important;
+    }
+
+    body>.ticket-transfer-panel.chat-transfer-mobile-portal #ticket-transfer-user{
+        display:block!important;
+        width:100%!important;
+        min-height:48px!important;
+        margin:10px 0 12px!important;
+        padding:10px 38px 10px 12px!important;
+        font-size:16px!important; /* evita zoom automático no iPhone */
+        line-height:1.2!important;
+        color:#26332d!important;
+        background-color:#fff!important;
+        border:1px solid #cfd8d3!important;
+        border-radius:10px!important;
+        opacity:1!important;
+        visibility:visible!important;
+    }
+
+    body>.ticket-transfer-panel.chat-transfer-mobile-portal .ticket-transfer-footer{
+        margin-top:12px!important;
+        display:grid!important;
+        grid-template-columns:1fr 1fr;
+        gap:8px!important;
+    }
+
+    body>.ticket-transfer-panel.chat-transfer-mobile-portal .ticket-transfer-footer .btn{
+        min-height:44px;
+        width:100%;
+    }
+
+    html[data-theme="dark"] body>.ticket-transfer-panel.chat-transfer-mobile-portal{
+        color:#e9edef!important;
+        background:#202c33!important;
+        border-color:#374248!important;
+    }
+
+    html[data-theme="dark"] body>.ticket-transfer-panel.chat-transfer-mobile-portal #ticket-transfer-user{
+        color:#e9edef!important;
+        background:#111b21!important;
+        border-color:#3b4a54!important;
+    }
+}

@@ -519,7 +519,7 @@
 
 
     <style id="login-brand-center-v12">
-        /* V12 — logo e identificação do painel como um único bloco central*/
+        /* V12 — logo e identificação do painel como um único bloco central */
         .brand-logo-wrap {
             display:flex;
             flex-direction:column;
@@ -930,6 +930,31 @@
         }
     </style>
 
+
+    <style id="login-success-no-layout-shift-v362">
+        /* Sucesso fica no botão: nenhum bloco novo é inserido no fluxo do formulário. */
+        .btn-adv.is-success {
+            cursor: default;
+            background: #17683d !important;
+            border-color: #17683d !important;
+            box-shadow: 0 8px 20px rgba(23,104,61,.18) !important;
+            transform: none !important;
+        }
+        .login-success-check {
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 20px;
+            border-radius: 50%;
+            color: #17683d;
+            background: #fff;
+            font-size: .76rem;
+            font-weight: 900;
+        }
+    </style>
+
 </head>
 
 <body>
@@ -1093,6 +1118,7 @@
         const pass=document.getElementById('pass');
         if(!form||!btn) return;
         const originalButton=btn.innerHTML;
+        let authenticated=false;
 
         function showFeedback(type,title,message){
             feedback.className=`login-feedback show ${type}`;
@@ -1106,8 +1132,14 @@
         function setLoading(on){
             btn.disabled=on; user.disabled=on; pass.disabled=on;
             loadingLine.classList.toggle('show',on);
-            if(on){btn.classList.add('is-loading');btn.innerHTML='<span class="login-spinner" aria-hidden="true"></span> Validando acesso...';}
-            else {btn.classList.remove('is-loading');btn.innerHTML=originalButton;}
+            if(on){
+                btn.classList.remove('is-success');
+                btn.classList.add('is-loading');
+                btn.innerHTML='<span class="login-spinner" aria-hidden="true"></span> Validando acesso...';
+            } else {
+                btn.classList.remove('is-loading','is-success');
+                btn.innerHTML=originalButton;
+            }
         }
         function validate(){
             user.removeAttribute('aria-invalid'); pass.removeAttribute('aria-invalid');
@@ -1121,7 +1153,10 @@
         }
 
         form.addEventListener('submit', async e => {
-            e.preventDefault(); hideFeedback(); if(!validate()) return;
+            e.preventDefault();
+            authenticated=false;
+            hideFeedback();
+            if(!validate()) return;
             setLoading(true);
             try{
                 const res=await fetch('/login',{
@@ -1140,12 +1175,20 @@
                     }
                     return;
                 }
-                showFeedback('success','Acesso autorizado','Credenciais validadas. Abrindo o painel...');
-                setTimeout(()=>window.location.assign(data.redirect||'/'),260);
+                authenticated=true;
+                hideFeedback();
+                loadingLine.classList.remove('show');
+                btn.classList.remove('is-loading');
+                btn.classList.add('is-success');
+                btn.disabled=true;
+                user.disabled=true;
+                pass.disabled=true;
+                btn.innerHTML='<span class="login-success-check" aria-hidden="true">✓</span> Autenticado com sucesso';
+                setTimeout(()=>window.location.assign(data.redirect||'/'),360);
             }catch(err){
                 showFeedback('error','Falha de conexão','Não foi possível comunicar com o servidor. Verifique sua conexão e tente novamente.');
             }finally{
-                if(!feedback.classList.contains('success')) setLoading(false);
+                if(!authenticated) setLoading(false);
             }
         });
 
